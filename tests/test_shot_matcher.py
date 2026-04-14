@@ -24,13 +24,13 @@ def test_detectar_tiro_duplicado():
     
     # Si el resultado es 100, es que ha detectado que es el mismo tiro
     assert resultado == 100
-    print("\n✅ Test de duplicado: ¡Pasado!")
+    print("\n Test de duplicado: ¡Pasado!")
 
 def test_prioridad_fuentes():
     """Prueba que StatsBomb tenga más prioridad que SofaScore"""
     assert prioridad_fuente('statsbomb') > prioridad_fuente('sofascore')
     assert prioridad_fuente('understat') > prioridad_fuente('sofascore')
-    print("✅ Test de prioridades: ¡Pasado!")
+    print(" Test de prioridades: ¡Pasado!")
 
 def test_tiro_diferente():
     """Prueba que si el minuto es muy distinto, no los confunda"""
@@ -40,4 +40,4 @@ def test_tiro_diferente():
     resultado = es_mismo_tiro(tiro_nuevo, [tiro_existente])
     
     assert resultado is None
-    print("✅ Test de tiro diferente: ¡Pasado!")
+    print(" Test de tiro diferente: ¡Pasado!")
