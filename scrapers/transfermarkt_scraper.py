@@ -32,13 +32,13 @@ HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/136.0.0.0 Safari/537.36"  # tu versión real
+        "Chrome/136.0.0.0 Safari/537.36"  
     ),
      "Accept-Language": "es-ES,es;q=0.9",
    
 }
 
-# Si se quiere obtener mas equipos, se  se añaden al diccionario  con el team_sluh y el nobmre del id
+# Si se quiere obtener mas equipos, se  se añaden al diccionario  con el team_slug y el id
 TEAMS = {
     "real-madrid": 418,
     "fc-barcelona": 131,
@@ -46,10 +46,11 @@ TEAMS = {
 
 #En Transfermarkt el año de la temporada es el año de inicio. 2020 significa la temporada 2020/2021
 SEASON       = 2020
-TARGET_SEASON = "2020/2021"  # para filtrar lesiones
 OUTPUT_DIR   = os.path.join('data', 'raw', 'transfermarkt')
 
-
+# ══════════════════════════════════════════════════
+# SCRAPING — PLANTILLAS
+# ══════════════════════════════════════════════════
 
 def  get_squad(team_slug, team_id, season):
     """
@@ -84,15 +85,15 @@ def  get_squad(team_slug, team_id, season):
         response.raise_for_status()
     except requests.exceptions.HTTPError as e:
         # servidor devuelve 4xx o 5xx
-        print(f"⚠ Error HTTP {e}")
+        print(f" Error HTTP {e}")
         return []
     except requests.exceptions.ConnectionError as e:
         # no hay conexión
-        print(f"⚠ Error de conexión: {e}")
+        print(f" Error de conexión: {e}")
         return []
     except requests.exceptions.Timeout as e:
         # la petición tardó demasiado
-        print(f"⚠ Timeout: {e}")
+        print(f" Timeout: {e}")
         return []
     
     
@@ -103,34 +104,27 @@ def  get_squad(team_slug, team_id, season):
     # los jugadores de un equicpo están en la web en una tabla con la clase items 
     table = soup.find('table', class_='items')
 
-    print(f"  DEBUG table encontrada: {table is not None}")
-
+   
     if not table:
         return []
 
     # busca  en table todas las tr con  class 'odd' o  'even'
     rows = table.find_all('tr', class_=['odd', 'even'])
    
-    # cada row es un objeto BeautifulShop 
-    """
-    rows = [
-        <tr class="odd">...</tr>,   # fila jugador 1
-        <tr class="even">...</tr>,  # fila jugador 2
-        <tr class="odd">...</tr>,   # fila jugador 3
-    ...
-    ]
-    """
+    # cada row es un objeto BeautifulShop  que representa una  fila <tr> en la tabla 
+    
     players=[]
     for row in rows: 
         try: 
                 
             # busca el <td> con class 'hauptlink'
             td_hauptlink = row.find('td', class_='hauptlink')
+            # el enlace del jugador está dentro de <td class="hauptlink">
             anchor = td_hauptlink.find('a') if td_hauptlink else None
             if not anchor: 
                     continue
             
-            # /jugador/karim-benzema/spieler/4189
+            # /karim-benzema/profil/spieler/18922   ← formato real
             href = anchor['href']  
         
             ## href.split('/') → ["", "karim-benzema", "profil", "spieler", "18922"]
@@ -139,8 +133,7 @@ def  get_squad(team_slug, team_id, season):
             ## [-1] → "18922"  (último elemento)
             player_id= href.split('/')[-1]
             
-            #elimina espacios 
-            #player_name = anchor.text.strip()
+           
             #Algunos jugadores tienen un <span> adicional dentro del enlace para indicar que están lesionados:
             #En ese caso anchor.text.strip() devolvería "Thibaut Courtois\xa0"
             player_name = anchor.get_text(strip=True).replace('\xa0', '').strip()
@@ -161,21 +154,21 @@ def  get_squad(team_slug, team_id, season):
             
 
         except KeyError as e:
-    # anchor no tiene atributo 'href'
-            print(f"⚠ Fila sin href: {e}")
+    
+            print(f" Fila sin href: {e}")
             continue
         except IndexError as e:
             # split('/') no devuelve suficientes elementos
             # o find_all('tr') no tiene segunda fila
-            print(f"⚠ Estructura HTML inesperada: {e}")
+            print(f" Estructura HTML inesperada: {e}")
             continue
         except AttributeError as e:
-        # row.find('table') devuelve None y se intenta llamar find_all sobre None
-            print(f"⚠ Elemento no encontrado: {e}")
+        # Por si se devuelve None  y se intenta llamar find_all sobre None
+            print(f" Elemento no encontrado: {e}")
             continue
         except Exception as e:
-            print(f"⚠ Error inesperado: {e}")
-            print(f"⚠ Error inesperado en fila: {type(e).__name__}: {e}")
+            print(f" Error inesperado: {e}")
+            print(f" Error inesperado en fila: {type(e).__name__}: {e}")
     
             continue
         
@@ -183,6 +176,9 @@ def  get_squad(team_slug, team_id, season):
     time.sleep(random.uniform(2, 4))
     return players
 
+# ══════════════════════════════════════════════════
+# SCRAPING — LESIONES
+# ══════════════════════════════════════════════════
 
 def get_player_injuries(player_slug, player_id): 
     """
@@ -218,27 +214,28 @@ def get_player_injuries(player_slug, player_id):
         response.raise_for_status()
     except requests.exceptions.HTTPError as e:
         # servidor devuelve 4xx o 5xx
-        print(f"⚠ Error HTTP {e}")
+        print(f" Error HTTP {e}")
         return []
     except requests.exceptions.ConnectionError as e:
         # no hay conexión
-        print(f"⚠ Error de conexión: {e}")
+        print(f" Error de conexión: {e}")
         return []
     except requests.exceptions.Timeout as e:
         # la petición tardó demasiado
-        print(f"⚠ Timeout: {e}")
+        print(f"  Timeout: {e}")
         return []
     
-    # parsea el html  con BeatifulShop
+    # parsea el html  con BeatifulSoup
     soup = BeautifulSoup(response.content, 'html.parser')
 
     # las lesiones de un jugador están en la web en una tabla con la clase items 
     table = soup.find('table', class_='items')
 
-    # puede que un jugador no tenga lesioens 
+    # puede que un jugador no tenga lesiones 
     if not table:
         return []
-
+    
+    # cada fila  con la clase odd o even representa una lesion
     rows= table.find_all('tr', class_=['odd','even'])
 
     """ Estrucutra de cada tr 
@@ -255,18 +252,23 @@ def get_player_injuries(player_slug, player_id):
     injuries= []
     for row in rows: 
         try:
+            # extrae los td de la fila 
             cols= row.find_all('td')
             
             season= cols[0].text.strip()
 
+            # de momento solo interesa la temporado 20/21
             if season =='20/21': 
                 injury_type= cols[1].text.strip()
                 date_from= cols[2].text.strip()
                 date_until= cols[3].text.strip()
                 
+                ## cols[4] devuelve "3 dias" → limpiamos el texto y convertimos a int
                 days_str = cols[4].text.strip().replace(' dias', '').replace(' día', '').strip()
                 days_absent = int(days_str) if days_str.isdigit() else None
-
+                
+                # los partidos perdidos están dentro de un <span> en la última celda
+                ## puede ser None si el jugador no tiene partidos registrados
                 span = cols[5].find('span')
                 matches_missed = int(span.text.strip()) if span else None
 
@@ -282,25 +284,28 @@ def get_player_injuries(player_slug, player_id):
                 )
 
         except IndexError as e:
-            
-            print(f"⚠ Estructura HTML inesperada: {e}")
+            # la fila no tiene la estructura esperada
+            print(f" Estructura HTML inesperada: {e}")
             continue
         except AttributeError as e:
-       
-            print(f"⚠ Elemento no encontrado: {e}")
+            # algún elemento devuelve None al utilizar find sobre él
+            print(f" Elemento no encontrado: {e}")
             continue
         except ValueError as e:
             # int() no puede convertir el string
-            print(f"⚠ Error convirtiendo a número: {e}")
+            print(f" Error convirtiendo a número: {e}")
             continue
         except Exception as e:
-            print(f"⚠ Error inesperado: {e}")
+            print(f" Error inesperado: {e}")
             continue
 
-     # pausa aleatoria entre 2 y 4 segundos para evitar bloqueos por parte de la web
+    # pausa aleatoria entre 2 y 4 segundos para evitar bloqueos por parte de la web
     time.sleep(random.uniform(2, 4))
     return  injuries
 
+# ══════════════════════════════════════════════════
+# ORQUESTADOR
+# ══════════════════════════════════════════════════
 
 def scrape_transfermarkt():
     
@@ -333,13 +338,13 @@ def scrape_transfermarkt():
 
     ## obtiene las plantillas de cada equipo 
     for team_slug, team_id in TEAMS.items():
-        print(f"\n📋 Obteniendo plantilla de {team_slug}...")
+        print(f"\n Obteniendo plantilla de {team_slug}...")
         players = get_squad(team_slug,team_id,SEASON)
-        print(f"  ✓ {len(players)} jugadores encontrados")
+        print(f" {len(players)} jugadores encontrados")
         all_players.extend(players)
     
     if not all_players:
-        print("⚠ No se obtuvieron jugadores.")
+        print(" No se obtuvieron jugadores.")
         return pd.DataFrame(), pd.DataFrame()
     
 
@@ -353,13 +358,15 @@ def scrape_transfermarkt():
 
         all_injuries.extend(injuries)
     
-    print(f"\n📊 Resumen:")
+    print(f"\n Resumen:")
     print(f"  Jugadores: {len(all_players)}")
     print(f"  Lesiones:  {len(all_injuries)}")
     
     return pd.DataFrame(all_players),pd.DataFrame(all_injuries)
 
-
+# ══════════════════════════════════════════════════
+# PROGRAMA PRINCIPAL
+# ══════════════════════════════════════════════════
 def main():
 
     """
@@ -379,12 +386,13 @@ def main():
     df_players, df_injuries =  scrape_transfermarkt()
 
     if df_players.empty:
-        print("⚠ No se obtuvieron datos.")
+        print(" No se obtuvieron datos.")
         return
     
-    #  crea el directorio
+    #  crea el directorio si no existe. Si existe, no hace nada
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-
+    
+    # definición de rutas 
     players_path = os.path.join(OUTPUT_DIR,'transfermarket_players.csv')
     injuries_path = os.path.join(OUTPUT_DIR,'transfermarket_injuries.csv')
 
@@ -393,7 +401,7 @@ def main():
     df_injuries.to_csv(injuries_path,index=False)
 
     #  imprime rutas de salida
-    print(f"\n✅ Archivos guardados:")
+    print(f"\n Archivos guardados:")
     print(f"  {players_path}  ({len(df_players)} filas)")
     print(f"  {injuries_path} ({len(df_injuries)} filas)")
 
