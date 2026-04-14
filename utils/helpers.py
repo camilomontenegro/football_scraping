@@ -20,3 +20,18 @@ def limpiar_y_transformar_tiros(df):
     df['y_metres'] = df['y'] * 68
     
     return df
+
+
+def normalize_coords(x, y, source):
+    """
+    Convierte coordenadas de cualquier fuente a metros reales (105x68).
+    """
+    if source == "understat":
+        return x * 105, y * 68
+    elif source == "statsbomb":
+        return (x / 120) * 105, (y / 80) * 68
+    elif source in ("sofascore", "whoscored"):
+        return (x / 100) * 105, (y / 100) * 68
+    else:
+        raise ValueError(f"Unknown source: {source}")
+    
