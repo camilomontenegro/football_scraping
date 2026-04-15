@@ -2,15 +2,6 @@
 -- SCHEMA football_db
 -- Versión actualizada con IDs de todas las fuentes
 -- ══════════════════════════════════════════════════════════
-
--- ── Limpiar tablas si existen ─────────────────────────────
-DROP TABLE IF EXISTS fact_injuries  CASCADE;
-DROP TABLE IF EXISTS fact_events    CASCADE;
-DROP TABLE IF EXISTS fact_shots     CASCADE;
-DROP TABLE IF EXISTS dim_match      CASCADE;
-DROP TABLE IF EXISTS dim_player     CASCADE;
-DROP TABLE IF EXISTS dim_team       CASCADE;
-
 -- ══════════════════════════════════════════════════════════
 -- DIMENSIONES
 -- ══════════════════════════════════════════════════════════
@@ -21,18 +12,11 @@ CREATE TABLE dim_team (
     name_canonical   VARCHAR(150)        NOT NULL,
     country          VARCHAR(80),
     id_sofascore     INTEGER,
-    id_statsbomb     INTEGER,
-    id_understat     INTEGER,
-    id_whoscored     INTEGER,
-    id_transfermarkt INTEGER,
     created_at       TIMESTAMP           DEFAULT NOW()
 );
 
 CREATE UNIQUE INDEX ux_team_sofascore    ON dim_team(id_sofascore)    WHERE id_sofascore    IS NOT NULL;
-CREATE UNIQUE INDEX ux_team_statsbomb    ON dim_team(id_statsbomb)    WHERE id_statsbomb    IS NOT NULL;
-CREATE UNIQUE INDEX ux_team_understat    ON dim_team(id_understat)    WHERE id_understat    IS NOT NULL;
-CREATE UNIQUE INDEX ux_team_whoscored    ON dim_team(id_whoscored)    WHERE id_whoscored    IS NOT NULL;
-CREATE UNIQUE INDEX ux_team_transfermkt  ON dim_team(id_transfermarkt) WHERE id_transfermarkt IS NOT NULL;
+
 
 -- ── dim_player ────────────────────────────────────────────
 CREATE TABLE dim_player (
@@ -97,6 +81,9 @@ CREATE TABLE fact_shots (
     data_source  VARCHAR(30)
 );
 
+-- Deduplicación de tiros: mismo partido, jugador, minuto y coordenadas (aprox)
+CREATE UNIQUE INDEX ux_shots_unique ON fact_shots (match_id, player_id, minute, x, y, data_source);
+
 CREATE INDEX idx_shots_match  ON fact_shots(match_id);
 CREATE INDEX idx_shots_player ON fact_shots(player_id);
 CREATE INDEX idx_shots_team   ON fact_shots(team_id);
@@ -118,6 +105,9 @@ CREATE TABLE fact_events (
     data_source  VARCHAR(30)
 );
 
+-- Deduplicación de eventos
+CREATE UNIQUE INDEX ux_events_unique ON fact_events (match_id, player_id, event_type, minute, second, x, y, data_source);
+
 CREATE INDEX idx_events_match  ON fact_events(match_id);
 CREATE INDEX idx_events_player ON fact_events(player_id);
 CREATE INDEX idx_events_team   ON fact_events(team_id);
@@ -134,5 +124,8 @@ CREATE TABLE fact_injuries (
     days_absent    INTEGER,
     matches_missed SMALLINT
 );
+
+-- Deduplicación de lesiones
+CREATE UNIQUE INDEX ux_injuries_unique ON fact_injuries (player_id, season, injury_type, date_from);
 
 CREATE INDEX idx_injuries_player ON fact_injuries(player_id);
