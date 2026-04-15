@@ -68,6 +68,15 @@ class DimPlayer(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 
+class DimTeam(Base):
+    __tablename__ = "dim_team"
+
+    team_id = Column(Integer, primary_key=True, autoincrement=True)
+    team_name = Column(String(100), nullable=False)
+    country = Column(String(80), nullable=True)
+    source = Column(String(50), nullable=True)
+
+
 class PlayerReview(Base):
     __tablename__ = "player_review"
 
@@ -105,6 +114,7 @@ class FactShots(Base):
     shot_id = Column(Integer, primary_key=True, autoincrement=True)
     match_id = Column(Integer, ForeignKey("dim_match.match_id"), nullable=True)
     player_id = Column(Integer, ForeignKey("dim_player.canonical_id"), nullable=True)
+    team_id = Column(Integer, ForeignKey("dim_team.team_id"), nullable=True)
     minute = Column(SmallInteger, nullable=True)
     x = Column(Numeric(6, 4), nullable=True)
     y = Column(Numeric(6, 4), nullable=True)
