@@ -12,8 +12,8 @@ def calculate_match_score(a, b):
 
     # Nombre (40 puntos)
     name_score = fuzz.token_sort_ratio(
-        a["canonical_name"].lower(),
-        b["canonical_name"].lower()
+        a["canonical_name"].lower() if a.get("canonical_name") else "",
+        b["canonical_name"].lower() if b.get("canonical_name") else "",
     )
     score += int((name_score / 100) * 40)
 
@@ -43,14 +43,14 @@ def resolve_player(incoming, session, id_field, auto_threshold=85, review_thresh
     """
     Busca en dim_player el jugador que mejor encaja con 'incoming'.
     - Score >= 85: match automático → actualiza el ID de la fuente
-    - 60 <= Score < 85: revisión manual → inserta en PlayerReview
+    - 60 <= Score < 85: revisión manual → inserta en player_review
     - Score < 60 o sin candidatos: jugador nuevo → inserta en DimPlayer
     """
     candidates = session.query(DimPlayer).all()
-    
+
     best_score = 0
     best_player = None
-    
+
     for candidate in candidates:
         a = {
             "canonical_name": incoming["name"],
@@ -59,10 +59,10 @@ def resolve_player(incoming, session, id_field, auto_threshold=85, review_thresh
             "position": incoming.get("position"),
         }
         b = {
-            "canonical_name": candidate.canonical_name,
+            "canonical_name": candidate.name_canonical,
             "birth_date": candidate.birth_date,
             "nationality": candidate.nationality,
-            "position": candidate.position,
+            "position": candidate.player_position,
         }
         score = calculate_match_score(a, b)
         if score > best_score:
@@ -72,7 +72,7 @@ def resolve_player(incoming, session, id_field, auto_threshold=85, review_thresh
     # Match automático
     if best_player and best_score >= auto_threshold:
         setattr(best_player, id_field, incoming["source_id"])
-        return best_player.canonical_id
+        return best_player.player_id
 
     # Revisión manual
     if best_player and best_score >= review_threshold:
@@ -80,7 +80,7 @@ def resolve_player(incoming, session, id_field, auto_threshold=85, review_thresh
             source_name=incoming["name"],
             source_system=incoming["source_system"],
             source_id=str(incoming["source_id"]),
-            suggested_canonical_id=best_player.canonical_id,
+            suggested_player_id=best_player.player_id,
             similarity_score=best_score,
             resolved=False,
         )
@@ -88,15 +88,15 @@ def resolve_player(incoming, session, id_field, auto_threshold=85, review_thresh
         return None
 
     # Jugador nuevo
-    new_player = DimPlayer(canonical_name=incoming["name"])
+    new_player = DimPlayer(name_canonical=incoming["name"])
     setattr(new_player, id_field, incoming["source_id"])
     if incoming.get("birth_date"):
         new_player.birth_date = incoming["birth_date"]
     if incoming.get("nationality"):
         new_player.nationality = incoming["nationality"]
     if incoming.get("position"):
-        new_player.position = incoming["position"]
+        new_player.player_position = incoming["position"]
     session.add(new_player)
     session.flush()
-    return new_player.canonical_id
+    return new_player.player_id
 
