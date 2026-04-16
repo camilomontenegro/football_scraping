@@ -1,79 +1,154 @@
--- MySQL DDL — informational reference only.
--- Authoritative schema creation: python -c "from db.models import get_engine, Base; Base.metadata.create_all(get_engine())"
-
-CREATE TABLE IF NOT EXISTS dim_player (
-    canonical_id     INT AUTO_INCREMENT PRIMARY KEY,
-    canonical_name   VARCHAR(150) NOT NULL,
-    birth_date       DATE,
-    nationality      VARCHAR(80),
-    position         VARCHAR(50),
-    id_understat     INT,
-    id_statsbomb     VARCHAR(50),
-    id_sofascore     INT,
-    id_whoscored     INT,
-    id_transfermarkt INT,
-    created_at       TIMESTAMP DEFAULT NOW()
+- - ══════════════════════════════════════════════════════════
+-- SCHEMA football_db
+-- Versión actualizada con IDs de todas las fuentes
+-- ══════════════════════════════════════════════════════════
+- - ── Limpiar tablas si existen ─────────────────────────────
+DROP TABLE IF EXISTS fact_injuries CASCADE;
+DROP TABLE IF EXISTS fact_events CASCADE;
+DROP TABLE IF EXISTS fact_shots CASCADE;
+DROP TABLE IF EXISTS dim_match CASCADE;
+DROP TABLE IF EXISTS dim_player CASCADE;
+DROP TABLE IF EXISTS dim_team CASCADE;
+- - ══════════════════════════════════════════════════════════
+-- DIMENSIONES
+-- ══════════════════════════════════════════════════════════
+- - ── dim_team ──────────────────────────────────────────────
+- CREATE TABLE dim_team (
+        team_id SERIAL PRIMARY KEY,
+        name_canonical VARCHAR(150) NOT NULL,
+        country VARCHAR(80),
+        id_sofascore INTEGER,
+        id_statsbomb INTEGER,
+        id_understat INTEGER,
+        id_whoscored INTEGER,
+        id_transfermarkt INTEGER,
+        created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS player_review (
-    id                     INT AUTO_INCREMENT PRIMARY KEY,
-    source_name            VARCHAR(150),
-    source_system          VARCHAR(50),
-    source_id              VARCHAR(50),
-    suggested_canonical_id INT REFERENCES dim_player(canonical_id),
-    similarity_score       SMALLINT,
-    resolved               BOOLEAN DEFAULT FALSE,
-    canonical_id_assigned  INT REFERENCES dim_player(canonical_id)
+CREATE UNIQUE INDEX ux_team_sofascore    ON dim_team(id_sofascore)    WHERE id_sofascore    IS NOT NULL;
+CREATE UNIQUE INDEX ux_team_statsbomb    ON dim_team(id_statsbomb)    WHERE id_statsbomb    IS NOT NULL;
+CREATE UNIQUE INDEX ux_team_understat    ON dim_team(id_understat)    WHERE id_understat    IS NOT NULL;
+CREATE UNIQUE INDEX ux_team_whoscored    ON dim_team(id_whoscored)    WHERE id_whoscored    IS NOT NULL;
+CREATE UNIQUE INDEX ux_team_transfermkt  ON dim_team(id_transfermarkt) WHERE id_transfermarkt IS NOT NULL;
+
+- - ── dim_player ────────────────────────────────────────────
+CREATE TABLE dim_player (
+        player_id SERIAL PRIMARY KEY,
+        name_canonical VARCHAR(150) NOT NULL,
+        nationality VARCHAR(80),
+        birth_date DATE,
+        player_position VARCHAR(50),
+        id_sofascore INTEGER,
+        id_understat INTEGER,
+        id_transfermarkt INTEGER,
+        id_statsbomb VARCHAR(50),
+        id_whoscored INTEGER,
+        created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS dim_match (
-    match_id    INT AUTO_INCREMENT PRIMARY KEY,
-    date        DATE,
-    competition VARCHAR(100),
-    season      VARCHAR(20),
-    home_team   VARCHAR(100),
-    away_team   VARCHAR(100),
-    home_score  SMALLINT,
-    away_score  SMALLINT,
-    source      VARCHAR(50)
+CREATE UNIQUE INDEX ux_player_sofascore   ON dim_player(id_sofascore)    WHERE id_sofascore    IS NOT NULL;
+CREATE UNIQUE INDEX ux_player_understat   ON dim_player(id_understat)    WHERE id_understat    IS NOT NULL;
+CREATE UNIQUE INDEX ux_player_statsbomb   ON dim_player(id_statsbomb)    WHERE id_statsbomb    IS NOT NULL;
+CREATE UNIQUE INDEX ux_player_whoscored   ON dim_player(id_whoscored)    WHERE id_whoscored    IS NOT NULL;
+CREATE UNIQUE INDEX ux_player_transfermkt ON dim_player(id_transfermarkt) WHERE id_transfermarkt IS NOT NULL;
+
+- - ── dim_match ─────────────────────────────────────────────
+CREATE TABLE dim_match (
+        match_id SERIAL PRIMARY KEY,
+        match_date DATE,
+        competition VARCHAR(100),
+        season VARCHAR(20),
+        home_team VARCHAR(100),
+        away_team VARCHAR(100),
+        home_score SMALLINT,
+        away_score SMALLINT,
+        data_source VARCHAR(50),
+        id_sofascore INTEGER,
+        id_understat INTEGER,
+        id_statsbomb INTEGER,
+        id_whoscored INTEGER
 );
 
-CREATE TABLE IF NOT EXISTS fact_shots (
-    shot_id   INT AUTO_INCREMENT PRIMARY KEY,
-    match_id  INT REFERENCES dim_match(match_id),
-    player_id INT REFERENCES dim_player(canonical_id),
-    minute    SMALLINT,
-    x         DECIMAL(6,4),
-    y         DECIMAL(6,4),
-    xg        DECIMAL(6,4),
-    result    VARCHAR(30),
-    shot_type VARCHAR(30),
-    situation VARCHAR(50),
-    source    VARCHAR(30)
+CREATE UNIQUE INDEX ux_match_sofascore ON dim_match(id_sofascore) WHERE id_sofascore IS NOT NULL;
+CREATE UNIQUE INDEX ux_match_understat ON dim_match(id_understat) WHERE id_understat IS NOT NULL;
+CREATE UNIQUE INDEX ux_match_statsbomb ON dim_match(id_statsbomb) WHERE id_statsbomb IS NOT NULL;
+CREATE UNIQUE INDEX ux_match_whoscored ON dim_match(id_whoscored) WHERE id_whoscored IS NOT NULL;
+
+- - ══════════════════════════════════════════════════════════
+-- HECHOS
+-- ══════════════════════════════════════════════════════════
+- - ── fact_shots ────────────────────────────────────────────
+CREATE TABLE fact_shots (
+        shot_id SERIAL PRIMARY KEY,
+        match_id INTEGER REFERENCES dim_match(match_id),
+        player_id INTEGER REFERENCES dim_player(player_id),
+        team_id INTEGER REFERENCES dim_team(team_id),
+        minute SMALLINT,
+        x DECIMAL(6,4),
+        y DECIMAL(6,4),
+        xg DECIMAL(6,4),
+        result VARCHAR(30),
+        shot_type VARCHAR(30),
+        situation VARCHAR(50),
+        data_source VARCHAR(30)
 );
 
-CREATE TABLE IF NOT EXISTS fact_events (
-    event_id   INT AUTO_INCREMENT PRIMARY KEY,
-    match_id   INT REFERENCES dim_match(match_id),
-    player_id  INT REFERENCES dim_player(canonical_id),
-    event_type VARCHAR(50),
-    minute     SMALLINT,
-    second     SMALLINT,
-    x          DECIMAL(6,4),
-    y          DECIMAL(6,4),
-    end_x      DECIMAL(6,4),
-    end_y      DECIMAL(6,4),
-    outcome    VARCHAR(50),
-    source     VARCHAR(30)
+CREATE INDEX idx_shots_match  ON fact_shots(match_id);
+CREATE INDEX idx_shots_player ON fact_shots(player_id);
+CREATE INDEX idx_shots_team   ON fact_shots(team_id);
+
+-- Deduplicación de tiros: mismo partido, jugador, minuto y coordenadas (aprox)
+CREATE UNIQUE INDEX ux_shots_unique ON fact_shots (match_id, player_id, minute, x, y, data_source);
+
+- - ── fact_events ───────────────────────────────────────────
+CREATE TABLE fact_events (
+        event_id SERIAL PRIMARY KEY,
+        match_id INTEGER REFERENCES dim_match(match_id),
+        player_id INTEGER REFERENCES dim_player(player_id),
+        team_id INTEGER REFERENCES dim_team(team_id),
+        event_type VARCHAR(50),
+        minute SMALLINT,
+        second SMALLINT,
+        x DECIMAL(6,4),
+        y DECIMAL(6,4),
+        end_x DECIMAL(6,4),
+        end_y DECIMAL(6,4),
+        outcome VARCHAR(50),
+        data_source VARCHAR(30)
 );
 
-CREATE TABLE IF NOT EXISTS fact_injuries (
-    injury_id      INT AUTO_INCREMENT PRIMARY KEY,
-    player_id      INT REFERENCES dim_player(canonical_id),
-    season         VARCHAR(20),
-    injury_type    VARCHAR(200),
-    date_from      DATE,
-    date_until     DATE,
-    days_absent    INT,
-    matches_missed SMALLINT
+CREATE INDEX idx_events_match  ON fact_events(match_id);
+CREATE INDEX idx_events_player ON fact_events(player_id);
+CREATE INDEX idx_events_team   ON fact_events(team_id);
+CREATE INDEX idx_events_type   ON fact_events(event_type);
+
+-- Deduplicación de eventos
+CREATE UNIQUE INDEX ux_events_unique ON fact_events (match_id, player_id, event_type, minute, second, x, y, data_source);
+
+- - ── fact_injuries ─────────────────────────────────────────
+CREATE TABLE fact_injuries (
+        injury_id SERIAL PRIMARY KEY,
+        player_id INTEGER REFERENCES dim_player(player_id),
+        season VARCHAR(20),
+        injury_type VARCHAR(200),
+        date_from DATE,
+        date_until DATE,
+        days_absent INTEGER,
+        matches_missed SMALLINT
+);
+
+CREATE INDEX idx_injuries_player ON fact_injuries(player_id);
+-- Deduplicación de lesiones
+CREATE UNIQUE INDEX ux_injuries_unique ON fact_injuries (player_id, season, injury_type, date_from);
+
+
+CREATE TABLE player_review (
+    id SERIAL PRIMARY KEY,
+    source_name VARCHAR(150),
+    source_system VARCHAR(50),
+    source_id VARCHAR(50),
+    suggested_player_id INTEGER REFERENCES dim_player(player_id),
+    similarity_score SMALLINT,
+    resolved BOOLEAN DEFAULT FALSE,
+    player_id_assigned INTEGER REFERENCES dim_player(player_id)
 );
