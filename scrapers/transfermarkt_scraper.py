@@ -47,6 +47,7 @@ TEAMS = {
 #En Transfermarkt el año de la temporada es el año de inicio. 2020 significa la temporada 2020/2021
 SEASON       = 2020
 OUTPUT_DIR   = os.path.join('data', 'raw', 'transfermarkt')
+TARGET_SEASON = '2020/2021'
 
 # ══════════════════════════════════════════════════
 # SCRAPING — PLANTILLAS
