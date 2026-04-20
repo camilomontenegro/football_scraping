@@ -17,6 +17,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # ══════════════════════════════════════════════════
 # FUNCIONES AUXILIARES 
 # ══════════════════════════════════════════════════
+
 def normalize(name):
     """Quita tildes y convierte a minúsculas para comparar nombres."""
     return unicodedata.normalize('NFD', name)\

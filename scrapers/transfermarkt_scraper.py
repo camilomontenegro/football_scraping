@@ -38,7 +38,7 @@ HEADERS = {
    
 }
 
-# Si se quiere obtener mas equipos, se  se añaden al diccionario  con el team_slug y el id
+# Si se quiere obtener mas equipos, se añaden al diccionario  con el team_slug y el id
 TEAMS = {
     "real-madrid": 418,
     "fc-barcelona": 131,
