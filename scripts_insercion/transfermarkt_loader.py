@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import unicodedata
 import pandas as pd
-from db.models import session_scope, DimPlayer, FactInjuries
+from db.models import session_scope, DimPlayer, FactInjuries,DimTeam
 from utils.player_matcher import resolve_player
 
 
@@ -66,18 +66,18 @@ def map_positions (df_players):
 
 def enrich_players_df(df_players, session):
     """
-    Añade birth_date y nationality al DataFrame  de jugadores consultando  la tabla dim_player por nombre.
+    Añade birth_date al DataFrame  de jugadores consultando  la tabla dim_player por nombre.
 
     Recive un DataFrame con datos de jugadores extraidos de Transfermarkt 
 
     Si se quiere utilizar la funcion resolver_player de player_matcher, como esta función utiliza campos de la tabla dim_players  que no estan en el csv de jugadores, hay que cargar esos campos en el Dataframe. 
-    Si no los cargamos, lo que ocurrira al utilziar revolve_player es que no se itentifca una equivalencia , el score que se otorga es bajo y la consecuencia es que se crean  registros solo  con el campo  de id de transfermarkt. 
+    Si no los cargamos, lo que ocurrira al utilizar revolve_player es que no se itentifca una equivalencia , el score que se otorga es bajo y la consecuencia es que se crean  registros solo  con el campo  de id de transfermarkt. 
     """
     ##obtiene los judagores de la tabla 
     candidates = session.query(DimPlayer).all()
 
     birth_dates = []
-    nationalities = []
+    
     
     # recorre la columna del DataFrame y comprueba si el nombre del jugador en el DataFrame es igual el nombre que existe en la tabla. A efectos de la comparación, se normaliza el nombre que viene de la tabla 
 
@@ -89,14 +89,63 @@ def enrich_players_df(df_players, session):
             None
         )
         birth_dates.append(match.birth_date if match else None)
-        nationalities.append(match.nationality if match else None)
+        
 
 
     df_players["birth_date"] = birth_dates
-    df_players["nationality"] = nationalities
+    
 
     return df_players
 
+
+
+
+# ══════════════════════════════════════════════════
+#  INSERTA LOS EQUIPOS
+# ══════════════════════════════════════════════════
+def load_teams(df_teams, session):
+    """
+    Si el equipo no existe en la tabla,  inbserta nuevo registro con el equipo   ( nombre y id de transfermarkt) 
+    Si el equipo existe y el campo id_transfermarkt es NULL, actualiza el id_tranfermarkt con el valor.  Si no es NULL, el equipo se 'salta'. 
+    """
+
+    insertados = 0
+    actualizados= 0
+    omitidos = 0
+    
+    for row in df_teams.itertuples():
+        # esta es la sintaxis equivalente a un SELECT * FROM dim_player WHERE ... LIMIT 1
+        existing = session.query(DimTeam).filter(
+           (DimPlayer.id_transfermarkt == row.team_id) |
+           (DimPlayer.name_canonical == row.team_name)
+        ).first()
+        # Si el equipo existe en la tabla y tiene el id_transfermarlt en NULL en la tabla, se actualiza el id 
+        # Si el id_transfermartk no es NULL, se  'salta' 
+        if existing: 
+            if existing.id_transfermarkt is None: 
+                # No hay consulta UPDATE explícita. Cuando se  un atributo de un objeto que vino de la sesión, SQLAlchemy lo marca como "sucio" y al hacer session.commit() genera y ejecuta el UPDATE automáticamente
+                existing.id_transfermarkt = row.team_id
+                actualizados +=1
+            else: 
+                omitidos +=1
+            continue
+
+        # Si el  equipo no existe en la tabla, se inserta 
+        try:
+            with session.begin_nested():
+                session.add(DimTeam(
+                    name_canonical= row.team_name,
+                    id_transfermarkt= row.team_id,
+                ))
+                insertados+=1
+        except Exception as e:
+            print(f'[ERROR] team={row.team_name} | {e}')
+            continue
+
+    print(f"Equipos insertados:    {insertados}")
+    print(f"Equipos actualizados:  {actualizados}")
+    print(f"Equipos omitidos:      {omitidos}")
+    
 
 # ══════════════════════════════════════════════════
 #  ACTUALIZA EL CAMPO id_transfermarkt en dim_players
@@ -183,11 +232,14 @@ def load_injuries(df_injuries,session):
 def load_transfermarkt(): 
     """ 
     Obtiene los DataFrames de los csv 
-    Normaliza campos, inserta id_tranfermarkt en dim_player y lesiones en fact_injuries
+    Normaliza campos, inserta equipos,  inserta id_tranfermarkt en dim_player y lesiones en fact_injuries
 
     """
     
     # El scrapper extrae los fichares en ese ruta por lo que se buscan ahi 
+    #lee el csv  de teams y guarda en DataFrame
+    df_teams = pd.read_csv(os.path.join(ROOT,'data', 'raw', 'transfermarkt', 'transfermarket_teams.csv'))
+    
     #lee el csv  de jugadores  y guarda en un DataFrame
     df_players = pd.read_csv(os.path.join(ROOT, 'data', 'raw', 'transfermarkt', 'transfermarket_players.csv'))
 
@@ -199,13 +251,16 @@ def load_transfermarkt():
         #1. Normaliza la columna positon en el Dataframe para que se ajuste al campo player_position en dim_players
         df_players= map_positions(df_players)
 
-        #2. Incorpora birth_date y nationality al DataFrame 
+        #2. Incorpora birth_date  al DataFrame 
         df_players = enrich_players_df(df_players, session)
+
+        # 3. Inserta equipos
+        load_teams(df_teams,session)
         
-        # 3. Actualiza en dim_players el campo id_transfermarkt
+        # 4. Actualiza en dim_players el campo id_transfermarkt
         update_transfermarkt_ids_in_dim_players(df_players, session)
 
-        # 4. INSERT  en la tabla fact_injuries
+        # 5. INSERT  en la tabla fact_injuries
         load_injuries(df_injuries,session)
     
         
