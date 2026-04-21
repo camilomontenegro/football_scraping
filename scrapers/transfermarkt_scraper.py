@@ -1,409 +1,519 @@
-r"""
-La estructura de la ruta en Transfermarket  usa términos en alemán.
+﻿"""
+scrapers/transfermarkt_scraper.py
+===================================
+Scraper unificado de Transfermarkt. Sigue el mismo patrÃ³n que understat_scraper.py:
 
-Términos en alemán y sus  traducciones en castellano 
+    Estructura:
+        1. CONSTANTS       â€” configuraciÃ³n del scraper
+        2. HELPERS         â€” parse_date, extract_id, request_with_retry
+        3. FETCH           â€” funciones puras de obtenciÃ³n de datos
+        4. ORCHESTRATOR    â€” scrape_transfermarkt() acumula todo
+        5. TRANSFORM       â€” adapta campos al esquema de la DB
+        6. DIM EXTRACTORS  â€” (jugadores ya son dimensiÃ³n directa)
+        7. MAIN            â€” scrape â†’ transform â†’ guardar en disco
+        8. __main__ guard
 
-Verletzungen  → "Lesiones".
-Spieler → "Jugador".
-Kader → Plantilla
-Verein → Club
-Startseite → "Página de inicio".
-Slug → parte corta de la URL que identifica la página ej www.web.de/startseite  -> slug es startseite
+    Salida (data/raw/transfermarkt/):
+        season=<year>/
+            <team_slug>/batch_id=<id>/
+                players.json            â† plantilla cruda
+                injuries.json           â† lesiones crudas
+            players_clean.csv           â† dim_player (campos DB)
+            injuries_clean.csv          â† fact_injuries (campos DB)
 
-zentriert → centrado
-hauptlink → enlace principal
-rechts → derecha
-wappen_verletzung → escudo lesión (o “icono de lesión”)
-tiny_wappen → escudo pequeño
+    Transfermarkt es la fuente CANÃ“NICA de jugadores:
+        dim_player.id_transfermarkt, canonical_name, nationality,
+        birth_date, position
 
+    Los loaders/ son los Ãºnicos que escriben en la DB.
 """
-## ID RealMadrid en transfermarlet es 418 
-## Id  FC Barcelona es 131
 
-## https://www.transfermarkt.es/real-madrid/kader/verein/418/saison_id/2020
-##https://www.transfermarkt.es/fc-barcelona/kader/verein/131/saison_id/2020
+from __future__ import annotations
 
+import json
+import logging
+import os
+import random
+import re
+import sys
+import time
+from datetime import datetime, date
+from pathlib import Path
+from typing import Optional
+
+# Allow running directly as a script
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+
+import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-import pandas as pd, time, random
-import os
+
+log = logging.getLogger(__name__)
+
+# â”€â”€ CONSTANTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+LEAGUE_CODE = "ES1"       # La Liga en Transfermarkt
+SEASONS     = [2020, 2021, 2022, 2023, 2024]  # aÃ±os de inicio de temporadas (20/21 a 24/25)
+DELAY_MIN   = 1.0         # pausa mÃ­nima entre peticiones (segundos)
+DELAY_MAX   = 2.0         # pausa mÃ¡xima entre peticiones (segundos)
+MAX_RETRIES = 3
+
+# Absolute path robusto para que funcione sin importar desde dÃ³nde de la terminal lo lances
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+OUTPUT_DIR  = PROJECT_ROOT / "data" / "raw" / "transfermarkt"
 
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/136.0.0.0 Safari/537.36"  
-    ),
-     "Accept-Language": "es-ES,es;q=0.9",
-   
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
 }
 
-# Si se quiere obtener mas equipos, se  se añaden al diccionario  con el team_slug y el id
-TEAMS = {
-    "real-madrid": 418,
-    "fc-barcelona": 131,
-}
 
-#En Transfermarkt el año de la temporada es el año de inicio. 2020 significa la temporada 2020/2021
-SEASON       = 2020
-OUTPUT_DIR   = os.path.join('data', 'raw', 'transfermarkt')
+# â”€â”€ HELPERS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-# ══════════════════════════════════════════════════
-# SCRAPING — PLANTILLAS
-# ══════════════════════════════════════════════════
+def parse_date(date_str: str) -> Optional[date]:
+    """Convierte una cadena de fecha en un objeto date de Python.
 
-def  get_squad(team_slug, team_id, season):
+    Acepta formatos como 30/04/1992, 30.04.1992, 1992-04-30.
+    Devuelve None si la cadena es invÃ¡lida o vacÃ­a.
     """
-    Descarga y parsea la plantilla de un equipo en Transfermarkt para una temporada.
+    if not date_str or date_str.strip() in ("-", ""):
+        return None
+    date_str = date_str.replace(".", "/").replace("-", "/").strip()
+    for fmt in ("%d/%m/%Y", "%d/%m/%y", "%Y/%m/%d", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(date_str, fmt).date()
+        except ValueError:
+            continue
+    return None
 
-    Realiza una petición HTTP a la ruta de plantilla:
-        https://www.transfermarkt.es/{team_slug}/kader/verein/{team_id}/saison_id/{season}
 
-    Parsea la tabla HTML con clase 'items', donde cada fila <tr class="odd/even">
-    representa un jugador. El enlace del jugador está en <td class="hauptlink">
-    y contiene el slug e id en el href: /{slug}/profil/spieler/{id}
+def _json_serializer(obj):
+    """Serializer personalizado para json.dump que maneja objetos date."""
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    raise TypeError(f"Type {type(obj)} not serializable")
 
-    Parámetros:
-        team_slug  (str): identificador del equipo en la URL, ej: "real-madrid"
-        team_id    (int): ID numérico del equipo en Transfermarkt, ej: 418
-        season     (int): año de inicio de la temporada, ej: 2020 para 2020/2021
 
-    Devuelve:
-        list[dict]: lista de jugadores, cada uno con:
-            - player_id   (str): ID del jugador en Transfermarkt
-            - player_slug (str): slug del jugador, ej: "karim-benzema"
-            - player_name (str): nombre completo del jugador
-            - position    (str): posición en español, ej: "Delantero centro"
-            - team        (str): team_slug del equipo
-        [] si hay error en la petición o no se encuentra la tabla
+def extract_player_id(href: str) -> Optional[str]:
+    """Extrae el ID numÃ©rico de Transfermarkt de un href de jugador.
+
+    Ejemplo: /lionel-messi/profil/spieler/28003 â†’ '28003'
     """
-    url =f'https://www.transfermarkt.es/{team_slug}/kader/verein/{team_id}/saison_id/{season}'
-    
-    #  hace  la peticion  para descargar el HTML de la página del equipo
-    try: 
-        response = requests.get(url, headers=HEADERS)
-        response.raise_for_status()
-    except requests.exceptions.HTTPError as e:
-        # servidor devuelve 4xx o 5xx
-        print(f" Error HTTP {e}")
-        return []
-    except requests.exceptions.ConnectionError as e:
-        # no hay conexión
-        print(f" Error de conexión: {e}")
-        return []
-    except requests.exceptions.Timeout as e:
-        # la petición tardó demasiado
-        print(f" Timeout: {e}")
-        return []
-    
-    
-    # parsea el html  con BeatifulShop
-    soup = BeautifulSoup(response.content, 'html.parser')
-    
+    match = re.search(r"/spieler/(\d+)", href)
+    return match.group(1) if match else None
 
-    # los jugadores de un equicpo están en la web en una tabla con la clase items 
-    table = soup.find('table', class_='items')
 
-   
-    if not table:
-        return []
+def extract_player_slug(href: str) -> Optional[str]:
+    """Extrae el slug de URL de un href de jugador.
 
-    # busca  en table todas las tr con  class 'odd' o  'even'
-    rows = table.find_all('tr', class_=['odd', 'even'])
-   
-    # cada row es un objeto BeautifulShop  que representa una  fila <tr> en la tabla 
-    
-    players=[]
-    for row in rows: 
-        try: 
-                
-            # busca el <td> con class 'hauptlink'
-            td_hauptlink = row.find('td', class_='hauptlink')
-            # el enlace del jugador está dentro de <td class="hauptlink">
-            anchor = td_hauptlink.find('a') if td_hauptlink else None
-            if not anchor: 
-                    continue
-            
-            # /karim-benzema/profil/spieler/18922   ← formato real
-            href = anchor['href']  
-        
-            ## href.split('/') → ["", "karim-benzema", "profil", "spieler", "18922"]
-            # [1] → "karim-benzema"
-            player_slug= href.split('/')[1]
-            ## [-1] → "18922"  (último elemento)
-            player_id= href.split('/')[-1]
-            
-           
-            #Algunos jugadores tienen un <span> adicional dentro del enlace para indicar que están lesionados:
-            #En ese caso anchor.text.strip() devolvería "Thibaut Courtois\xa0"
-            player_name = anchor.get_text(strip=True).replace('\xa0', '').strip()
+    Ejemplo: /lionel-messi/profil/spieler/28003 â†’ 'lionel-messi'
+    """
+    parts = href.split("/")
+    return parts[1] if len(parts) > 1 else None
 
-            # row.find('table') → encuentra la tabla anidada inline-table
-            # .find_all('tr')   → [fila con foto y nombre, fila con posición]
-            # [1]               → segunda fila
-            # .text.strip()     → "Delantero centro"
-            position    = row.find('table').find_all('tr')[1].text.strip()
 
-            players.append({
-                "player_id": player_id,
-                "player_slug": player_slug,
-                "player_name": player_name,
-                "position":position,
-                "team": team_slug
-            })
-            
+def request_with_retry(url: str, retries: int = MAX_RETRIES) -> Optional[requests.Response]:
+    """Hace una peticiÃ³n GET con reintentos exponenciales.
 
-        except KeyError as e:
-    
-            print(f" Fila sin href: {e}")
-            continue
-        except IndexError as e:
-            # split('/') no devuelve suficientes elementos
-            # o find_all('tr') no tiene segunda fila
-            print(f" Estructura HTML inesperada: {e}")
-            continue
-        except AttributeError as e:
-        # Por si se devuelve None  y se intenta llamar find_all sobre None
-            print(f" Elemento no encontrado: {e}")
-            continue
+    Devuelve el objeto Response si tiene Ã©xito, o None si falla.
+    """
+    for i in range(retries):
+        try:
+            r = requests.get(url, headers=HEADERS, timeout=20)
+            r.raise_for_status()
+            return r
         except Exception as e:
-            print(f" Error inesperado: {e}")
-            print(f" Error inesperado en fila: {type(e).__name__}: {e}")
-    
+            log.warning("Intento %d/%d fallido para %s: %s", i + 1, retries, url, e)
+            time.sleep(2 * (i + 1))
+    return None
+
+
+# â”€â”€ FETCH FUNCTIONS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+def get_league_teams(league_code: str = LEAGUE_CODE, season: str = str(SEASONS[0])) -> dict[str, int]:
+    """Escanea la tabla de la liga y devuelve {slug_equipo: id_equipo}.
+
+    Recorre los enlaces de la tabla de clasificaciÃ³n de Transfermarkt
+    para obtener los slugs e IDs de todos los equipos.
+    """
+    url = (
+        f"https://www.transfermarkt.es/laliga/startseite"
+        f"/wettbewerb/{league_code}/saison_id/{season}"
+    )
+    r = request_with_retry(url)
+    if not r:
+        return {}
+
+    soup  = BeautifulSoup(r.text, "html.parser")
+    teams: dict[str, int] = {}
+
+    for td in soup.select("td.hauptlink.no-border-links"):
+        a = td.select_one("a")
+        if a:
+            parts = a.get("href", "").split("/")
+            if "startseite" in parts and len(parts) >= 5:
+                try:
+                    teams[parts[1]] = int(parts[4])
+                except (ValueError, IndexError):
+                    pass
+
+    log.info("Equipos encontrados en %s %s: %d", league_code, season, len(teams))
+    return teams
+
+
+def get_player_profile(player_slug: str, player_id: str) -> dict:
+    """Extrae nacionalidad y fecha de nacimiento del perfil individual."""
+    url = f"https://www.transfermarkt.es/{player_slug}/profil/spieler/{player_id}"
+    r = request_with_retry(url)
+    if not r:
+        return {"nationality": None, "birth_date": None}
+
+    soup = BeautifulSoup(r.text, "html.parser")
+    profile = {"nationality": None, "birth_date": None}
+
+    # Nueva estructura de Transfermarkt usa spans en lugar de li
+    labels = soup.find_all("span", class_="info-table__content--regular")
+    for label in labels:
+        val = label.find_next_sibling("span")
+        if not val:
             continue
-        
-    # pausa aleatoria entre 2 y 4 segundos para evitar bloqueos por parte de la web
-    time.sleep(random.uniform(2, 4))
+            
+        text_label = label.text.strip().lower()
+        if "nacim" in text_label or "birth" in text_label:
+            raw = val.text.split("(")[0]
+            raw_match = re.search(r"\d{2}/\d{2}/\d{4}", raw)
+            if raw_match:
+                profile["birth_date"] = parse_date(raw_match.group())
+        elif "nacionalidad" in text_label or "citizenship" in text_label:
+            img = val.find("img")
+            if img:
+                profile["nationality"] = img.get("title")
+            else:
+                profile["nationality"] = val.get_text(strip=True)
+
+    return profile
+
+
+def get_squad(team_slug: str, team_id: int, season: int) -> list[dict]:
+    """Descarga la plantilla de un equipo para una temporada.
+
+    Devuelve una lista de dicts con: player_id, player_name, player_slug,
+    position, nationality, birth_date, team_country.
+    """
+    url = (
+        f"https://www.transfermarkt.es/{team_slug}/kader"
+        f"/verein/{team_id}/saison_id/{season}"
+    )
+    r = request_with_retry(url)
+    if not r:
+        return []
+
+    soup  = BeautifulSoup(r.text, "html.parser")
+    table = soup.find("table", class_="items")
+    if not table:
+        log.warning("Sin tabla de plantilla para %s", team_slug)
+        return []
+
+    # PaÃ­s del equipo (bandera en la cabecera)
+    flag = soup.find("img", class_="flaggenrahmen")
+    team_country = flag.get("title") if flag else None
+
+    players = []
+    for row in table.find_all("tr", class_=["odd", "even"]):
+        link = row.select_one("td.hauptlink a")
+        if not link:
+            continue
+
+        href        = link.get("href", "")
+        player_id   = extract_player_id(href)
+        player_slug = extract_player_slug(href)
+
+        # PosiciÃ³n (segunda fila de la tabla anidada dentro de la celda)
+        position = None
+        nested   = row.find("table")
+        if nested:
+            nested_rows = nested.find_all("tr")
+            if len(nested_rows) > 1:
+                position = nested_rows[1].get_text(strip=True)
+
+        # Nacionalidad rÃ¡pida desde la tabla
+        nationality_table = None
+        tds = row.find_all("td")
+        if len(tds) > 6:
+            nat_img = tds[6].find("img")
+            if nat_img:
+                nationality_table = nat_img.get("title")
+
+        # Perfil individual para fecha de nacimiento
+        profile = get_player_profile(player_slug, player_id)
+
+        players.append({
+            "player_id":    player_id,
+            "player_name":  link.text.strip(),
+            "player_slug":  player_slug,
+            "position":     position,
+            "nationality":  profile["nationality"] or nationality_table,
+            "birth_date":   profile["birth_date"],
+            "team_slug":    team_slug,
+            "team_id_tm":   team_id,
+            "team_country": team_country,
+        })
+
+        time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
+
     return players
 
-# ══════════════════════════════════════════════════
-# SCRAPING — LESIONES
-# ══════════════════════════════════════════════════
 
-def get_player_injuries(player_slug, player_id): 
+def get_player_injuries(player_slug: str, player_id: str) -> list[dict]:
+    """Descarga el historial de lesiones de un jugador.
+
+    Devuelve lista de dicts con: season, injury_type, date_from,
+    date_until, days_absent, matches_missed.
     """
-    Descarga y parsea el historial de lesiones de un jugador en Transfermarkt.
-
-    Realiza una petición HTTP a la ruta de lesiones:
-        https://www.transfermarkt.es/{player_slug}/verletzungen/spieler/{player_id}
-
-    Parsea la tabla HTML con clase 'items', donde cada fila <tr class="odd/even">
-    representa una lesión. Solo extrae las lesiones de la temporada TARGET_SEASON
-    usando el formato corto de Transfermarkt, ej: "20/21" para 2020/2021.
-
-    Parámetros:
-        player_slug (str): slug del jugador en la URL, ej: "karim-benzema"
-        player_id   (str): ID del jugador en Transfermarkt, ej: "18922"
-
-    Devuelve:
-        list[dict]: lista de lesiones de la temporada TARGET_SEASON, cada una con:
-            - season         (str): temporada en formato corto, ej: "20/21"
-            - injury_type    (str): tipo de lesión, ej: "Lesión muscular"
-            - date_from      (str): fecha de inicio en formato dd/mm/yyyy
-            - date_until     (str): fecha de fin en formato dd/mm/yyyy
-            - days_absent    (int|None): días de baja, None si no disponible
-            - matches_missed (int|None): partidos perdidos, None si no disponible
-            - player_id      (str): ID del jugador en Transfermarkt
-        [] si hay error en la petición o el jugador no tiene lesiones
-    """
-
-    url= f'https://www.transfermarkt.es/{player_slug}/verletzungen/spieler/{player_id}'
-
-    try: 
-        response = requests.get(url, headers=HEADERS)
-        response.raise_for_status()
-    except requests.exceptions.HTTPError as e:
-        # servidor devuelve 4xx o 5xx
-        print(f" Error HTTP {e}")
+    url = f"https://www.transfermarkt.es/{player_slug}/verletzungen/spieler/{player_id}"
+    r   = request_with_retry(url)
+    if not r:
         return []
-    except requests.exceptions.ConnectionError as e:
-        # no hay conexión
-        print(f" Error de conexión: {e}")
-        return []
-    except requests.exceptions.Timeout as e:
-        # la petición tardó demasiado
-        print(f"  Timeout: {e}")
-        return []
-    
-    # parsea el html  con BeatifulSoup
-    soup = BeautifulSoup(response.content, 'html.parser')
 
-    # las lesiones de un jugador están en la web en una tabla con la clase items 
-    table = soup.find('table', class_='items')
-
-    # puede que un jugador no tenga lesiones 
+    soup  = BeautifulSoup(r.text, "html.parser")
+    table = soup.find("table", class_="items")
     if not table:
         return []
+
+    injuries = []
+    for row in table.find_all("tr", class_=["odd", "even"]):
+        cols = row.find_all("td")
+        if len(cols) < 6:
+            continue
+
+        days_str  = cols[4].text.strip()
+        days_m    = re.search(r"\d+", days_str)
+
+        span = cols[5].find("span")
+
+        injuries.append({
+            "season":         cols[0].text.strip(),
+            "injury_type":    cols[1].text.strip(),
+            "date_from":      parse_date(cols[2].text.strip()),
+            "date_until":     parse_date(cols[3].text.strip()),
+            "days_absent":    int(days_m.group()) if days_m else None,
+            "matches_missed": int(span.text.strip()) if span and span.text.strip().isdigit() else None,
+        })
+
+    time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
+    return injuries
+
+
+# â”€â”€ ORCHESTRATOR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+def scrape_transfermarkt(
+    league_code: str = LEAGUE_CODE,
+    season: int      = None,
+    teams: Optional[dict[str, int]] = None,
+) -> tuple[list[dict], list[dict]]:
+    """Orquestador principal: descarga plantillas y lesiones de todos los equipos.
+
+    Args:
+        league_code: CÃ³digo de liga en Transfermarkt (p.ej. 'ES1')
+        season:      AÃ±o de inicio de la temporada (p.ej. 2020). Si es None, usa la primera.
+        teams:       Dict {slug: id} de equipos. Si es None, se auto-descubren.
+
+    Returns:
+        (all_players, all_injuries) â€” listas de dicts con datos crudos.
+    """
+    if season is None:
+        season = SEASONS[0]
     
-    # cada fila  con la clase odd o even representa una lesion
-    rows= table.find_all('tr', class_=['odd','even'])
+    from utils.batch import generate_batch_id
+    batch_id = generate_batch_id()
 
-    """ Estrucutra de cada tr 
-    <tr class="odd">
-        <td class="zentriert">25/26</td>
-        <td class="hauptlink">Lesión en el dedo del pie</td>
-        <td class="zentriert">04/04/2026</td>
-        <td class="zentriert">06/04/2026</td>
-        <td class="rechts">3 dias</td>
-        <td class="rechts hauptlink wappen_verletzung">
-        <a title="Al-Hilal SFC" href="/al-hilal-riad/startseite/verein/1114/saison_id/2025"><img src="https://tmssl.akamaized.net//images/wappen/tiny/1114.png?lm=1755170975" title="Al-Hilal SFC" alt="Al-Hilal SFC" class="tiny_wappen"></a><span>1</span></td>
-    </tr>
-    """
-    injuries= []
-    for row in rows: 
-        try:
-            # extrae los td de la fila 
-            cols= row.find_all('td')
-            
-            season= cols[0].text.strip()
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)  # crear directorio al scrapear, no al importar
 
-            # de momento solo interesa la temporado 20/21
-            if season =='20/21': 
-                injury_type= cols[1].text.strip()
-                date_from= cols[2].text.strip()
-                date_until= cols[3].text.strip()
-                
-                ## cols[4] devuelve "3 dias" → limpiamos el texto y convertimos a int
-                days_str = cols[4].text.strip().replace(' dias', '').replace(' día', '').strip()
-                days_absent = int(days_str) if days_str.isdigit() else None
-                
-                # los partidos perdidos están dentro de un <span> en la última celda
-                ## puede ser None si el jugador no tiene partidos registrados
-                span = cols[5].find('span')
-                matches_missed = int(span.text.strip()) if span else None
+    if not teams:
+        teams = get_league_teams(league_code, str(season))
+        log.info("Auto-descubiertos %d equipos para %s %d", len(teams), league_code, season)
 
-                injuries.append({
-                        "season": season,
-                        "injury_type": injury_type,
-                        "date_from": date_from,
-                        "date_until": date_until,
-                        "days_absent": days_absent,
-                        "matches_missed": matches_missed,
-                        "player_id" : player_id
-                    }
-                )
+    print("=" * 55)
+    print(f"  Transfermarkt scraper â€” {league_code} {season}/{season+1}")
+    print("=" * 55)
 
-        except IndexError as e:
-            # la fila no tiene la estructura esperada
-            print(f" Estructura HTML inesperada: {e}")
-            continue
-        except AttributeError as e:
-            # algún elemento devuelve None al utilizar find sobre él
-            print(f" Elemento no encontrado: {e}")
-            continue
-        except ValueError as e:
-            # int() no puede convertir el string
-            print(f" Error convirtiendo a número: {e}")
-            continue
-        except Exception as e:
-            print(f" Error inesperado: {e}")
+    all_players:  list[dict] = []
+    all_injuries: list[dict] = []
+    failed: list[str] = []
+
+    for team_slug, team_id in teams.items():
+        print(f"\n[INFO] Equipo: {team_slug} (id={team_id})")
+
+        # Plantilla â€” con reintentos
+        players = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                players = get_squad(team_slug, team_id, season)
+                if players:
+                    break
+            except Exception as e:
+                log.warning("%s intento %d: %s", team_slug, attempt + 1, e)
+            time.sleep(2 * (attempt + 1))
+
+        if not players:
+            log.error("%s sin datos de plantilla", team_slug)
+            failed.append(team_slug)
             continue
 
-    # pausa aleatoria entre 2 y 4 segundos para evitar bloqueos por parte de la web
-    time.sleep(random.uniform(2, 4))
-    return  injuries
+        # Enriquecer cada jugador con metadatos de extracciÃ³n
+        for p in players:
+            p["season"]   = season
+            p["batch_id"] = batch_id
 
-# ══════════════════════════════════════════════════
-# ORQUESTADOR
-# ══════════════════════════════════════════════════
+        # Lesiones por jugador
+        team_injuries: list[dict] = []
+        for p in players:
+            try:
+                injuries = get_player_injuries(p["player_slug"], p["player_id"])
+                for inj in injuries:
+                    inj["player_id_tm"] = p["player_id"]
+                    inj["player_name"]  = p["player_name"]
+                    inj["team_slug"]    = team_slug
+                    inj["batch_id"]     = batch_id
+                team_injuries.extend(injuries)
+            except Exception as e:
+                log.warning("%s â€” lesiones fallidas: %s", p["player_name"], e)
 
-def scrape_transfermarkt():
-    
-    """
-    Orquestador principal del scraping de Transfermarkt.
-    Devuelve DataFrames con los jugadores y las lesiones 
-    Llama a get_squad()  y a get_players_injuries() 
+        # Guardar JSON crudos por equipo
+        team_dir = OUTPUT_DIR / f"season={season}" / team_slug / f"batch_id={batch_id}"
+        _save_json(players,       team_dir / "players.json")
+        _save_json(team_injuries, team_dir / "injuries.json")
 
-    Fase 1 — Plantillas:
-        Recorre el diccionario TEAMS y llama a get_squad() por cada equipo.
-        Acumula todos los jugadores en una lista única independientemente del equipo,
-        que se puede filtrar por el campo 'team' de cada diccionario.
-
-    Fase 2 — Lesiones:
-        Por cada jugador obtenido en la Fase 1 llama a get_player_injuries()
-        usando player_slug y player_id. Solo se guardan las lesiones de
-        TARGET_SEASON definida en las constantes de configuración.
-
-    Devuelve:
-        tuple[pd.DataFrame, pd.DataFrame]:
-            - df_players:  un jugador por fila con player_id, player_slug,
-                           player_name, position y team
-            - df_injuries: una lesión por fila con season, injury_type,
-                           date_from, date_until, days_absent, matches_missed
-                           y player_id para cruzar con df_players
-        tuple[pd.DataFrame vacío, pd.DataFrame vacío] si no se obtienen jugadores
-    """
-    all_players= []
-    all_injuries= []
-
-    ## obtiene las plantillas de cada equipo 
-    for team_slug, team_id in TEAMS.items():
-        print(f"\n Obteniendo plantilla de {team_slug}...")
-        players = get_squad(team_slug,team_id,SEASON)
-        print(f" {len(players)} jugadores encontrados")
         all_players.extend(players)
-    
-    if not all_players:
-        print(" No se obtuvieron jugadores.")
-        return pd.DataFrame(), pd.DataFrame()
-    
+        all_injuries.extend(team_injuries)
 
-    ## obtiene las lesiones de todos los jugadores 
-    for player in all_players: 
-        print(f"  → Lesiones de {player['player_name']}...")
-        injuries = get_player_injuries(
-            player['player_slug'],
-            player['player_id']
-        )
+        print(f"  [OK] {len(players)} jugadores | {len(team_injuries)} lesiones")
 
-        all_injuries.extend(injuries)
-    
-    print(f"\n Resumen:")
-    print(f"  Jugadores: {len(all_players)}")
-    print(f"  Lesiones:  {len(all_injuries)}")
-    
-    return pd.DataFrame(all_players),pd.DataFrame(all_injuries)
+    print(f"\n  Equipos procesados: {len(teams) - len(failed)}/{len(teams)}")
+    if failed:
+        print(f"  [WARNING] Fallidos: {failed}")
 
-# ══════════════════════════════════════════════════
-# PROGRAMA PRINCIPAL
-# ══════════════════════════════════════════════════
+    return all_players, all_injuries
+
+
+# â”€â”€ TRANSFORM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+def transform_players(players_raw: list[dict]) -> pd.DataFrame:
+    """Adapta la lista cruda de jugadores a las columnas de dim_player.
+
+    Columnas generadas (alineadas con create_tables.sql dim_player):
+        id_transfermarkt, canonical_name, nationality,
+        birth_date, position
+    """
+    rows = []
+    for p in players_raw:
+        rows.append({
+            "id_transfermarkt": p.get("player_id"),
+            "canonical_name":   p.get("player_name"),
+            "nationality":      p.get("nationality"),
+            "birth_date":       p.get("birth_date"),
+            "position":         p.get("position"),
+            # Metadatos de procedencia (Ãºtil para resoluciÃ³n en loader)
+            "team_slug":        p.get("team_slug"),
+            "team_id_tm":       p.get("team_id_tm"),
+            "season":           p.get("season"),
+        })
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df["id_transfermarkt"] = pd.to_numeric(df["id_transfermarkt"], errors="coerce").astype("Int64")
+        df = df.drop_duplicates(subset=["id_transfermarkt"]).sort_values("id_transfermarkt")
+    return df.reset_index(drop=True)
+
+
+def transform_injuries(injuries_raw: list[dict]) -> pd.DataFrame:
+    """Adapta la lista cruda de lesiones a las columnas de fact_injuries.
+
+    Columnas generadas (alineadas con create_tables.sql fact_injuries):
+        player_id_tm (FK â†’ dim_player.id_transfermarkt),
+        season, injury_type, date_from, date_until,
+        days_absent, matches_missed
+    """
+    rows = []
+    for inj in injuries_raw:
+        rows.append({
+            "player_id_tm":  inj.get("player_id_tm"),
+            "player_name":   inj.get("player_name"),   # para facilitar el join en loader
+            "season":        inj.get("season"),
+            "injury_type":   inj.get("injury_type"),
+            "date_from":     inj.get("date_from"),
+            "date_until":    inj.get("date_until"),
+            "days_absent":   inj.get("days_absent"),
+            "matches_missed": inj.get("matches_missed"),
+        })
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df["player_id_tm"]  = pd.to_numeric(df["player_id_tm"],  errors="coerce").astype("Int64")
+        df["days_absent"]   = pd.to_numeric(df["days_absent"],   errors="coerce").astype("Int32")
+        df["matches_missed"]= pd.to_numeric(df["matches_missed"],errors="coerce").astype("Int16")
+    return df.reset_index(drop=True)
+
+
+# â”€â”€ HELPERS INTERNOS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+def _save_json(data, path: Path) -> None:
+    """Guarda JSON en disco de forma segura, con soporte para objetos date."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2, default=_json_serializer)
+
+
+# â”€â”€ MAIN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
 def main():
+    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s - %(message)s")
 
-    """
-    Punto de entrada del script. 
-    
-    Llama al orquestador scrape_transfermarkt(), crea el directorio de salida
-    OUTPUT_DIR si no existe, y guarda los resultados en dos CSVs:
-        - transfermarket_players.csv:  plantillas de los equipos en TEAMS
-        - transfermarket_injuries.csv: lesiones de la temporada TARGET_SEASON
-    """
-    
     print("=" * 55)
-    print(f"  Transfermarkt scraper — temporada {TARGET_SEASON}")
+    print(f"  Transfermarkt scraper â€” {LEAGUE_CODE} {SEASONS[0]}/{SEASONS[0]+1} a {SEASONS[-1]}/{SEASONS[-1]+1}")
     print("=" * 55)
 
-    #  llama al orquestador
-    df_players, df_injuries =  scrape_transfermarkt()
+    all_players_combined = []
+    all_injuries_combined = []
 
-    if df_players.empty:
-        print(" No se obtuvieron datos.")
+    for season in SEASONS:
+        print(f"\n[SEASON] Descargando temporada {season}/{season+1}...")
+        
+        all_players, all_injuries = scrape_transfermarkt(LEAGUE_CODE, season)
+
+        if not all_players:
+            print(f"  [WARNING] No se obtuvieron datos para temporada {season}")
+            continue
+
+        print(f"  [INFO] Temporada {season}/{season+1}:")
+        print(f"    Jugadores: {len(all_players)}")
+        print(f"    Lesiones:  {len(all_injuries)}")
+
+        all_players_combined.extend(all_players)
+        all_injuries_combined.extend(all_injuries)
+
+    if not all_players_combined:
+        print("\n[WARNING] No se obtuvieron datos en ninguna temporada.")
         return
-    
-    #  crea el directorio si no existe. Si existe, no hace nada
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    
-    # definición de rutas 
-    players_path = os.path.join(OUTPUT_DIR,'transfermarket_players.csv')
-    injuries_path = os.path.join(OUTPUT_DIR,'transfermarket_injuries.csv')
 
-    #  guarda los CSVs
-    df_players.to_csv(players_path, index= False)
-    df_injuries.to_csv(injuries_path,index=False)
+    # Transformar (datos acumulados de todas las temporadas)
+    df_players  = transform_players(all_players_combined)
+    df_injuries = transform_injuries(all_injuries_combined)
 
-    #  imprime rutas de salida
-    print(f"\n Archivos guardados:")
-    print(f"  {players_path}  ({len(df_players)} filas)")
-    print(f"  {injuries_path} ({len(df_injuries)} filas)")
+    # Guardar CSVs (agregado)
+    season_dir = OUTPUT_DIR / f"season={SEASONS[0]}-{SEASONS[-1]}"
+    season_dir.mkdir(parents=True, exist_ok=True)
+
+    players_path  = season_dir / "players_clean.csv"
+    injuries_path = season_dir / "injuries_clean.csv"
+
+    df_players.to_csv(players_path,   index=False, encoding="utf-8-sig")
+    df_injuries.to_csv(injuries_path, index=False, encoding="utf-8-sig")
+
+    print(f"\nâœ… Archivos guardados:")
+    print(f"  {players_path}   ({len(df_players)} filas)")
+    print(f"  {injuries_path}  ({len(df_injuries)} filas)")
+
+    print(f"\nðŸŽ‰ Descarga de Transfermarkt completada")
+
 
 if __name__ == "__main__":
     main()
