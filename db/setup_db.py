@@ -16,7 +16,12 @@ DB_HOST     = os.getenv("DB_HOST", "127.0.0.1")
 DB_PORT     = os.getenv("DB_PORT", "5432")
 DB_NAME     = os.getenv("DB_NAME", "football_db")
 DB_USER     = os.getenv("DB_USER", "postgres")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "OseN18112011-")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+
+if not DB_PASSWORD:
+    print(" ERROR: DB_PASSWORD must be set in .env file")
+    print(" See .env.example for reference")
+    raise SystemExit(1)
 
 SQL_PATH = os.path.join(os.path.dirname(__file__), "create_tables.sql")
 
