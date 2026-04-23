@@ -289,19 +289,19 @@ def _load_events_source(conn, source: str, file_pattern: str, files_dir: Path) -
     mid_col = {
         "sofascore": "match_id_ss",
         "statsbomb": "match_id_sb",
-        "whoscored": "match_id_ws",
+        "whoscored": "whoscored_match_id",
     }.get(source, "match_id_ss")
 
     pid_col = {
         "sofascore": "player_id_ss",
         "statsbomb": "player_id_sb",
-        "whoscored": "player_id_ws",
+        "whoscored": "whoscored_player_id",
     }.get(source, "player_id_ss")
 
     tid_col = {
         "sofascore": "team_id_ss",
         "statsbomb": "team_id_sb",
-        "whoscored": None,          # WhoScored no tiene team_id en events
+        "whoscored": "whoscored_team_id",          # WhoScored no tiene team_id en events
     }.get(source)
 
     count = skipped = 0
@@ -436,6 +436,6 @@ def load_injuries(conn) -> int:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s - %(message)s")
     with engine.begin() as conn:
-        load_shots(conn)
+        #load_shots(conn)
         load_events(conn)
-        load_injuries(conn)
+        #load_injuries(conn)
