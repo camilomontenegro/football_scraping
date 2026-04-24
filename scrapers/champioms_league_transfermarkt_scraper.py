@@ -74,6 +74,15 @@ HEADERS = {
     ),
     "Accept-Language": "es-ES,es;q=0.9",
 }
+
+
+def _append_to_csv(records: list[dict], path: str) -> None:
+    if not records:
+        return
+    df = pd.DataFrame(records)
+    write_header = not os.path.exists(path)
+    df.to_csv(path, mode="a", index=False, header=write_header)
+    print(f"    → {len(records)} filas guardadas en {os.path.basename(path)}")
  
  
 # ══════════════════════════════════════════════════
@@ -491,148 +500,133 @@ def get_player_injuries(player_slug: str, player_id: str) -> list[dict]:
 # ══════════════════════════════════════════════════
 # ORQUESTADOR
 # ══════════════════════════════════════════════════
- 
-def scrape_champions() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+
+# ──────────────────────────────────────────── CAMBIO ────────────────────────────────────────────
+def scrape_champions() -> None:
     """
     Orquesta la extracción completa de datos de la Champions League.
- 
+    Guarda los resultados de forma incremental tras cada temporada, de modo que
+    si el proceso se interrumpe no se pierden las temporadas ya completadas.
+
+    Resume automático: si los CSVs ya existen detecta qué temporadas están
+    procesadas leyendo el CSV de jugadores, y las salta.
+
     Fase 1 — Equipos:
-        Por cada temporada en SEASONS llama a get_league_teams() para obtener
-        los equipos participantes ese año (varían cada temporada) en una lista de diccionarios 
- 
+        Por cada temporada llama a get_league_teams().
+
     Fase 2 — Plantillas:
-        Por cada equipo llama a get_squad() para obtener sus jugadores.
-        get_squad() ya incorpora la fecha de nacimiento de cada jugador
-        haciendo una petición adicional al perfil individual.
-        Acumula todos los jugadores con el campo 'season'.
- 
-    Fase 3 — Lesiones:
-        Por cada jugador único (deduplicado por player_id) llama a
-        get_player_injuries() para obtener su historial completo de lesiones.
- 
-    Devuelve:
-        tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-            - df_players:  un registro por (jugador, temporada, equipo) con
-                           player_id, player_slug, player_name, position,
-                           nationality, birth_date, team, season
-            - df_injuries: una lesión por fila con season, injury_type,
-                           date_from, date_until, days_absent, matches_missed
-                           y player_id para cruzar con df_players
-            - df_teams:    un equipo por fila (sin duplicados) con
-                           team_id, team_slug y team_name
-        tuple[pd.DataFrame vacío x3] si no se obtienen jugadores
+        Por cada equipo llama a get_squad().
+
+    Fase 3 — Lesiones (dentro del bucle de temporadas):
+        Por cada jugador nuevo (deduplicado por player_id) llama a
+        get_player_injuries(). Se ejecuta antes del guardado para que cada
+        temporada quede completa en disco.
+
+    Salida (data/raw/transfermarkt/champions/):
+        transfermarkt_champions_teams.csv
+        transfermarkt_champions_players.csv
+        transfermarkt_champions_injuries.csv
     """
-    # todos los jugadores de todos los equipos
-    all_players  = []
-    # todas las lesiones de todos lso jugadores de todos lso equipos 
-    all_injuries = []
-    # todos los equipos 
-    all_teams    = []
- 
-    # equipos ya vistos para deduplicar df_teams. En cada temporada habra equippos qeu vuelvan a aparecer 
-    seen_team_ids = set()
- 
-    # jugadores ya procesados para no repetir get_player_injuries y evitar obtener las lesiones de un jugador mas de un vez 
-    # un mismo jugador puede aparecer en varios equipos y temporadas
-    processed_player_ids = set()
- 
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    teams_path    = os.path.join(OUTPUT_DIR, "transfermarkt_champions_teams.csv")
+    players_path  = os.path.join(OUTPUT_DIR, "transfermarkt_champions_players.csv")
+    injuries_path = os.path.join(OUTPUT_DIR, "transfermarkt_champions_injuries.csv")
+
+    # resume: detecta temporadas ya procesadas leyendo el CSV de jugadores
+    done_seasons: set[int] = set()
+    if os.path.exists(players_path):
+        df_existing = pd.read_csv(players_path, usecols=["season"])
+        done_seasons = set(df_existing["season"].dropna().astype(int).unique())
+        if done_seasons:
+            print(f"  Resume: temporadas ya guardadas → {sorted(done_seasons)}")
+
+    # resume: carga los player_id ya procesados del CSV de lesiones
+    # para no volver a descargar lesiones de jugadores ya procesados en ejecuciones anteriores
+    processed_player_ids: set[str] = set()
+    if os.path.exists(injuries_path):
+        df_injuries_existing = pd.read_csv(injuries_path, usecols=["player_id"])
+        processed_player_ids = set(df_injuries_existing["player_id"].dropna().astype(str).unique())
+        if processed_player_ids:
+            print(f"  Resume: {len(processed_player_ids)} jugadores con lesiones ya descargadas")
+
+    # equipos ya vistos para deduplicar df_teams entre temporadas
+    seen_team_ids: set[int] = set()
+
     for season in SEASONS:
         print(f"\n{'=' * 50}")
         print(f"  Temporada {season}/{season + 1}")
         print(f"{'=' * 50}")
- 
-        # fase 1: equipos de la temporada. 
+
+        if season in done_seasons:
+            print(f"  Ya procesada, omitiendo.")
+            continue
+
+        season_teams:    list[dict] = []
+        season_players:  list[dict] = []
+        season_injuries: list[dict] = []
+
+        # fase 1: equipos de la temporada
         teams = get_league_teams(season)
         print(f"  {len(teams)} equipos encontrados")
- 
+
         if not teams:
             print(f"  No se obtuvieron equipos para {season}, saltando...")
             continue
- 
-        # fase 2: plantillas por equipo. 
-        # Recorre la lista de diccionarios 
+
+        # fase 2: plantillas por equipo
         for team in teams:
             if team["team_id"] not in seen_team_ids:
                 seen_team_ids.add(team["team_id"])
-                all_teams.append(team)
- 
+                season_teams.append(team)
+
             print(f"\n  Obteniendo plantilla de {team['team_name']}...")
             players = get_squad(team["team_slug"], team["team_id"], season)
             print(f"  {len(players)} jugadores encontrados")
-            all_players.extend(players)
- 
-    if not all_players:
-        print("\n  No se obtuvieron jugadores.")
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
- 
-    # fase 3: lesiones por jugador único
-    print(f"\n  Obteniendo lesiones ({len(all_players)} registros de jugadores)...")
-    for player in all_players:
-        player_id = player["player_id"]
-        if player_id in processed_player_ids:
-            continue
-        processed_player_ids.add(player_id)
- 
-        print(f"  → Lesiones de {player['player_name']}...")
-        injuries = get_player_injuries(player["player_slug"], player_id)
-        all_injuries.extend(injuries)
- 
-    print(f"\n  Resumen:")
-    print(f"    Equipos únicos:         {len(all_teams)}")
-    print(f"    Registros de jugadores: {len(all_players)}")
-    print(f"    Jugadores únicos:       {len(processed_player_ids)}")
-    print(f"    Lesiones:               {len(all_injuries)}")
- 
-    return (
-        pd.DataFrame(all_players),
-        pd.DataFrame(all_injuries),
-        pd.DataFrame(all_teams),
-    )
- 
- 
+            season_players.extend(players)
+
+        # fase 3: lesiones de jugadores nuevos en esta temporada
+        new_players = [p for p in season_players if p["player_id"] not in processed_player_ids]
+        print(f"\n  Obteniendo lesiones de {len(new_players)} jugadores nuevos...")
+        for player in new_players:
+            processed_player_ids.add(player["player_id"])
+            print(f"  → Lesiones de {player['player_name']}...")
+            injuries = get_player_injuries(player["player_slug"], player["player_id"])
+            season_injuries.extend(injuries)
+
+        # guardar temporada completa a disco
+        print(f"\n  Guardando temporada {season}/{season + 1}...")
+        _append_to_csv(season_teams,    teams_path)
+        _append_to_csv(season_players,  players_path)
+        _append_to_csv(season_injuries, injuries_path)
+        print(f"  Temporada {season}/{season + 1} guardada.")
+
+    print(f"\n  Proceso finalizado.")
+    print(f"    {teams_path}")
+    print(f"    {players_path}")
+    print(f"    {injuries_path}")
+# ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
 # ══════════════════════════════════════════════════
 # PROGRAMA PRINCIPAL
 # ══════════════════════════════════════════════════
- 
+
+# ──────────────────────────────────────────── CAMBIO ────────────────────────────────────────────
 def main():
     """
     Punto de entrada del script.
- 
-    Llama al orquestador scrape_champions(), crea el directorio de salida
-    OUTPUT_DIR si no existe y guarda los resultados en tres CSVs:
-        - transfermarkt_champions_teams.csv
-        - transfermarkt_champions_players.csv
-        - transfermarkt_champions_injuries.csv
+
+    Llama a scrape_champions(), que gestiona internamente el directorio de
+    salida, el guardado incremental por temporada y el resume automático.
     """
     print("=" * 55)
     print(f"  Champions League scraper — {SEASONS[0]}/{SEASONS[0]+1} → {SEASONS[-1]}/{SEASONS[-1]+1}")
     print("=" * 55)
-    
-    # desempaqueta al tupla devuelta con los DataFrames
-    df_players, df_injuries, df_teams = scrape_champions()
- 
-    if df_players.empty:
-        print("\n  No se obtuvieron datos.")
-        return
-        
-    #  crea el directorio si no existe. Si existe, no hace nada
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # define las rutas 
-    teams_path   = os.path.join(OUTPUT_DIR, "transfermarkt_champions_teams.csv")
-    players_path = os.path.join(OUTPUT_DIR, "transfermarkt_champions_players.csv")
-    injuries_path = os.path.join(OUTPUT_DIR, "transfermarkt_champions_injuries.csv")
+    scrape_champions()
+# ────────────────────────────────────────────────────────────────────────────────────────────────
 
-    df_teams.to_csv(teams_path,    index=False)
-    df_players.to_csv(players_path,  index=False)
-    df_injuries.to_csv(injuries_path, index=False)
- 
-    print(f"\n  Archivos guardados:")
-    print(f"    {teams_path}    ({len(df_teams)} filas)")
-    print(f"    {players_path}  ({len(df_players)} filas)")
-    print(f"    {injuries_path} ({len(df_injuries)} filas)")
- 
- 
+
 if __name__ == "__main__":
     main()
- 
