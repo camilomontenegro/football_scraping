@@ -83,7 +83,9 @@ def _load_phase1_transfermarkt(conn) -> int:
     Returns:
         Número de jugadores insertados/actualizados.
     """
-    files = list(RAW_TM.glob("**/players_clean.csv"))
+    #files = list(RAW_TM.glob("**/players_clean.csv"))
+    files = list((RAW_TM / "champions").glob("**/transfermarkt_champions_players.csv"))
+
     if not files:
         log.warning("player_loader fase 1: no se encontró players_clean.csv en %s", RAW_TM)
         return 0
@@ -296,7 +298,10 @@ def _load_phase4_statsbomb(conn) -> tuple[int, int]:
 
 def _load_phase5_whoscored(conn) -> tuple[int, int]:
     """Enlaza id_whoscored a jugadores existentes de TM via resolución de nombre."""
-    f = RAW_WS / "whoscored_players_laliga.csv"
+   
+    #f = RAW_WS / "whoscored_players_laliga.csv"
+    f = RAW_WS / "champions" / "whoscored_champions_players.csv"
+
     if not f.exists():
         log.info("player_loader fase 5: no hay whoscored_players_laliga.csv")
         return 0, 0
@@ -346,13 +351,13 @@ def load_players(conn) -> int:
     _load_phase1_transfermarkt(conn)
 
     # Fase 2 — SofaScore (enlace por nombre)
-    _load_phase2_sofascore(conn)
+    #_load_phase2_sofascore(conn)
 
     # Fase 3 — Understat (enlace por nombre)
-    _load_phase3_understat(conn)
+    #_load_phase3_understat(conn)
 
     # Fase 4 — StatsBomb (enlace por nombre)
-    _load_phase4_statsbomb(conn)
+   # _load_phase4_statsbomb(conn)
 
     # Fase 5 — WhoScored (enlace por nombre)
     _load_phase5_whoscored(conn)
