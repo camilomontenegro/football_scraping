@@ -172,6 +172,44 @@ _TEAM_ALIASES: dict[str, str] = {
     "espanyol":                  "Espanyol",
     "espanyol barcelona":        "Espanyol",
     "rcd espanyol":              "Espanyol",
+
+# ── Champions League — WhoScored ──────────────────────────────────────
+    "ajax":                  "Ajax de Ámsterdam",        # WS: Ajax
+    "arsenal":               "Arsenal FC",               # WS: Arsenal
+    "atalanta":              "Atalanta de Bérgamo",      # WS: Atalanta
+    "bayern":                "Bayern Múnich",            # WS: Bayern
+    "benfica":               "SL Benfica",               # WS: Benfica
+    "bodoe glimt":           "Bodø/Glimt",               # WS: Bodoe/Glimt
+    "borussia m gladbach":   "Borussia Mönchengladbach", # WS: Borussia M.Gladbach
+    "brest":                 "Stade Brestois 29",        # WS: Brest
+    "celtic":                "Celtic FC",                # WS: Celtic
+    "chelsea":               "Chelsea FC",               # WS: Chelsea
+    "club brugge":           "Club Brujas KV",           # WS: Club Brugge
+    "copenhagen":            "FC Copenhague",            # WS: Copenhagen
+    "eintracht frankfurt":   "Eintracht Fráncfort​​",    # WS: Eintracht Frankfurt
+    "inter":                 "Inter de Milán",           # WS: Inter
+    "juventus":              "Juventus de Turín",        # WS: Juventus
+    "lazio":                 "SS Lazio",                 # WS: Lazio
+    "leverkusen":            "Bayer 04 Leverkusen",      # WS: Leverkusen
+    "lille":                 "LOSC Lille",               # WS: Lille
+    "liverpool":             "Liverpool FC",             # WS: Liverpool
+    "man city":              "Manchester City",          # WS: Man City
+    "man utd":               "Manchester United",        # WS: Man Utd
+    "monaco":                "AS Mónaco",                # WS: Monaco
+    "napoli":                "SSC Nápoles",              # WS: Napoli
+    "newcastle":             "Newcastle United",         # WS: Newcastle
+    "olympiacos":            "Olympiacos El Pireo",      # WS: Olympiacos
+    "porto":                 "FC Oporto",                # WS: Porto
+    "psg":                   "París Saint-Germain FC",   # WS: PSG
+    "psv":                   "PSV Eindhoven",            # WS: PSV
+    "rbl":                   "RB Leipzig",               # WS: RBL
+    "salzburg":              "Red Bull Salzburgo",       # WS: Salzburg
+    "sporting":              "Sporting de Lisboa",       # WS: Sporting
+    "tottenham":             "Tottenham Hotspur",  
+    "qarabag fk":            "Qarabag FK",
+    "qarabag":               "Qarabag FK",
+    "bodoe glimt":           "Bodø/Glimt",
+
 }
 
 
