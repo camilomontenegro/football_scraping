@@ -226,7 +226,7 @@ Temporary landing zone — idempotent, reloaded on each pipeline run.
 
 ```bash
 # 1. Clone the repository
-git clone <repo-url>
+git clone https://github.com/camilomontenegro/football_scraping.git
 cd football_scrapping
 
 # 2. Create virtual environment
