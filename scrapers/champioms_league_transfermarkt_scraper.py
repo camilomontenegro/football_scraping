@@ -236,11 +236,13 @@ def get_league_teams(season: int) -> list[dict]:
             team_slug = parts[1]       # "real-madrid"
             team_id   = int(parts[4])  # 418
             team_name = anchor.get("title")
+            country = get_team_country(team_slug,team_id)
 
             teams.append({
                 "team_id":   team_id,
                 "team_slug": team_slug,
                 "team_name": team_name,
+                "team_country":country,
             })
 
         except (ValueError, IndexError) as e:
@@ -250,6 +252,52 @@ def get_league_teams(season: int) -> list[dict]:
 
     time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
     return teams
+
+
+def get_team_country(team_slug: str, team_id: int) -> Optional[str]:
+    """
+    Accede a la página del equipo y extrae el país.
+
+    URL:
+        https://www.transfermarkt.es/{team_slug}/startseite/verein/{team_id}
+
+    El país está en el label "Liga:" dentro de data-header:
+        <span class="data-header__label">
+            <strong>Liga:</strong>
+            <span class="data-header__content">
+                <a href="...">
+                    <img title="Inglaterra" alt="Inglaterra" class="flaggenrahmen">
+                </a>
+            </span>
+        </span>
+
+    Parámetros:
+        team_slug (str): slug del equipo, ej: "manchester-city"
+        team_id   (int): ID del equipo en Transfermarkt, ej: 281
+
+    Devuelve:
+        str con el país, ej: "Inglaterra", o None si no se encuentra
+
+        ** Este metodo se va a llamar en get_league_teams. Otra opcion seria  prescindir del método y  usar la logia de extraccion en get_squad ya que  el dato del pais del equipo se encuentra en la misma pagian que la plantilla del equipo. Habria que modificar get_squady  para que devolvise tambien un string.
+        Se deja asi porsi solo se quiere obtener datos de los equipos. 
+    """
+    url = f"https://www.transfermarkt.es/{team_slug}/startseite/verein/{team_id}"
+    response = request_with_retry(url)
+    if not response:
+        return None
+
+    soup = BeautifulSoup(response.content, "html.parser")
+
+    # busca el label "Liga:" por texto — más estable que posición en el DOM
+    for label in soup.find_all("span", class_="data-header__label"):
+        if "Liga" in label.text:
+            flag = label.find("img", class_="flaggenrahmen")
+            if flag:
+                return flag.get("title")
+
+    return None
+
+
 
 # ══════════════════════════════════════════════════
 # SCRAPING — fecha de nacimeinto 
@@ -533,7 +581,7 @@ def scrape_champions() -> None:
     players_path  = os.path.join(OUTPUT_DIR, "transfermarkt_champions_players.csv")
     injuries_path = os.path.join(OUTPUT_DIR, "transfermarkt_champions_injuries.csv")
 
-    # resume: detecta temporadas ya procesadas leyendo el CSV de jugadores
+    # detecta temporadas ya procesadas leyendo el CSV de jugadores
     done_seasons: set[int] = set()
     if os.path.exists(players_path):
         df_existing = pd.read_csv(players_path, usecols=["season"])
@@ -541,7 +589,7 @@ def scrape_champions() -> None:
         if done_seasons:
             print(f"  Resume: temporadas ya guardadas → {sorted(done_seasons)}")
 
-    # resume: carga los player_id ya procesados del CSV de lesiones
+    # resume carga los player_id ya procesados del CSV de lesiones
     # para no volver a descargar lesiones de jugadores ya procesados en ejecuciones anteriores
     processed_player_ids: set[str] = set()
     if os.path.exists(injuries_path):
