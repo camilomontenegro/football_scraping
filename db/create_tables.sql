@@ -106,6 +106,7 @@ CREATE TABLE dim_competition(
     canonical_name VARCHAR(150) NOT NULL,
     id_sofascore INTEGER,
     id_understat INTEGER,
+    # problema TF usa  string como codigo para las competiciones 
     id_transfermarkt INTEGER,
     id_statsbomb VARCHAR(50),
     id_whoscored INTEGER,
@@ -223,16 +224,14 @@ CREATE TABLE fact_events (
     data_source VARCHAR(30)
 );
 
-CREATE UNIQUE INDEX ux_events_unique ON fact_events (
-    match_id,
-    player_id,
-    event_type,
-    minute,
-    second,
-    x,
-    y,
-    data_source
-);
+-- se modifica el indez para que los campos second, x e y , que estan en null en algunso eventos, tengan un valor 
+-- y  se puedan itenticar  como registros unicos y evitar la inserccion duplicada  de eventos 
+CREATE UNIQUE INDEX ux_events_unique 
+ON fact_events (match_id, player_id, event_type, minute, 
+                COALESCE(second, -1), 
+                COALESCE(x, -1.0), 
+                COALESCE(y, -1.0), 
+                data_source);
 
 CREATE INDEX idx_events_match ON fact_events (match_id);
 

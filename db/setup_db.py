@@ -1,6 +1,6 @@
 # db/setup_db.py
 # Crea la base de datos y carga el schema usando SQLAlchemy.
-#
+# Esta conexion  se utlzia solo para crear la base de datos 
 # Uso:
 #   pip install sqlalchemy psycopg2-binary python-dotenv
 #   python db/setup_db.py
