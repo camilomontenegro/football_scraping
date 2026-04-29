@@ -72,7 +72,8 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "LaLiga2",
             },
             "understat": {
-                "league": "La_Liga",
+                # understat no tiene datos de Segunda Division 
+                "league": None,
                 "name": "La Liga",  # Understat no tiene Segunda
             },
             "statsbomb": {
@@ -134,7 +135,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Championship",
             },
             "understat": {
-                "league": "EPL",  # Understat no tiene Championship
+                "league": None,  # Understat no tiene Championship
                 "name": "Championship",
             },
             "statsbomb": {
