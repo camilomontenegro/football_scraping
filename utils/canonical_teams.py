@@ -29,189 +29,250 @@ import unicodedata
 # â”€â”€ Diccionario de normalizaciÃ³n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Clave: nombre normalizado (minÃºsculas, sin tildes, sin puntuaciÃ³n)
 # Valor: nombre canÃ³nico tal y como aparece en SofaScore
-
 _TEAM_ALIASES: dict[str, str] = {
-
-    # â”€â”€ Real Madrid â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "real madrid":               "Real Madrid",
-    "real madrid cf":            "Real Madrid",
-    "real madrid c f":           "Real Madrid",
-
-    # â”€â”€ FC Barcelona â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "fc barcelona":              "FC Barcelona",
-    "barcelona":                 "FC Barcelona",
-    "f c barcelona":             "FC Barcelona",
-    "barca":                     "FC Barcelona",
-    "barÃ§a":                     "FC Barcelona",
-
-    # â”€â”€ AtlÃ©tico de Madrid â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "atletico de madrid":        "AtlÃ©tico de Madrid",
-    "atletico madrid":           "AtlÃ©tico de Madrid",
-    "atletico":                  "AtlÃ©tico de Madrid",
-    "atl madrid":                "AtlÃ©tico de Madrid",
-    "club atletico de madrid":   "AtlÃ©tico de Madrid",
-    "atlÃ©tico de madrid":        "AtlÃ©tico de Madrid",
-
-    # â”€â”€ Sevilla FC â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "sevilla":                   "Sevilla FC",
-    "sevilla fc":                "Sevilla FC",
-    "fc sevilla":                "Sevilla FC",
-
-    # â”€â”€ Real Betis â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "real betis":                "Real Betis",
-    "real betis sevilla":        "Real Betis",
-    "betis":                     "Real Betis",
-
-    # â”€â”€ Real Sociedad â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "real sociedad":             "Real Sociedad",
-    "real sociedad san sebastian":"Real Sociedad",
-    "sociedad":                  "Real Sociedad",
-
-    # â”€â”€ Athletic Club â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "athletic bilbao":           "Athletic Club",
-    "athletic club":             "Athletic Club",
-    "athletic":                  "Athletic Club",
-    "bilbao":                    "Athletic Club",
-
-    # â”€â”€ Valencia CF â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "valencia":                  "Valencia CF",
-    "valencia cf":               "Valencia CF",
-    "fc valencia":               "Valencia CF",
-
-    # â”€â”€ Villarreal CF â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "villarreal":                "Villarreal CF",
-    "villarreal cf":             "Villarreal CF",
-    "fc villarreal":             "Villarreal CF",
-    "yellow submarine":          "Villarreal CF",
-
-    # â”€â”€ Celta de Vigo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "celta de vigo":             "Celta de Vigo",
-    "celta vigo":                "Celta de Vigo",
-    "rc celta":                  "Celta de Vigo",
-    "celta":                     "Celta de Vigo",
-
-    # â”€â”€ CA Osasuna â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "osasuna":                   "Osasuna",
-    "ca osasuna":                "Osasuna",
-    "c a osasuna":               "Osasuna",
-
-    # â”€â”€ Deportivo AlavÃ©s â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "deportivo alaves":          "Deportivo AlavÃ©s",
-    "alaves":                    "Deportivo AlavÃ©s",
-    "deportivo alavÃ©s":          "Deportivo AlavÃ©s",
-    "sd alaves":                 "Deportivo AlavÃ©s",
-
-    # â”€â”€ Getafe CF â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "getafe":                    "Getafe CF",
-    "getafe cf":                 "Getafe CF",
-    "fc getafe":                 "Getafe CF",
-
-    # â”€â”€ Granada CF â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "granada":                   "Granada CF",
-    "granada cf":                "Granada CF",
-    "granada c f":               "Granada CF",
-    "fc granada":                "Granada CF",
-    "f c granada":               "Granada CF",
-
-    # â”€â”€ Levante UD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "levante":                   "Levante UD",
-    "levante ud":                "Levante UD",
-    "ud levante":                "Levante UD",
-
-    # â”€â”€ CÃ¡diz CF â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "cadiz":                     "CÃ¡diz CF",
-    "cadiz cf":                  "CÃ¡diz CF",
-    "fc cadiz":                  "CÃ¡diz CF",
-    "cÃ¡diz cf":                  "CÃ¡diz CF",
-
-    # â”€â”€ Elche CF â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "elche":                     "Elche CF",
-    "elche cf":                  "Elche CF",
-    "fc elche":                  "Elche CF",
-
-    # â”€â”€ SD Eibar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "eibar":                     "SD Eibar",
-    "sd eibar":                  "SD Eibar",
-
-    # â”€â”€ SD Huesca â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "huesca":                    "SD Huesca",
-    "sd huesca":                 "SD Huesca",
-    "s d huesca":                "SD Huesca",
-    "huesca sd":                 "SD Huesca",
-
-    # â”€â”€ Real Valladolid â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "valladolid":                "Real Valladolid",
-    "real valladolid":           "Real Valladolid",
-    "real valladolid cf":        "Real Valladolid",
-
-    # â”€â”€ Girona FC â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "girona fc":                 "Girona FC",
-    "girona":                    "Girona FC",
-    "fc girona":                 "Girona FC",
-
-    # â”€â”€ CD LeganÃ©s â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "leganes":                   "LeganÃ©s",
-    "cd leganes":                "LeganÃ©s",
-
-    # â”€â”€ UD Las Palmas â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "las palmas":                "Las Palmas",
-    "ud las palmas":             "Las Palmas",
-
-    # â”€â”€ RCD Mallorca â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "mallorca":                  "Mallorca",
-    "rcd mallorca":              "Mallorca",
-
-    # â”€â”€ Rayo Vallecano â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "rayo vallecano":            "Rayo Vallecano",
-
-    # â”€â”€ UD AlmerÃ­a â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "almeria":                   "AlmerÃ­a",
-    "ud almeria":                "AlmerÃ­a",
-
-    # â”€â”€ RCD Espanyol â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    "espanyol":                  "Espanyol",
-    "espanyol barcelona":        "Espanyol",
-    "rcd espanyol":              "Espanyol",
-
-# ── Champions League — WhoScored ──────────────────────────────────────
-    "ajax":                  "Ajax de Ámsterdam",        # WS: Ajax
-    "arsenal":               "Arsenal FC",               # WS: Arsenal
-    "atalanta":              "Atalanta de Bérgamo",      # WS: Atalanta
-    "bayern":                "Bayern Múnich",            # WS: Bayern
-    "benfica":               "SL Benfica",               # WS: Benfica
-    "bodoe glimt":           "Bodø/Glimt",               # WS: Bodoe/Glimt
-    "borussia m gladbach":   "Borussia Mönchengladbach", # WS: Borussia M.Gladbach
-    "brest":                 "Stade Brestois 29",        # WS: Brest
-    "celtic":                "Celtic FC",                # WS: Celtic
-    "chelsea":               "Chelsea FC",               # WS: Chelsea
-    "club brugge":           "Club Brujas KV",           # WS: Club Brugge
-    "copenhagen":            "FC Copenhague",            # WS: Copenhagen
-    "eintracht frankfurt":   "Eintracht Fráncfort​​",    # WS: Eintracht Frankfurt
-    "inter":                 "Inter de Milán",           # WS: Inter
-    "juventus":              "Juventus de Turín",        # WS: Juventus
-    "lazio":                 "SS Lazio",                 # WS: Lazio
-    "leverkusen":            "Bayer 04 Leverkusen",      # WS: Leverkusen
-    "lille":                 "LOSC Lille",               # WS: Lille
-    "liverpool":             "Liverpool FC",             # WS: Liverpool
-    "man city":              "Manchester City",          # WS: Man City
-    "man utd":               "Manchester United",        # WS: Man Utd
-    "monaco":                "AS Mónaco",                # WS: Monaco
-    "napoli":                "SSC Nápoles",              # WS: Napoli
-    "newcastle":             "Newcastle United",         # WS: Newcastle
-    "olympiacos":            "Olympiacos El Pireo",      # WS: Olympiacos
-    "porto":                 "FC Oporto",                # WS: Porto
-    "psg":                   "París Saint-Germain FC",   # WS: PSG
-    "psv":                   "PSV Eindhoven",            # WS: PSV
-    "rbl":                   "RB Leipzig",               # WS: RBL
-    "salzburg":              "Red Bull Salzburgo",       # WS: Salzburg
-    "sporting":              "Sporting de Lisboa",       # WS: Sporting
-    "tottenham":             "Tottenham Hotspur",  
-    "qarabag fk":            "Qarabag FK",
-    "qarabag":               "Qarabag FK",
-    "bodoe glimt":           "Bodø/Glimt",
-
+ 
+    # ── La Liga ───────────────────────────────────────────────────────────────
+ 
+    # Real Madrid
+    "real madrid":                  "Real Madrid",
+    "real madrid cf":               "Real Madrid",
+    "real madrid c f":              "Real Madrid",
+ 
+    # FC Barcelona
+    "fc barcelona":                 "FC Barcelona",
+    "barcelona":                    "FC Barcelona",
+    "f c barcelona":                "FC Barcelona",
+    "barca":                        "FC Barcelona",
+    "barca":                        "FC Barcelona",
+ 
+    # Atlético de Madrid
+    "atletico de madrid":           "Atlético de Madrid",
+    "atletico madrid":              "Atlético de Madrid",
+    "atletico":                     "Atlético de Madrid",
+    "atl madrid":                   "Atlético de Madrid",
+    "club atletico de madrid":      "Atlético de Madrid",
+    "atletico madrid":              "Atlético de Madrid",
+ 
+    # Sevilla FC
+    "sevilla":                      "Sevilla FC",
+    "sevilla fc":                   "Sevilla FC",
+    "fc sevilla":                   "Sevilla FC",
+ 
+    # Real Betis
+    "real betis":                   "Real Betis",
+    "real betis sevilla":           "Real Betis",
+    "betis":                        "Real Betis",
+ 
+    # Real Sociedad
+    "real sociedad":                "Real Sociedad",
+    "real sociedad san sebastian":  "Real Sociedad",
+    "sociedad":                     "Real Sociedad",
+ 
+    # Athletic Club
+    "athletic bilbao":              "Athletic Club",
+    "athletic club":                "Athletic Club",
+    "athletic":                     "Athletic Club",
+    "bilbao":                       "Athletic Club",
+ 
+    # Valencia CF
+    "valencia":                     "Valencia CF",
+    "valencia cf":                  "Valencia CF",
+    "fc valencia":                  "Valencia CF",
+ 
+    # Villarreal CF
+    "villarreal":                   "Villarreal CF",
+    "villarreal cf":                "Villarreal CF",
+    "fc villarreal":                "Villarreal CF",
+    "yellow submarine":             "Villarreal CF",
+ 
+    # Celta de Vigo
+    "celta de vigo":                "Celta de Vigo",
+    "celta vigo":                   "Celta de Vigo",
+    "rc celta":                     "Celta de Vigo",
+    "celta":                        "Celta de Vigo",
+ 
+    # CA Osasuna
+    "osasuna":                      "Osasuna",
+    "ca osasuna":                   "Osasuna",
+    "c a osasuna":                  "Osasuna",
+ 
+    # Deportivo Alavés
+    "deportivo alaves":             "Deportivo Alavés",
+    "alaves":                       "Deportivo Alavés",
+    "deportivo alaves":             "Deportivo Alavés",
+    "sd alaves":                    "Deportivo Alavés",
+ 
+    # Getafe CF
+    "getafe":                       "Getafe CF",
+    "getafe cf":                    "Getafe CF",
+    "fc getafe":                    "Getafe CF",
+ 
+    # Granada CF
+    "granada":                      "Granada CF",
+    "granada cf":                   "Granada CF",
+    "granada c f":                  "Granada CF",
+    "fc granada":                   "Granada CF",
+    "f c granada":                  "Granada CF",
+ 
+    # Levante UD
+    "levante":                      "Levante UD",
+    "levante ud":                   "Levante UD",
+    "ud levante":                   "Levante UD",
+ 
+    # Cádiz CF
+    "cadiz":                        "Cádiz CF",
+    "cadiz cf":                     "Cádiz CF",
+    "fc cadiz":                     "Cádiz CF",
+ 
+    # Elche CF
+    "elche":                        "Elche CF",
+    "elche cf":                     "Elche CF",
+    "fc elche":                     "Elche CF",
+ 
+    # SD Eibar
+    "eibar":                        "SD Eibar",
+    "sd eibar":                     "SD Eibar",
+ 
+    # SD Huesca
+    "huesca":                       "SD Huesca",
+    "sd huesca":                    "SD Huesca",
+    "s d huesca":                   "SD Huesca",
+    "huesca sd":                    "SD Huesca",
+ 
+    # Real Valladolid
+    "valladolid":                   "Real Valladolid",
+    "real valladolid":              "Real Valladolid",
+    "real valladolid cf":           "Real Valladolid",
+ 
+    # Girona FC
+    "girona fc":                    "Girona FC",
+    "girona":                       "Girona FC",
+    "fc girona":                    "Girona FC",
+ 
+    # Leganés
+    "leganes":                      "Leganés",
+    "cd leganes":                   "Leganés",
+ 
+    # Las Palmas
+    "las palmas":                   "Las Palmas",
+    "ud las palmas":                "Las Palmas",
+ 
+    # Mallorca
+    "mallorca":                     "Mallorca",
+    "rcd mallorca":                 "Mallorca",
+ 
+    # Rayo Vallecano
+    "rayo vallecano":               "Rayo Vallecano",
+ 
+    # Almería
+    "almeria":                      "Almería",
+    "ud almeria":                   "Almería",
+ 
+    # Espanyol
+    "espanyol":                     "Espanyol",
+    "espanyol barcelona":           "Espanyol",
+    "rcd espanyol":                 "Espanyol",
+ 
+ 
+    # ── Champions League — Transfermarkt → SofaScore ─────────────────────────
+    # Estos aliases mapean los nombres en español de Transfermarkt
+    # al nombre canónico de SofaScore
+ 
+    "1 fc union berlin":            "1. FC Union Berlin",   # TM: 1.FC Unión Berlín
+    "ac milan":                     "Milan",                # TM: AC Milan
+    "ac sparta praga":              "AC Sparta Praha",      # TM: AC Sparta Praga
+    "ajax de amsterdam":            "AFC Ajax",             # TM: Ajax de Ámsterdam
+    "as monaco":                    "AS Monaco",            # TM: AS Mónaco
+    "basaksehir fk":                "Başakşehir FK",        # TM: Basaksehir FK
+    "bayern munich":                "FC Bayern München",    # TM: Bayern Múnich
+    "besiktas jk":                  "Beşiktaş JK",         # TM: Besiktas JK
+    "club brujas kv":               "Club Brugge KV",       # TM: Club Brujas KV
+    "estrella roja de belgrado":    "FK Crvena zvezda",     # TM: Estrella Roja de Belgrado
+    "fc copenhague":                "FC København",         # TM: FC Copenhague
+    "fc dinamo de kiev":            "Dynamo Kyiv",          # TM: FC Dinamo de Kiev
+    "fc oporto":                    "FC Porto",             # TM: FC Oporto
+    "fc sheriff tiraspol":          "Sheriff Tiraspol",     # TM: FC Sheriff Tiraspol
+    "fc viktoria plzen":            "FC Viktoria Plzeň",    # TM: FC Viktoria Plzen
+    "fk krasnodar":                 "FC Krasnodar",         # TM: FK Krasnodar
+    "lokomotiv moscu":              "Lokomotiv Moscow",     # TM: Lokomotiv Moscú
+    "malmoe ff":                    "Malmö FF",             # TM: Malmoe FF
+    "olympiacos el pireo":          "Olympiacos FC",        # TM: Olympiacos El Pireo
+    "olympique de marsella":        "Olympique de Marseille", # TM: Olympique de Marsella
+    "paris saint germain fc":       "Paris Saint-Germain",  # TM: París Saint-Germain FC
+    "rangers fc":                   "Rangers",              # TM: Rangers FC
+    "red bull salzburgo":           "Red Bull Salzburg",    # TM: Red Bull Salzburgo
+    "royal amberes fc":             "Royal Antwerp FC",     # TM: Royal Amberes FC
+    "sc braga":                     "Sporting Braga",       # TM: SC Braga
+    "slovan bratislava":            "ŠK Slovan Bratislava", # TM: Slovan Bratislava
+    "sporting de lisboa":           "Sporting CP",          # TM: Sporting de Lisboa
+    "stade brestois 29":            "Dynamo Brest",         # TM: Stade Brestois 29
+    "stade rennais fc":             "Stade Rennais",        # TM: Stade Rennais FC
+    "vfl wolfsburgo":               "VfL Wolfsburg",        # TM: VfL Wolfsburgo
+    "zenit de san petersburgo":     "Zenit St. Petersburg", # TM: Zenit de San Petersburgo
+    "bolonia":                      "Bologna",              # TM: Bolonia
+    "atalanta de bergamo":          "Atalanta",             # TM: Atalanta de Bérgamo
+    "inter de milan":               "Inter",                # TM: Inter de Milán
+    "juventus de turin":            "Juventus",             # TM: Juventus de Turín
+    "ss lazio":                     "Lazio",                # TM: SS Lazio
+    "losc lille":                   "Lille",                # TM: LOSC Lille
+    "manchester city":              "Manchester City",
+    "manchester united":            "Manchester United",
+    "liverpool fc":                 "Liverpool",            # TM: Liverpool FC
+    "chelsea fc":                   "Chelsea",              # TM: Chelsea FC
+    "arsenal fc":                   "Arsenal",              # TM: Arsenal FC
+    "tottenham hotspur":            "Tottenham Hotspur",
+    "newcastle united":             "Newcastle United",
+    "bayer 04 leverkusen":          "Bayer 04 Leverkusen",
+    "borussia monchengladbach":     "Borussia M'gladbach",  # TM: Borussia Mönchengladbach
+    "eintracht francfort":          "Eintracht Frankfurt",  # TM: Eintracht Fráncfort
+    "celtic fc":                    "Celtic",               # TM: Celtic FC
+    "sl benfica":                   "Benfica",              # TM: SL Benfica
+    "psv eindhoven":                "PSV Eindhoven",
+    "rb leipzig":                   "RB Leipzig",
+    "ssc napoles":                  "Napoli",               # TM: SSC Nápoles
+ 
+ 
+    # ── Champions League — WhoScored → SofaScore ──────────────────────────────
+    # Estos aliases mapean los nombres cortos de WhoScored
+    # al nombre canónico de SofaScore
+ 
+    "ajax":                         "AFC Ajax",             # WS: Ajax
+    "arsenal":                      "Arsenal",              # WS: Arsenal
+    "atalanta":                     "Atalanta",             # WS: Atalanta
+    "bayern":                       "FC Bayern München",    # WS: Bayern
+    "benfica":                      "Benfica",              # WS: Benfica
+    "bodoe glimt":                  "Bodø/Glimt",           # WS: Bodoe/Glimt
+    "borussia m gladbach":          "Borussia M'gladbach",  # WS: Borussia M.Gladbach
+    "brest":                        "Dynamo Brest",         # WS: Brest
+    "celtic":                       "Celtic",               # WS: Celtic
+    "chelsea":                      "Chelsea",              # WS: Chelsea
+    "club brugge":                  "Club Brugge KV",       # WS: Club Brugge
+    "copenhagen":                   "FC København",         # WS: Copenhagen
+    "eintracht frankfurt":          "Eintracht Frankfurt",  # WS: Eintracht Frankfurt
+    "inter":                        "Inter",                # WS: Inter
+    "juventus":                     "Juventus",             # WS: Juventus
+    "lazio":                        "Lazio",                # WS: Lazio
+    "leverkusen":                   "Bayer 04 Leverkusen",  # WS: Leverkusen
+    "lille":                        "Lille",                # WS: Lille
+    "liverpool":                    "Liverpool",            # WS: Liverpool
+    "man city":                     "Manchester City",      # WS: Man City
+    "man utd":                      "Manchester United",    # WS: Man Utd
+    "monaco":                       "AS Monaco",            # WS: Monaco
+    "napoli":                       "Napoli",               # WS: Napoli
+    "newcastle":                    "Newcastle United",     # WS: Newcastle
+    "olympiacos":                   "Olympiacos FC",        # WS: Olympiacos
+    "porto":                        "FC Porto",             # WS: Porto
+    "psg":                          "Paris Saint-Germain",  # WS: PSG
+    "psv":                          "PSV Eindhoven",        # WS: PSV
+    "rbl":                          "RB Leipzig",           # WS: RBL
+    "salzburg":                     "Red Bull Salzburg",    # WS: Salzburg
+    "sporting":                     "Sporting CP",          # WS: Sporting
+    "tottenham":                    "Tottenham Hotspur",    # WS: Tottenham
+    "qarabag fk":                   "Qarabağ FK",           # WS: Qarabag FK
+    "qarabag":                      "Qarabağ FK",           # WS: Qarabag
+ 
 }
-
+ 
 
 # â”€â”€ FunciÃ³n principal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
