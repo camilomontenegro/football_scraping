@@ -90,7 +90,7 @@ def check_existing_data(competition: str, season: str, source: str = None) -> di
     
     Args:
         competition: Nombre de la competición (ej: "La Liga")
-        season: Temporada en formato "2024/25"
+        season: Temporada en formato "2024/2025"
         source: Fuente específica a verificar (None = todas)
     
     Returns:
@@ -104,159 +104,58 @@ def check_existing_data(competition: str, season: str, source: str = None) -> di
         "competition": competition,
         "season": season,
         "season_start_year": season_start,
-        "sources": {},
-        "has_any_data": False,
+        "has_data": False,
     }
     
-    # Obtener ID de competición en la DB
-    comp_config = get_competition(competition)
-    if not comp_config:
-        result["error"] = f"Competición '{competition}' no encontrada"
-        return result
+    # Determinar si es La Liga (caso especial)
+    is_la_liga = competition.lower() in ["la liga", "laliga", "liga"]
     
-    db_comp_id = comp_config.get("db_id")
-    
-    sources_to_check = [source] if source else ["understat", "sofascore", "transfermarkt", "statsbomb", "whoscored"]
+    # Convertir "2024/2025" -> "24/25" y "LaLiga 24/25"
+    parts = season.split("/")
+    season_short = parts[0][-2:] + "/" + parts[1][-2:]
+    db_competition = "LaLiga" if is_la_liga else competition
+    db_season = f"{db_competition} {season_short}"
     
     with engine.connect() as conn:
-        for src in sources_to_check:
-            try:
-                src_config = get_source_config(competition, src)
-            except ValueError:
-                result["sources"][src] = {"available": False, "error": "Fuente no disponible para esta competición"}
-                continue
-            
-            source_info = {
-                "available": True,
-                "has_data": False,
-                "tables": {},
-            }
-            
-            # Verificar cada tabla según la fuente
-            # ARQUITECTURA DE DATOS:
-            # - Transfermarkt: Players + Injuries (todas las competiciones)
-            # - Sofascore: Matches + Events (base para La Liga, base para otras)
-            # - Understat: Shots para La Liga, shots complemento para otras
-            # - WhoScored: Events para otras competiciones (con Sofascore base)
-            # - StatsBomb: No usado actualmente
-            
-            # Determinar si es La Liga (caso especial)
-            is_la_liga = competition.lower() in ["la liga", "laliga", "liga"]
-            
-            # El usuario pasa "2024/2025" pero la DB usa formatos diferentes:
-            # - fact_injuries: "24/25"
-            # - dim_match: "LaLiga 24/25" o "La Liga 24/25"
-            # Convertir "2024/2025" -> "24/25"
-            # "2024/2025" -> tomar los últimos 2 dígitos de cada año: "24/25"
-            parts = season.split("/")
-            season_short = parts[0][-2:] + "/" + parts[1][-2:]  # "2024/2025" -> "24/25"
-            
-            # El competition en la DB puede ser "LaLiga" o "La Liga"
-            db_competition = "LaLiga" if is_la_liga else competition
-            db_season = f"{db_competition} {season_short}"  # ej: "LaLiga 24/25"
-            
-            if src == "understat":
-                if is_la_liga:
-                    # La Liga: shots de understat
-                    tables_to_check = {
-                        "fact_shots": f"""SELECT COUNT(*) FROM fact_shots f 
-                            JOIN dim_match m ON f.match_id = m.match_id 
-                            WHERE f.data_source = 'understat' AND m.season = '{db_season}'""",
-                    }
-                    # Query para última fecha
-                    progress_query = f"""SELECT MAX(m.match_date), COUNT(DISTINCT m.match_id)
-                        FROM fact_shots f 
-                        JOIN dim_match m ON f.match_id = m.match_id 
-                        WHERE f.data_source = 'understat' AND m.season = '{db_season}'"""
-                else:
-                    # Otras: shots como complemento
-                    tables_to_check = {
-                        "fact_shots": f"""SELECT COUNT(*) FROM fact_shots f 
-                            JOIN dim_match m ON f.match_id = m.match_id 
-                            WHERE f.data_source = 'understat' AND m.season = '{db_season}'""",
-                    }
-                    progress_query = f"""SELECT MAX(m.match_date), COUNT(DISTINCT m.match_id)
-                        FROM fact_shots f 
-                        JOIN dim_match m ON f.match_id = m.match_id 
-                        WHERE f.data_source = 'understat' AND m.season = '{db_season}'"""
-            elif src == "sofascore":
-                # SofaScore: BASE - Matches, Teams, Players
-                tables_to_check = {
-                    "dim_match": f"SELECT COUNT(*) FROM dim_match WHERE data_source = 'sofascore' AND season = '{db_season}'",
-                    "dim_team": "SELECT COUNT(*) FROM dim_team WHERE id_sofascore IS NOT NULL",
-                    "dim_player": "SELECT COUNT(*) FROM dim_player WHERE id_sofascore IS NOT NULL",
-                    "fact_shots": f"""SELECT COUNT(*) FROM fact_shots f 
-                        JOIN dim_match m ON f.match_id = m.match_id 
-                        WHERE m.data_source = 'sofascore' AND m.season = '{db_season}'""",
-                    "fact_events": f"""SELECT COUNT(*) FROM fact_events e 
-                        JOIN dim_match m ON e.match_id = m.match_id 
-                        WHERE m.data_source = 'sofascore' AND m.season = '{db_season}'""",
-                }
-                # Query para última fecha
-                progress_query = f"""SELECT MAX(match_date), COUNT(*)
-                    FROM dim_match 
-                    WHERE data_source = 'sofascore' AND season = '{db_season}'"""
-            elif src == "transfermarkt":
-                # Transfermarkt: Players + Injuries (universal)
-                tables_to_check = {
-                    "dim_player": "SELECT COUNT(*) FROM dim_player WHERE id_transfermarkt IS NOT NULL",
-                    "fact_injuries": f"SELECT COUNT(*) FROM fact_injuries WHERE season = '{season_short}'",
-                }
-                # Query para última fecha de injuries
-                progress_query = f"""SELECT MAX(date_from), COUNT(*)
-                    FROM fact_injuries 
-                    WHERE season = '{season_short}'"""
-            elif src == "statsbomb":
-                # StatsBomb: No usado actualmente
-                tables_to_check = {}
-                progress_query = None
-            elif src == "whoscored":
-                if is_la_liga:
-                    # La Liga: WhoScored no se usa (events de sofascore)
-                    tables_to_check = {}
-                    progress_query = None
-                else:
-                    # Otras: Events (con Sofascore como base para matches)
-                    tables_to_check = {
-                        "dim_player": "SELECT COUNT(*) FROM dim_player WHERE id_whoscored IS NOT NULL",
-                        "fact_events": f"""SELECT COUNT(*) FROM fact_events e 
-                            JOIN dim_match m ON e.match_id = m.match_id 
-                            WHERE m.data_source = 'whoscored' AND m.season = '{db_season}'""",
-                    }
-                    # Query para última fecha
-                    progress_query = f"""SELECT MAX(m.match_date), COUNT(DISTINCT m.match_id)
-                        FROM fact_events e 
-                        JOIN dim_match m ON e.match_id = m.match_id 
-                        WHERE m.data_source = 'whoscored' AND m.season = '{db_season}'"""
-            else:
-                tables_to_check = {}
-                progress_query = None
-            
-            total_records = 0
-            for table, query in tables_to_check.items():
-                try:
-                    row = conn.execute(text(query)).fetchone()
-                    count = row[0] if row else 0
-                    source_info["tables"][table] = count
-                    total_records += count
-                except Exception as e:
-                    source_info["tables"][table] = f"Error: {str(e)[:30]}"
-            
-            # Ejecutar query de progreso (última fecha)
-            if progress_query:
-                try:
-                    row = conn.execute(text(progress_query)).fetchone()
-                    if row and row[0]:
-                        source_info["last_date"] = str(row[0])
-                        source_info["match_count"] = row[1] if len(row) > 1 else None
-                except Exception as e:
-                    source_info["progress_error"] = str(e)[:50]
-            
-            source_info["has_data"] = total_records > 0
-            if total_records > 0:
-                result["has_any_data"] = True
-            
-            result["sources"][src] = source_info
+        # Query simple: última fecha de partido en la DB
+        query = text("""
+            SELECT MAX(match_date), COUNT(*)
+            FROM dim_match 
+            WHERE season = :season
+        """)
+        row = conn.execute(query, {"season": db_season}).fetchone()
+        
+        result["last_match_date"] = str(row[0]) if row and row[0] else None
+        result["match_count"] = row[1] if row else 0
+        
+        # Total de shots
+        query = text("""
+            SELECT COUNT(*)
+            FROM fact_shots f 
+            JOIN dim_match m ON f.match_id = m.match_id 
+            WHERE m.season = :season
+        """)
+        result["shot_count"] = conn.execute(query, {"season": db_season}).fetchone()[0] or 0
+        
+        # Total de events
+        query = text("""
+            SELECT COUNT(*)
+            FROM fact_events e 
+            JOIN dim_match m ON e.match_id = m.match_id 
+            WHERE m.season = :season
+        """)
+        result["event_count"] = conn.execute(query, {"season": db_season}).fetchone()[0] or 0
+        
+        # Total de injuries (formato diferente: "24/25")
+        query = text("""
+            SELECT COUNT(*), MAX(date_from)
+            FROM fact_injuries 
+            WHERE season = :season
+        """)
+        row = conn.execute(query, {"season": season_short}).fetchone()
+        result["injury_count"] = row[0] if row else 0
+        
+        result["has_data"] = result["match_count"] > 0 or result["shot_count"] > 0 or result["event_count"] > 0
     
     return result
 
@@ -274,33 +173,15 @@ def print_data_check(check_result: dict):
         print("\n" + "=" * 60)
         return
     
-    for source, info in check_result["sources"].items():
-        status = "[OK]" if info.get("has_data") else "[EMPTY]"
-        available = "[*]" if info.get("available") else "[-]"
-        
-        print(f"\n{available} {source.upper()}:")
-        if not info.get("available"):
-            print(f"   {info.get('error', 'No disponible')}")
-            continue
-        
-        print(f"   {status} {'Tiene datos' if info.get('has_data') else 'Sin datos'}")
-        
-        # Mostrar ultima fecha de datos (progreso)
-        if info.get("last_date"):
-            match_count = info.get("match_count")
-            if match_count:
-                print(f"      -> Hasta: {info['last_date']} ({match_count:,} partidos)")
-            else:
-                print(f"      -> Hasta: {info['last_date']}")
-        
-        # Mostrar tablas y registros
-        tables = info.get("tables", {})
-        if tables:
-            for table, count in tables.items():
-                if isinstance(count, int):
-                    print(f"      {table}: {count:,} registros")
-                else:
-                    print(f"      {table}: {count}")
+    # Mostrar resumen simple
+    if check_result.get("has_data"):
+        print(f"\n  Ultimo partido: {check_result.get('last_match_date', 'N/A')}")
+        print(f"  Partidos: {check_result.get('match_count', 0):,}")
+        print(f"  Shots: {check_result.get('shot_count', 0):,}")
+        print(f"  Events: {check_result.get('event_count', 0):,}")
+        print(f"  Injuries: {check_result.get('injury_count', 0):,}")
+    else:
+        print("\n  Sin datos para esta competición/temporada")
     
     print("\n" + "=" * 60)
 
