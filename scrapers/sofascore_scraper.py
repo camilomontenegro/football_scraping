@@ -471,5 +471,30 @@ def main():
     print(f"\n Descarga de SofaScore completada")
 
 
+def main_with_args(tournament_id: int = None, season_name: str = None):
+    """Versión de main que acepta parámetros."""
+    if tournament_id is None:
+        tournament_id = TOURNAMENT_ID
+    if season_name is None:
+        season_name = SEASON_NAMES[0]
+    
+    print(f"[INFO] Scraping SofaScore - Tournament ID: {tournament_id}, Temporada: {season_name}")
+    scrape_sofascore(season_name=season_name, tournament_id=tournament_id)
+
+
 if __name__ == "__main__":
-    main()
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Scraper de SofaScore")
+    parser.add_argument("--tournament-id", "-t", type=int, default=None,
+                        help="ID del torneo en SofaScore (ej: 8 para La Liga)")
+    parser.add_argument("--season", "-s", type=str, default=None,
+                        help="Temporada a scrapear (ej: 2024/2025)")
+    
+    args = parser.parse_args()
+    
+    # Usar valores por defecto si no se especifican
+    tournament_id = args.tournament_id if args.tournament_id else TOURNAMENT_ID
+    season_name = args.season if args.season else SEASON_NAMES[0]
+    
+    scrape_sofascore(season_name=season_name, tournament_id=tournament_id)

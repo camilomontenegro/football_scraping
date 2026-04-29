@@ -515,5 +515,30 @@ def main():
     print(f"\nðŸŽ‰ Descarga de Transfermarkt completada")
 
 
+def main_with_args(league_code: str = None, season: int = None):
+    """Versión de main que acepta parámetros."""
+    if league_code is None:
+        league_code = LEAGUE_CODE
+    if season is None:
+        season = SEASONS[0]
+    
+    print(f"[INFO] Scraping Transfermarkt - Liga: {league_code}, Temporada: {season}")
+    scrape_transfermarkt(league_code=league_code, season=season)
+
+
 if __name__ == "__main__":
-    main()
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Scraper de Transfermarkt")
+    parser.add_argument("--league-code", "-l", type=str, default=None,
+                        help="Código de la liga en Transfermarkt (ej: ES1, GB1, L1)")
+    parser.add_argument("--season", "-s", type=int, default=None,
+                        help="Año de inicio de temporada (ej: 2020 para 20/21)")
+    
+    args = parser.parse_args()
+    
+    # Usar valores por defecto si no se especifican
+    league_code = args.league_code if args.league_code else LEAGUE_CODE
+    season = args.season if args.season else SEASONS[0]
+    
+    scrape_transfermarkt(league_code=league_code, season=season)

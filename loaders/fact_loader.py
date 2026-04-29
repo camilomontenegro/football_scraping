@@ -289,19 +289,19 @@ def _load_events_source(conn, source: str, file_pattern: str, files_dir: Path) -
     mid_col = {
         "sofascore": "match_id_ss",
         "statsbomb": "match_id_sb",
-        "whoscored": "match_id_ws",
+        "whoscored": "whoscored_match_id",
     }.get(source, "match_id_ss")
 
     pid_col = {
         "sofascore": "player_id_ss",
         "statsbomb": "player_id_sb",
-        "whoscored": "player_id_ws",
+        "whoscored": "whoscored_player_id",
     }.get(source, "player_id_ss")
 
     tid_col = {
         "sofascore": "team_id_ss",
         "statsbomb": "team_id_sb",
-        "whoscored": None,          # WhoScored no tiene team_id en events
+        "whoscored": "whoscored_team_id",          # WhoScored no tiene team_id en events
     }.get(source)
 
     count = skipped = 0
@@ -373,7 +373,10 @@ def load_events(conn) -> int:
 def load_injuries(conn) -> int:
     """Carga fact_injuries desde injuries_clean.json de Transfermarkt."""
     log.info("[START] Cargando fact_injuries...")
-    files = list(RAW_TM.glob("**/injuries_clean.csv"))
+    #
+    files = list((RAW_TM / "champions").glob("**/transfermarkt_champions_injuries.csv"))
+
+    # files = list(RAW_TM.glob("**/injuries_clean.csv"))
     if not files:
         log.warning("fact_injuries: no hay injuries_clean.csv en %s", RAW_TM)
         return 0
@@ -388,12 +391,14 @@ def load_injuries(conn) -> int:
 
     count = skipped = 0
     for row in all_rows:
+        # cambio player_id_tm por player_id
         # Usar player_id_tm como parte del nombre del savepoint para depuración
-        sp_name = f"injury_{_safe_int(row.get('player_id_tm'))}_{count}"
+        sp_name = f"injury_{_safe_int(row.get('player_id'))}_{count}"
         conn.execute(text(f"SAVEPOINT {sp_name}"))
         
         try:
-            pid = _player_id_by_source(conn, "transfermarkt", _safe_int(row.get("player_id_tm")))
+            # cambio player_id_tm por player_id
+            pid = _player_id_by_source(conn, "transfermarkt", _safe_int(row.get("player_id")))
 
             if not pid:
                 conn.execute(text(f"RELEASE SAVEPOINT {sp_name}"))
@@ -436,6 +441,6 @@ def load_injuries(conn) -> int:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s - %(message)s")
     with engine.begin() as conn:
-        load_shots(conn)
-        load_events(conn)
+        #load_shots(conn)
+        #load_events(conn)
         load_injuries(conn)

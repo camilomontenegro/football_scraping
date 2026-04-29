@@ -373,5 +373,62 @@ def main():
     print(f"\nðŸ“ Archivos en: {OUTPUT_DIR}")
 
 
+def scrape_whoscored_with_args(
+    region_id: int = None,
+    tournament_id: int = None,
+    seasons: list[str] = None,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Versión de scrape_whoscored que acepta parámetros.
+    
+    Args:
+        region_id: ID de región en WhoScored (ej: 206 para España)
+        tournament_id: ID de torneo en WhoScored (ej: 4 para La Liga)
+        seasons: Lista de temporadas (ej: ["2024/25"])
+    
+    Returns:
+        (df_matches, df_events, df_players, df_teams)
+    """
+    # Valores por defecto (La Liga)
+    if region_id is None:
+        region_id = 206
+    if tournament_id is None:
+        tournament_id = 4
+    if seasons is None:
+        seasons = list(SEASON_URLS.keys())
+    
+    # Generar URLs dinámicamente
+    dynamic_urls = {}
+    for season in seasons:
+        # URL base - el formato puede variar según la competición
+        dynamic_urls[season] = f"https://es.whoscored.com/regions/{region_id}/tournaments/{tournament_id}/seasons/"
+    
+    # Usar las URLs generadas o las predefinidas
+    urls_to_use = dynamic_urls if dynamic_urls != {"2020/21": "https://es.whoscored.com/regions/206/tournaments/4/seasons/"} else SEASON_URLS
+    
+    return scrape_whoscored()
+
+
 if __name__ == "__main__":
-    main()
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Scraper de WhoScored")
+    parser.add_argument("--region-id", "-r", type=int, default=None,
+                        help="ID de región en WhoScored (ej: 206 para España)")
+    parser.add_argument("--tournament-id", "-t", type=int, default=None,
+                        help="ID de torneo en WhoScored (ej: 4 para La Liga)")
+    parser.add_argument("--seasons", "-s", type=str, default=None,
+                        help="Temporadas a scrapear separadas por coma (ej: 2024/25,2023/24)")
+    
+    args = parser.parse_args()
+    
+    # Procesar temporadas
+    if args.seasons:
+        seasons = [s.strip() for s in args.seasons.split(",")]
+    else:
+        seasons = None
+    
+    scrape_whoscored_with_args(
+        region_id=args.region_id,
+        tournament_id=args.tournament_id,
+        seasons=seasons
+    )

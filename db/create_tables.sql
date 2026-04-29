@@ -6,6 +6,7 @@
 -- DIMENSIONES
 -- ══════════════════════════════════════════════════════════
 
+
 -- ── dim_team ──────────────────────────────────────────────
 CREATE TABLE dim_team (
     canonical_id SERIAL PRIMARY KEY,
@@ -98,6 +99,34 @@ CREATE INDEX IF NOT EXISTS idx_player_review_unresolved ON player_review (resolv
 WHERE
     resolved IS FALSE;
 
+
+-- ── dim_competition ────────────────────────────────────────────
+CREATE TABLE dim_competition(
+    canonical_id SERIAL PRIMARY KEY,
+    canonical_name VARCHAR(150) NOT NULL,
+    id_sofascore INTEGER,
+    id_understat INTEGER,
+    id_transfermarkt INTEGER,
+    id_statsbomb VARCHAR(50),
+    id_whoscored INTEGER,
+    created_at TIMESTAMP DEFAULT NOW(),
+)
+-- garantiza que no haya dos competiciones con el mismo nombre
+CREATE UNIQUE INDEX idx_dim_competition_name_unique 
+ON dim_competition(canonical_name);
+
+
+CREATE UNIQUE INDEX idx_dim_competition_transfermarkt_unique  ON dim_competition(id_transfermarkt) 
+WHERE id_transfermarkt IS NOT NULL;
+
+CREATE UNIQUE INDEX idx_dim_competition_sofascore_unique ON dim_competition(id_sofascore) 
+WHERE id_sofascore IS NOT NULL;  
+
+CREATE UNIQUE INDEX idx_dim_competition_whoscored_unique
+ON dim_competition(id_whoscored) WHERE id_whoscored IS NOT NULL;
+
+
+
 -- ── dim_match ─────────────────────────────────────────────
 CREATE TABLE dim_match (
     match_id SERIAL PRIMARY KEY,
@@ -106,6 +135,7 @@ CREATE TABLE dim_match (
     season VARCHAR(20),
     home_team_id INTEGER REFERENCES dim_team (canonical_id),
     away_team_id INTEGER REFERENCES dim_team (canonical_id),
+    competition_id INTEGER REFERENDES dim_competition (canonical_id),
     home_score SMALLINT,
     away_score SMALLINT,
     data_source VARCHAR(50),
@@ -137,6 +167,10 @@ CREATE INDEX idx_match_away_team ON dim_match (away_team_id);
 
 CREATE INDEX idx_match_date ON dim_match (match_date);
 
+-- índice sobre la clave foránea para acelerar los JOINs
+CREATE INDEX idx_dim_match_competition_id ON dim_match(competition_id);
+
+
 -- ══════════════════════════════════════════════════════════
 -- HECHOS
 -- ══════════════════════════════════════════════════════════
@@ -148,9 +182,9 @@ CREATE TABLE fact_shots (
     player_id INTEGER NOT NULL REFERENCES dim_player (canonical_id),
     team_id INTEGER NOT NULL REFERENCES dim_team (canonical_id),
     minute SMALLINT,
-    x DECIMAL(6, 4),
-    y DECIMAL(6, 4),
-    xg DECIMAL(6, 4),
+    x DECIMAL(7, 4),
+    y DECIMAL(7, 4),
+    xg DECIMAL(7, 4),
     result VARCHAR(30),
     shot_type VARCHAR(30),
     situation VARCHAR(50),
@@ -181,10 +215,10 @@ CREATE TABLE fact_events (
     event_type VARCHAR(50),
     minute SMALLINT,
     second SMALLINT,
-    x DECIMAL(6, 4),
-    y DECIMAL(6, 4),
-    end_x DECIMAL(6, 4),
-    end_y DECIMAL(6, 4),
+    x DECIMAL(7, 4),
+    y DECIMAL(7, 4),
+    end_x DECIMAL(7, 4),
+    end_y DECIMAL(7, 4),
     outcome VARCHAR(50),
     data_source VARCHAR(30)
 );

@@ -414,5 +414,30 @@ def main():
     print(f"\n[DONE] Descarga de StatsBomb completada")
 
 
+def main_with_args(competition_id: int = None, season_id: int = None):
+    """Versión de main que acepta parámetros."""
+    if competition_id is None:
+        competition_id = COMPETITION_ID
+    if season_id is None:
+        season_id = SEASON_IDS[0]
+    
+    print(f"[INFO] Scraping StatsBomb - Competition ID: {competition_id}, Season ID: {season_id}")
+    scrape_statsbomb(competition_id=competition_id, season_id=season_id)
+
+
 if __name__ == "__main__":
-    main()
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Scraper de StatsBomb")
+    parser.add_argument("--competition-id", "-c", type=int, default=None,
+                        help="ID de la competición en StatsBomb (ej: 11 para La Liga)")
+    parser.add_argument("--season-id", "-s", type=int, default=None,
+                        help="ID de la temporada en StatsBomb (ej: 90 para 2020/21)")
+    
+    args = parser.parse_args()
+    
+    # Usar valores por defecto si no se especifican
+    competition_id = args.competition_id if args.competition_id else COMPETITION_ID
+    season_id = args.season_id if args.season_id else SEASON_IDS[0]
+    
+    scrape_statsbomb(competition_id=competition_id, season_id=season_id)
