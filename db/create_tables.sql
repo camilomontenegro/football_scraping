@@ -105,7 +105,7 @@ CREATE TABLE dim_competition(
     canonical_id SERIAL PRIMARY KEY,
     canonical_name VARCHAR(150) NOT NULL,
     id_sofascore INTEGER,
-    id_understat INTEGER,
+    id_understat VARCHAR(50),
     # problema TF usa  string como codigo para las competiciones 
     id_transfermarkt INTEGER,
     id_statsbomb VARCHAR(50),

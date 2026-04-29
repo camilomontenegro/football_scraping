@@ -7,9 +7,11 @@ CREATE TABLE dim_competition (
     canonical_id      SERIAL PRIMARY KEY,
     canonical_name    VARCHAR(150) NOT NULL,
     id_sofascore      INTEGER,
-    id_understat      INTEGER,
-    id_transfermarkt  INTEGER,
-    id_statsbomb      VARCHAR(50),
+    --el 'id' de understat en la pagina no es numerico, sino texto
+    --lo mismo ocurre en transfermarkt 
+    id_understat      VARCHAR(50)
+    id_transfermarkt  VARCHAR(50),
+    id_statsbomb      INTEGER,
     id_whoscored      INTEGER,
     created_at        TIMESTAMP DEFAULT NOW()
 );
