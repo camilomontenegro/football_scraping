@@ -106,12 +106,12 @@ CREATE TABLE dim_competition(
     canonical_name VARCHAR(150) NOT NULL,
     id_sofascore INTEGER,
     id_understat VARCHAR(50),
-    # problema TF usa  string como codigo para las competiciones 
+    -- problema TF usa  string como codigo para las competiciones
     id_transfermarkt INTEGER,
     id_statsbomb VARCHAR(50),
     id_whoscored INTEGER,
-    created_at TIMESTAMP DEFAULT NOW(),
-)
+    created_at TIMESTAMP DEFAULT NOW()
+);
 -- garantiza que no haya dos competiciones con el mismo nombre
 CREATE UNIQUE INDEX idx_dim_competition_name_unique 
 ON dim_competition(canonical_name);
@@ -136,7 +136,7 @@ CREATE TABLE dim_match (
     season VARCHAR(20),
     home_team_id INTEGER REFERENCES dim_team (canonical_id),
     away_team_id INTEGER REFERENCES dim_team (canonical_id),
-    competition_id INTEGER REFERENDES dim_competition (canonical_id),
+    competition_id INTEGER REFERENCES dim_competition (canonical_id),
     home_score SMALLINT,
     away_score SMALLINT,
     data_source VARCHAR(50),
