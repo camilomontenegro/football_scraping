@@ -1,36 +1,35 @@
 ﻿"""
 scrapers/sofascore_scraper.py
 ==============================
-Scraper unificado de SofaScore. Sigue el mismo patrÃ³n que understat_scraper.py:
+Scraper GENÉRICO de SofaScore — funciona para cualquier competición.
 
-    Estructura:
-        1. CONSTANTS       - configuraciÃ³n del scraper
-        2. HELPERS         - driver Selenium y peticiÃ³n JSON
-        3. FETCH           - funciones puras de obtenciÃ³n de datos
-        4. ORCHESTRATOR    - scrape_sofascore() acumula todo
-        5. TRANSFORM       - adapta campos al esquema de la DB
-        6. DIM EXTRACTORS  - extract_teams(), extract_players()
-        7. MAIN            - scrape -> transform -> guardar en disco
-        8. __main__ guard
+Uso:
+    python -m scrapers.sofascore_scraper --competition "La Liga"
+    python -m scrapers.sofascore_scraper --competition "Champions League"
+    python -m scrapers.sofascore_scraper --competition "Europa League"
+    python -m scrapers.sofascore_scraper --competition "La Liga" --seasons "LaLiga 23/24" "LaLiga 24/25"
 
-    Salida (data/raw/sofascore/):
-        season=<label>/
-            matches_batch_<id>.json          <- lista cruda de partidos
-            matches_clean.csv                <- dim_match (campos DB)
-            teams.csv                        <- dim_team  (campos DB)
-            players.csv                      <- dim_player (campos DB)
-            match_<id>/batch_id=<id>/
-                shots.json                   <- tiros crudos
-                events.json                  <- incidentes crudos
-                lineups.json                 <- alineaciones crudas
-                shots_clean.csv              <- fact_shots (campos DB)
-                events_clean.csv             <- fact_events (campos DB)
+La competición debe existir en scripts/competitions.py con fuente "sofascore".
 
-    Los loaders/ son los Ãºnicos que escriben en la DB.
+Estructura de salida (data/raw/<competition_slug>/sofascore/):
+    season=<label>/
+        matches_batch_<id>.json          <- lista cruda de partidos
+        matches_clean.csv                <- dim_match (campos DB)
+        teams.csv                        <- dim_team  (campos DB)
+        players.csv                      <- dim_player (campos DB)
+        match_<id>/batch_id=<id>/
+            shots.json                   <- tiros crudos
+            events.json                  <- incidentes crudos
+            lineups.json                 <- alineaciones crudas
+            shots_clean.csv              <- fact_shots (campos DB)
+            events_clean.csv             <- fact_events (campos DB)
+
+Los loaders/ son los únicos que escriben en la DB.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import re
@@ -49,19 +48,54 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 
+# ── Importar competitions.py (fuente única de verdad para IDs) ────────────────
+from scripts.competitions import get_competition
+
 log = logging.getLogger(__name__)
 
-# â”€â”€ CONSTANTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-TOURNAMENT_ID = 8                          # La Liga en SofaScore
-SEASON_NAMES  = ["LaLiga 20/21", "LaLiga 21/22", "LaLiga 22/23", "LaLiga 23/24", "LaLiga 24/25"]  # temporadas a scrapear
-DELAY_SEC     = 0.3                        # pausa entre peticiones
-PROJECT_ROOT  = Path(__file__).resolve().parent.parent
-OUTPUT_DIR    = PROJECT_ROOT / "data" / "raw" / "sofascore"
-# Note: mkdir() is called inside scrape_sofascore() to avoid side-effects on import
+# ══════════════════════════════════════════════════════════════════════════════
+# 1. CONSTANTS
+# ══════════════════════════════════════════════════════════════════════════════
+# NADA está hardcodeado aquí.
+# Todo se carga desde competitions.py .
+#
+# Ejemplo:
+#   --competition "La Liga"        → TOURNAMENT_ID=8,  slug="la_liga"
+#   --competition "Champions League" → TOURNAMENT_ID=7,  slug="champions_league"
+#   --competition "Europa League"  → TOURNAMENT_ID=679, slug="europa_league"
+
+def _load_config(competition_name: str) -> dict:
+    """
+    Carga la configuración de SofaScore para una competición desde competitions.py.
+    Lanza un error claro si la competición no existe o no tiene fuente sofascore.
+    """
+    comp = get_competition(competition_name)
+    if comp is None:
+        raise ValueError(
+            f"Competición '{competition_name}' no encontrada en competitions.py.\n"
+            f"Comprueba que el nombre coincide exactamente con la clave del diccionario."
+        )
+    source = comp["sources"].get("sofascore")
+    if source is None:
+        raise ValueError(
+            f"La competición '{competition_name}' no tiene configuración de SofaScore "
+            f"en competitions.py."
+        )
+    return {
+        "tournament_id": source["tournament_id"],
+        "comp_slug":     competition_name.lower().replace(" ", "_"),
+        "comp_name":     comp["name"],
+    }
 
 
-# â”€â”€ HELPERS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+DELAY_SEC    = 0.3   # pausa entre peticiones (SofaScore no bloquea agresivamente)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 2. HELPERS
+# ══════════════════════════════════════════════════════════════════════════════
 
 def create_driver(headless: bool = True) -> webdriver.Chrome:
     """Crea un Chrome controlado por Selenium.
@@ -87,7 +121,7 @@ def create_driver(headless: bool = True) -> webdriver.Chrome:
 def get_json(driver: webdriver.Chrome, url: str, timeout: float = 2) -> dict:
     """Navega a una URL de la API de SofaScore y devuelve el JSON parseado.
 
-    SofaScore usa una API REST pÃºblica que devuelve JSON directamente
+    SofaScore usa una API REST pública que devuelve JSON directamente
     en el body del navegador; no hay JS que renderizar.
     """
     driver.get(url)
@@ -101,20 +135,37 @@ def get_json(driver: webdriver.Chrome, url: str, timeout: float = 2) -> dict:
     return json.loads(driver.find_element("tag name", "body").text)
 
 
-# â”€â”€ FETCH FUNCTIONS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+def _save_json(data, path: Path) -> None:
+    """Guarda JSON en disco de forma segura."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def _ss_timestamp_to_date(ts) -> Optional[str]:
+    """Convierte un Unix timestamp de SofaScore a cadena YYYY-MM-DD."""
+    if not ts:
+        return None
+    from datetime import datetime, timezone
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 3. FETCH
+# ══════════════════════════════════════════════════════════════════════════════
 
 def get_season_id(driver: webdriver.Chrome, tournament_id: int, season_name: str) -> tuple[Optional[int], Optional[str]]:
     """Devuelve (season_id, season_label) para un nombre de temporada dado.
 
     Consulta el endpoint de temporadas del torneo y busca la que
-    contenga season_name en su nombre.
+    contenga season_name en su nombre (búsqueda parcial).
     """
     data = get_json(
         driver,
         f"https://api.sofascore.com/api/v1/unique-tournament/{tournament_id}/seasons",
     )
     for s in data.get("seasons", []):
-        if season_name in s["name"]:
+        if season_name in s.get("name", ""):
             return s["id"], s["name"]
     return None, None
 
@@ -122,8 +173,8 @@ def get_season_id(driver: webdriver.Chrome, tournament_id: int, season_name: str
 def get_matches(driver: webdriver.Chrome, tournament_id: int, season_id: int) -> list[dict]:
     """Devuelve todos los partidos de una temporada paginando el endpoint.
 
-    El endpoint devuelve hasta ~20 partidos por pÃ¡gina.
-    Navega hacia atrÃ¡s hasta agotar las pÃ¡ginas.
+    El endpoint devuelve hasta ~20 partidos por página.
+    Navega hacia atrás hasta agotar las páginas.
     """
     events = []
     page   = 0
@@ -158,46 +209,52 @@ def get_match_lineups(driver: webdriver.Chrome, match_id: int) -> dict:
     return get_json(driver, f"https://api.sofascore.com/api/v1/event/{match_id}/lineups")
 
 
-# â”€â”€ ORCHESTRATOR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ══════════════════════════════════════════════════════════════════════════════
+# 4. ORCHESTRATOR
+# ══════════════════════════════════════════════════════════════════════════════
 
 def scrape_sofascore(
-    season_name: str  = None,
-    tournament_id: int = TOURNAMENT_ID,
+    season_name:   str,
+    tournament_id: int,
+    output_dir:    Path,
 ) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
     """Orquestador principal: obtiene partidos, tiros, eventos y alineaciones.
 
     Args:
-        season_name: Nombre de la temporada (ej: "2020/2021"). Si es None, usa la primera.
-        tournament_id: ID del torneo en SofaScore.
+        season_name:   Nombre de la temporada tal como aparece en SofaScore
+                       (ej: "LaLiga 24/25", "Champions League 24/25")
+        tournament_id: ID del torneo en SofaScore (viene de competitions.py)
+        output_dir:    Carpeta raíz donde guardar los datos
+                       (ej: data/raw/la_liga/sofascore)
 
     Returns:
-        (matches, all_shots, all_events, all_lineups)
-        Cada elemento es una lista de dicts con los datos crudos de SofaScore.
+        (matches, all_shots, all_events, all_lineups) — datos crudos
     """
-    if season_name is None:
-        season_name = SEASON_NAMES[0]
-    
     from utils.batch import generate_batch_id
     batch_id = generate_batch_id()
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)  # crear directorio al scrapear, no al importar
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     driver = create_driver()
-    all_shots:    list[dict] = []
-    all_events:   list[dict] = []
-    all_lineups:  list[dict] = []
+    all_shots:   list[dict] = []
+    all_events:  list[dict] = []
+    all_lineups: list[dict] = []
 
     try:
         season_id, season_label = get_season_id(driver, tournament_id, season_name)
         if season_id is None:
-            raise ValueError(f"Temporada '{season_name}' no encontrada en SofaScore")
+            raise ValueError(
+                f"Temporada '{season_name}' no encontrada en SofaScore "
+                f"para tournament_id={tournament_id}.\n"
+                f"Comprueba el nombre exacto en la web de SofaScore."
+            )
 
         print(f"\n[SEASON] Temporada: {season_label}  (id={season_id})")
         matches = get_matches(driver, tournament_id, season_id)
         print(f"  [+] {len(matches)} partidos encontrados")
 
         # Directorio base para la temporada
-        base_path = OUTPUT_DIR / f"season={season_label}"
+        base_path = output_dir / f"season={season_label}"
         base_path.mkdir(parents=True, exist_ok=True)
 
         # Guardar partidos crudos
@@ -216,7 +273,6 @@ def scrape_sofascore(
             try:
                 shots_raw = get_match_shots(driver, match_id)
                 _save_json(shots_raw, match_dir / "shots.json")
-                # AÃ±adir contexto al registro crudo
                 for s in shots_raw.get("shotmap", []):
                     s["_match_id_ss"]     = match_id
                     s["_season_label"]    = season_label
@@ -251,28 +307,19 @@ def scrape_sofascore(
     return matches, all_shots, all_events, all_lineups
 
 
-# â”€â”€ TRANSFORM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ══════════════════════════════════════════════════════════════════════════════
+# 5. TRANSFORM
+# ══════════════════════════════════════════════════════════════════════════════
 
 def transform_matches(matches: list[dict]) -> pd.DataFrame:
-    """Adapta la lista cruda de partidos a las columnas de dim_match.
-
-    Columnas generadas:
-        id_sofascore, match_date, competition, season,
-        home_team_id_ss, away_team_id_ss,
-        home_team_name, away_team_name,
-        home_score, away_score, data_source
-    """
+    """Adapta la lista cruda de partidos a las columnas de dim_match."""
     rows = []
     for m in matches:
-        status = m.get("status", {})
-        score  = m.get("homeScore", {}), m.get("awayScore", {})
-
         rows.append({
             "id_sofascore":    m.get("id"),
             "match_date":      _ss_timestamp_to_date(m.get("startTimestamp")),
             "competition":     m.get("tournament", {}).get("name"),
             "season":          m.get("season", {}).get("name"),
-            # IDs de equipos en SofaScore (para cruzar con dim_team)
             "home_team_id_ss": m.get("homeTeam", {}).get("id"),
             "away_team_id_ss": m.get("awayTeam", {}).get("id"),
             "home_team_name":  m.get("homeTeam", {}).get("name"),
@@ -285,47 +332,35 @@ def transform_matches(matches: list[dict]) -> pd.DataFrame:
 
 
 def transform_shots(shots_raw: list[dict]) -> pd.DataFrame:
-    """Adapta los tiros crudos a las columnas de fact_shots.
-
-    Columnas generadas:
-        id_sofascore (match), player_id_ss, team_id_ss,
-        minute, x, y, xg, result, shot_type, situation, data_source
-    """
+    """Adapta los tiros crudos a las columnas de fact_shots."""
     rows = []
     for s in shots_raw:
         player = s.get("player", {})
         rows.append({
-            # Referencias a resolver por el loader en la DB
-            "match_id_ss":   s.get("_match_id_ss"),
-            "player_id_ss":   player.get("id"),
-            "player_name":    player.get("name"),
-            "team_id_ss":     s.get("teamId"),
-            # Campos de fact_shots
-            "minute":         s.get("time"),
-            "x":              s.get("playerCoordinates", {}).get("x"),
-            "y":              s.get("playerCoordinates", {}).get("y"),
-            "xg":             s.get("xg"),
-            "result":         s.get("shotType"),          # Goal, Miss, Save...
-            "shot_type":      s.get("bodyPart"),          # RightFoot, LeftFoot, Head
-            "situation":      s.get("situation"),         # OpenPlay, SetPiece...
-            "data_source":    "sofascore",
+            "match_id_ss":  s.get("_match_id_ss"),
+            "player_id_ss": player.get("id"),
+            "player_name":  player.get("name"),
+            "team_id_ss":   s.get("_home_team_id_ss") if s.get("isHome") else s.get("_away_team_id_ss"),
+            "minute":       s.get("time"),
+            "x":            s.get("playerCoordinates", {}).get("x"),
+            "y":            s.get("playerCoordinates", {}).get("y"),
+            "xg":           s.get("xg"),
+            "result":       s.get("shotType"),
+            "shot_type":    s.get("bodyPart"),
+            "situation":    s.get("situation"),
+            "data_source":  "sofascore",
         })
     df = pd.DataFrame(rows)
     if not df.empty:
-        df["x"]   = pd.to_numeric(df["x"],   errors="coerce").round(4)
-        df["y"]   = pd.to_numeric(df["y"],   errors="coerce").round(4)
-        df["xg"]  = pd.to_numeric(df["xg"],  errors="coerce").round(4)
+        df["x"]      = pd.to_numeric(df["x"],      errors="coerce").round(4)
+        df["y"]      = pd.to_numeric(df["y"],      errors="coerce").round(4)
+        df["xg"]     = pd.to_numeric(df["xg"],     errors="coerce").round(4)
         df["minute"] = pd.to_numeric(df["minute"], errors="coerce").astype("Int16")
     return df
 
 
 def transform_events(events_raw: list[dict]) -> pd.DataFrame:
-    """Adapta los incidentes crudos a las columnas de fact_events.
-
-    Columnas generadas:
-        match_id_ss, player_id_ss, player_name, team_id_ss,
-        event_type, minute, x, y, outcome, data_source
-    """
+    """Adapta los incidentes crudos a las columnas de fact_events."""
     rows = []
     for ev in events_raw:
         player = ev.get("player", {})
@@ -337,7 +372,7 @@ def transform_events(events_raw: list[dict]) -> pd.DataFrame:
             "team_id_ss":   ev.get("teamId"),
             "event_type":   ev.get("incidentType"),
             "minute":       ev.get("time"),
-            "second":       None,           # SofaScore no expone segundos en incidentes
+            "second":       None,
             "x":            point.get("x"),
             "y":            point.get("y"),
             "end_x":        None,
@@ -348,36 +383,33 @@ def transform_events(events_raw: list[dict]) -> pd.DataFrame:
     df = pd.DataFrame(rows)
     if not df.empty:
         df["minute"] = pd.to_numeric(df["minute"], errors="coerce").astype("Int16")
-        df["x"] = pd.to_numeric(df["x"], errors="coerce").round(4)
-        df["y"] = pd.to_numeric(df["y"], errors="coerce").round(4)
+        df["x"]      = pd.to_numeric(df["x"],      errors="coerce").round(4)
+        df["y"]      = pd.to_numeric(df["y"],      errors="coerce").round(4)
     return df
 
 
-# â”€â”€ DIM EXTRACTORS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ══════════════════════════════════════════════════════════════════════════════
+# 6. DIM EXTRACTORS
+# ══════════════════════════════════════════════════════════════════════════════
 
 def extract_teams(matches: list[dict]) -> pd.DataFrame:
-    """Extrae equipos Ãºnicos de la lista de partidos -> columnas de dim_team.
-
-    Columnas: id_sofascore, canonical_name
-    """
+    """Extrae equipos únicos de la lista de partidos -> columnas de dim_team."""
     teams = {}
     for m in matches:
         for side in ("homeTeam", "awayTeam"):
-            t = m.get(side, {})
+            t   = m.get(side, {})
             tid = t.get("id")
             if tid and tid not in teams:
                 teams[tid] = t.get("name")
-    df = pd.DataFrame(
-        [{"id_sofascore": k, "canonical_name": v} for k, v in teams.items()]
-    ).sort_values("id_sofascore").reset_index(drop=True)
-    return df
+    return (
+        pd.DataFrame([{"id_sofascore": k, "canonical_name": v} for k, v in teams.items()])
+        .sort_values("id_sofascore")
+        .reset_index(drop=True)
+    )
 
 
 def extract_players(shots_df: pd.DataFrame, events_df: pd.DataFrame) -> pd.DataFrame:
-    """Extrae jugadores Ãºnicos de tiros y eventos -> columnas de dim_player.
-
-    Columnas: id_sofascore, canonical_name
-    """
+    """Extrae jugadores únicos de tiros y eventos -> columnas de dim_player."""
     frames = []
     for df in (shots_df, events_df):
         if not df.empty and "player_id_ss" in df.columns:
@@ -396,80 +428,110 @@ def extract_players(shots_df: pd.DataFrame, events_df: pd.DataFrame) -> pd.DataF
     )
 
 
-# â”€â”€ HELPERS INTERNOS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-def _save_json(data, path: Path) -> None:
-    """Guarda JSON en disco de forma segura."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-
-def _ss_timestamp_to_date(ts) -> Optional[str]:
-    """Convierte un Unix timestamp de SofaScore a cadena YYYY-MM-DD."""
-    if not ts:
-        return None
-    from datetime import datetime, timezone
-    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
-
-
-# â”€â”€ MAIN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ══════════════════════════════════════════════════════════════════════════════
+# 7. MAIN
+# ══════════════════════════════════════════════════════════════════════════════
 
 def main():
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s - %(message)s")
 
-    print("=" * 55)
-    print(f"  SofaScore scraper - La Liga {SEASON_NAMES[0]} a {SEASON_NAMES[-1]}")
-    print("=" * 55)
+    # ── Argumentos por terminal ───────────────────────────────────────────────
+    # Aquí es donde recibimos --competition y --seasons cuando ejecutas el scraper.
+    # Si no pasas nada, usa "La Liga" por defecto.
+    parser = argparse.ArgumentParser(description="SofaScore scraper genérico")
+    parser.add_argument(
+        "--competition",
+        default="La Liga",
+        help='Nombre de la competición (debe existir en competitions.py). '
+             'Ejemplos: "La Liga", "Champions League", "Europa League"'
+    )
+    parser.add_argument(
+        "--seasons",
+        nargs="+",
+        default=None,
+        help='Temporadas a descargar tal como aparecen en SofaScore. '
+             'Ejemplos: "LaLiga 24/25" "LaLiga 23/24" o "Champions League 24/25"'
+    )
+    args = parser.parse_args()
 
-    for season_name in SEASON_NAMES:
-        print(f"\n[SEASON] Descargando temporada {season_name}...")
-        
+    # ── Cargar configuración desde scripts/competitions.py ────────────────────────────
+    # Esto reemplaza los TOURNAMENT_ID y OUTPUT_DIR hardcodeados de antes.
+    config       = _load_config(args.competition)
+    tournament_id = config["tournament_id"]
+    output_dir    = PROJECT_ROOT / "data" / "raw" / config["comp_slug"] / "sofascore"
+
+    # ── Temporadas ────────────────────────────────────────────────────────────
+    # Si no se pasan --seasons, avisa al usuario para que las especifique.
+    # No podemos asumir nombres de temporada porque cambian entre competiciones.
+    if args.seasons is None:
+        print(
+            f"\n[!] No especificaste --seasons.\n"
+            f"    Consulta los nombres exactos en SofaScore para '{args.competition}'\n"
+            f"    y pásalos así:\n"
+            f'    python -m scrapers.sofascore_scraper --competition "{args.competition}" '
+            f'--seasons "NombreTemporada 24/25"\n'
+        )
+        return
+
+    print("=" * 60)
+    print(f"  SofaScore scraper — {args.competition}")
+    print(f"  tournament_id : {tournament_id}")
+    print(f"  Temporadas    : {args.seasons}")
+    print(f"  Salida        : {output_dir}")
+    print("=" * 60)
+
+    # ── Bucle por temporadas ──────────────────────────────────────────────────
+    for season_name in args.seasons:
+        print(f"\n[SEASON] Descargando temporada '{season_name}'...")
+
         try:
-            matches, all_shots, all_events, _ = scrape_sofascore(season_name, TOURNAMENT_ID)
+            matches, all_shots, all_events, _ = scrape_sofascore(
+                season_name=season_name,
+                tournament_id=tournament_id,
+                output_dir=output_dir,
+            )
         except ValueError as e:
-            log.warning(f"Temporada {season_name} no disponible en SofaScore: {e}")
-            print(f"  [!] Temporada {season_name} no encontrada. Continuando...")
+            log.warning("Temporada '%s' no disponible: %s", season_name, e)
+            print(f"  [!] Temporada '{season_name}' no encontrada. Continuando...")
             continue
 
         if not matches:
-            print(f"  [!] No se obtuvieron partidos para {season_name}")
+            print(f"  [!] No se obtuvieron partidos para '{season_name}'")
             continue
 
-        print(f"  Temporada {season_name}:")
-        print(f"    Partidos: {len(matches)}")
-        print(f"    Tiros:    {len(all_shots)}")
-        print(f"    Eventos:  {len(all_events)}")
-
-        # Transformar
+        # ── Transformar ───────────────────────────────────────────────────────
         df_matches = transform_matches(matches)
         df_shots   = transform_shots(all_shots)
         df_events  = transform_events(all_events)
         df_teams   = extract_teams(matches)
         df_players = extract_players(df_shots, df_events)
 
-        # Guardar CSVs (capa de presentaciÃ³n para los loaders)
-        season_dir = OUTPUT_DIR / f"season={season_name.replace('/', '_')}"
+        # ── Guardar CSVs ──────────────────────────────────────────────────────
+        season_label = df_matches["season"].iloc[0] if not df_matches.empty else season_name
+        season_dir   = output_dir / f"season={season_label.replace('/', '_')}"
         season_dir.mkdir(parents=True, exist_ok=True)
 
-        paths = {
-            "matches": season_dir / "matches_clean.csv",
-            "shots":   season_dir / "shots_clean.csv",
-            "events":  season_dir / "events_clean.csv",
-            "teams":   season_dir / "teams.csv",
-            "players": season_dir / "players.csv",
-        }
+        df_matches.to_csv(season_dir / "matches_clean.csv", index=False, encoding="utf-8-sig")
+        df_shots.to_csv(  season_dir / "shots_clean.csv",   index=False, encoding="utf-8-sig")
+        df_events.to_csv( season_dir / "events_clean.csv",  index=False, encoding="utf-8-sig")
+        df_teams.to_csv(  season_dir / "teams.csv",         index=False, encoding="utf-8-sig")
+        df_players.to_csv(season_dir / "players.csv",       index=False, encoding="utf-8-sig")
 
-        df_matches.to_csv(paths["matches"], index=False, encoding="utf-8-sig")
-        df_shots.to_csv(  paths["shots"],   index=False, encoding="utf-8-sig")
-        df_events.to_csv( paths["events"],  index=False, encoding="utf-8-sig")
-        df_teams.to_csv(  paths["teams"],   index=False, encoding="utf-8-sig")
-        df_players.to_csv(paths["players"], index=False, encoding="utf-8-sig")
+        print(f"  Temporada '{season_name}':")
+        print(f"    Partidos:  {len(df_matches)}")
+        print(f"    Tiros:     {len(df_shots)}")
+        print(f"    Eventos:   {len(df_events)}")
+        print(f"    Equipos:   {len(df_teams)}")
+        print(f"    Jugadores: {len(df_players)}")
+        print(f"  Guardado en: {season_dir}")
 
-        print(f"Archivos guardados en {season_dir}")
+    print(f"\n SofaScore — {args.competition} completado")
+    print(f"   Directorio: {output_dir}")
 
-    print(f"\n Descarga de SofaScore completada")
 
+# ══════════════════════════════════════════════════════════════════════════════
+# 8. __main__ GUARD
+# ══════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     main()

@@ -341,8 +341,8 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Champions League",
             },
             "whoscored": {
-                "region_id": 2,
-                "tournament_id": 3,
+                "region_id": 250,
+                "tournament_id": 12,
                 "name": "Champions League",
             },
         },
@@ -370,8 +370,8 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Europa League",
             },
             "whoscored": {
-                "region_id": 2,
-                "tournament_id": 404,
+                "region_id": 250,
+                "tournament_id": 30,
                 "name": "Europa League",
             },
         },
