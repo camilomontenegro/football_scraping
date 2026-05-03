@@ -1,4 +1,4 @@
-﻿"""
+"""
 scrapers/statsbomb_scraper.py
 ===============================
 Scraper unificado de StatsBomb Open Data. Sigue el mismo patrÃ³n que understat_scraper.py:
@@ -123,6 +123,7 @@ def scrape_statsbomb(
     competition_id: int = COMPETITION_ID,
     season_id: int      = None,
     sleep_between: float = DELAY_SEC,
+    from_date: Optional[str] = None,
 ) -> tuple[pd.DataFrame, list[dict], list[dict]]:
     """Orquestador principal: descarga partidos, eventos y lineups.
 
@@ -130,6 +131,7 @@ def scrape_statsbomb(
         competition_id: ID de la competicion en StatsBomb (p.ej. 11 = La Liga)
         season_id:      ID de la temporada (p.ej. 90 = 2020/21). Si es None, usa la primera.
         sleep_between:  Pausa entre partidos en segundos
+        from_date:      Fecha mínima para partidos (formato YYYY-MM-DD)
 
     Returns:
         (matches_df, all_events, all_lineups) where:
@@ -139,6 +141,13 @@ def scrape_statsbomb(
     """
     if season_id is None:
         season_id = SEASON_IDS[0]
+    
+    # Parse from_date if provided
+    from_date_obj = None
+    if from_date:
+        from datetime import datetime
+        from_date_obj = datetime.strptime(from_date, "%Y-%m-%d").date()
+        log.info("Filtrando partidos desde: %s", from_date_obj)
     
     from utils.batch import generate_batch_id
     batch_id = generate_batch_id()
@@ -154,6 +163,13 @@ def scrape_statsbomb(
     if matches_df.empty:
         log.warning("Sin partidos para competition=%d season=%d", competition_id, season_id)
         return pd.DataFrame(), [], []
+
+    # Filter by from_date if provided
+    if from_date_obj and "match_date" in matches_df.columns:
+        matches_df = matches_df[matches_df["match_date"] >= from_date_obj]
+        log.info("Filtrados %d partidos desde %s", len(matches_df), from_date_obj)
+    elif from_date_obj:
+        log.warning("Columna 'match_date' no encontrada, sin filtrar por fecha")
 
     print(f"  [OK] {len(matches_df)} partidos encontrados")
 
@@ -412,17 +428,6 @@ def main():
         print(f"  [OK] Archivos guardados en {season_dir}")
 
     print(f"\n[DONE] Descarga de StatsBomb completada")
-
-
-def main_with_args(competition_id: int = None, season_id: int = None):
-    """Versión de main que acepta parámetros."""
-    if competition_id is None:
-        competition_id = COMPETITION_ID
-    if season_id is None:
-        season_id = SEASON_IDS[0]
-    
-    print(f"[INFO] Scraping StatsBomb - Competition ID: {competition_id}, Season ID: {season_id}")
-    scrape_statsbomb(competition_id=competition_id, season_id=season_id)
 
 
 if __name__ == "__main__":

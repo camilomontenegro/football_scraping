@@ -148,8 +148,8 @@ def _load_from_sofascore(conn) -> int:
 def _load_from_transfermarkt(conn) -> int:
     """Lee players_clean.csv de TM → añade country e id_transfermarkt a dim_team."""
     
-    #files = list(RAW_TM.glob("**/players_clean.csv"))
-    files = list((RAW_TM / "champions").glob("**/transfermarkt_champions_teams.csv"))
+    # Buscar cualquier archivo de equipos de Transfermarkt (ej. transfermarkt_teams.csv o players_clean.csv si contenía info)
+    files = list(RAW_TM.glob("**/*teams*.csv")) + list(RAW_TM.glob("**/players_clean.csv"))
 
     if not files:
         log.info("team_loader: no hay players_clean.csv de TM")
@@ -254,19 +254,17 @@ def _load_from_statsbomb(conn) -> int:
 
 def _load_from_whoscored(conn) -> int:
 
-    """Lee whoscored_teams_laliga.csv → añade id_whoscored a dim_team."""
-    #f = RAW_WS / "whoscored_teams_laliga.csv"
-
-    f = RAW_WS / "champions" / "whoscored_champions_teams_.csv"
-
-    if not f.exists():
+    # Buscar cualquier archivo de equipos de WhoScored
+    files = list(RAW_WS.glob("**/*teams*.csv"))
+    if not files:
         log.info("team_loader: no hay whoscored_teams_laliga.csv")
         return 0
 
     try:
-        df = pd.read_csv(f)
+        dfs = [pd.read_csv(f) for f in files]
+        df = pd.concat(dfs, ignore_index=True)
     except Exception as e:
-        log.warning("Error leyendo %s: %s", f, e)
+        log.warning("Error leyendo archivos de WhoScored: %s", e)
         return 0
 
     count = 0
@@ -299,10 +297,10 @@ def load_teams(conn) -> int:
     """
     log.info("[START] Cargando dim_team...")
     total = 0
-    #total += _load_from_sofascore(conn)
+    total += _load_from_sofascore(conn)
     total += _load_from_transfermarkt(conn)
-    #total += _load_from_understat(conn)
-    #total += _load_from_statsbomb(conn)
+    total += _load_from_understat(conn)
+    total += _load_from_statsbomb(conn)
     total += _load_from_whoscored(conn)
     log.info("[OK] dim_team completado — %d registros procesados", total)
     return total

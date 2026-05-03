@@ -1,12 +1,12 @@
-﻿"""
+"""
 scrapers/sofascore_scraper.py
 ==============================
-Scraper unificado de SofaScore. Sigue el mismo patrÃ³n que understat_scraper.py:
+Scraper unificado de SofaScore. Sigue el mismo patron que understat_scraper.py:
 
     Estructura:
-        1. CONSTANTS       - configuraciÃ³n del scraper
-        2. HELPERS         - driver Selenium y peticiÃ³n JSON
-        3. FETCH           - funciones puras de obtenciÃ³n de datos
+        1. CONSTANTS       - configuracion del scraper
+        2. HELPERS         - driver Selenium y peticion JSON
+        3. FETCH           - funciones puras de obtencion de datos
         4. ORCHESTRATOR    - scrape_sofascore() acumula todo
         5. TRANSFORM       - adapta campos al esquema de la DB
         6. DIM EXTRACTORS  - extract_teams(), extract_players()
@@ -26,7 +26,7 @@ Scraper unificado de SofaScore. Sigue el mismo patrÃ³n que understat_scraper.p
                 shots_clean.csv              <- fact_shots (campos DB)
                 events_clean.csv             <- fact_events (campos DB)
 
-    Los loaders/ son los Ãºnicos que escriben en la DB.
+    Los loaders/ son los unicos que escriben en la DB.
 """
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ import logging
 import re
 import sys
 import time
+from datetime import datetime, date
 from pathlib import Path
 from typing import Optional, Dict
 
@@ -51,17 +52,16 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 log = logging.getLogger(__name__)
 
-# â”€â”€ CONSTANTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
+#CONSTANTS
 TOURNAMENT_ID = 8                          # La Liga en SofaScore
-SEASON_NAMES  = ["LaLiga 20/21", "LaLiga 21/22", "LaLiga 22/23", "LaLiga 23/24", "LaLiga 24/25"]  # temporadas a scrapear
+SEASON_NAMES  = ["LaLiga 20/21", "LaLiga 21/22", "LaLiga 22/23", "LaLiga 23/24", "LaLiga 24/25", "LaLiga 25/26"]  # temporadas a scrapear
 DELAY_SEC     = 0.3                        # pausa entre peticiones
 PROJECT_ROOT  = Path(__file__).resolve().parent.parent
 OUTPUT_DIR    = PROJECT_ROOT / "data" / "raw" / "sofascore"
 # Note: mkdir() is called inside scrape_sofascore() to avoid side-effects on import
 
 
-# â”€â”€ HELPERS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# HELPERS 
 
 def create_driver(headless: bool = True) -> webdriver.Chrome:
     """Crea un Chrome controlado por Selenium.
@@ -113,9 +113,15 @@ def get_season_id(driver: webdriver.Chrome, tournament_id: int, season_name: str
         driver,
         f"https://api.sofascore.com/api/v1/unique-tournament/{tournament_id}/seasons",
     )
+    possible_names = {season_name}
+    if re.match(r"^\d{4}/\d{4}$", season_name):
+        start_year, end_year = season_name.split("/")
+        possible_names.add(f"{start_year[-2:]}/{end_year[-2:]}")
+
     for s in data.get("seasons", []):
-        if season_name in s["name"]:
-            return s["id"], s["name"]
+        season_label = s.get("name", "")
+        if any(name in season_label for name in possible_names):
+            return s["id"], season_label
     return None, None
 
 
@@ -143,6 +149,21 @@ def get_matches(driver: webdriver.Chrome, tournament_id: int, season_id: int) ->
     return events
 
 
+def _get_match_date(match: dict) -> "date | None":
+    """Extrae la fecha de un partido de SofaScore."""
+    from datetime import date
+    # El campo puede ser "startDate" o "timestamp"
+    start_date = match.get("startDate") or match.get("start_date")
+    if start_date:
+        # Formato: "2025-05-25" o similar
+        return date.fromisoformat(start_date[:10])
+    timestamp = match.get("timestamp") or match.get("startTime")
+    if timestamp:
+        # Unix timestamp
+        return date.fromtimestamp(timestamp)
+    return None
+
+
 def get_match_shots(driver: webdriver.Chrome, match_id: int) -> dict:
     """Devuelve el JSON crudo del mapa de tiros de un partido."""
     return get_json(driver, f"https://api.sofascore.com/api/v1/event/{match_id}/shotmap")
@@ -158,17 +179,40 @@ def get_match_lineups(driver: webdriver.Chrome, match_id: int) -> dict:
     return get_json(driver, f"https://api.sofascore.com/api/v1/event/{match_id}/lineups")
 
 
-# â”€â”€ ORCHESTRATOR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+def get_scraped_sofascore_match_ids() -> set[int]:
+    """Obtiene los id_sofascore de los partidos que ya tienen eventos en la BBDD."""
+    try:
+        from sqlalchemy import text
+        from loaders.common import engine
+        query = """
+            SELECT DISTINCT m.id_sofascore
+            FROM dim_match m
+            JOIN fact_events e ON m.match_id = e.match_id
+            WHERE m.id_sofascore IS NOT NULL
+        """
+        with engine.connect() as conn:
+            rows = conn.execute(text(query)).fetchall()
+            return {int(r[0]) for r in rows}
+    except Exception as e:
+        log.warning("No se pudo consultar BBDD para cache de SofaScore: %s", e)
+        return set()
+
+
+# ── ORCHESTRATOR ──────────────────────────────────────────────────────────────
 
 def scrape_sofascore(
     season_name: str  = None,
     tournament_id: int = TOURNAMENT_ID,
+    from_date: str = None,
+    full_refresh: bool = False,
 ) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
     """Orquestador principal: obtiene partidos, tiros, eventos y alineaciones.
 
     Args:
         season_name: Nombre de la temporada (ej: "2020/2021"). Si es None, usa la primera.
         tournament_id: ID del torneo en SofaScore.
+        from_date: Fecha inicial (YYYY-MM-DD). Descarga solo partidos desde esta fecha.
+        full_refresh: Si es True, ignora la caché de la DB y descarga todo.
 
     Returns:
         (matches, all_shots, all_events, all_lineups)
@@ -176,6 +220,11 @@ def scrape_sofascore(
     """
     if season_name is None:
         season_name = SEASON_NAMES[0]
+    
+    from_date_obj = None
+    if from_date:
+        from_date_obj = datetime.strptime(from_date, "%Y-%m-%d").date()
+        print(f"\n[FILTER] Descargando solo partidos desde: {from_date}")
     
     from utils.batch import generate_batch_id
     batch_id = generate_batch_id()
@@ -196,17 +245,34 @@ def scrape_sofascore(
         matches = get_matches(driver, tournament_id, season_id)
         print(f"  [+] {len(matches)} partidos encontrados")
 
+        # Normalizar label para carpetas
+        folder_label = season_label.replace("/", "_")
+
         # Directorio base para la temporada
-        base_path = OUTPUT_DIR / f"season={season_label}"
+        base_path = OUTPUT_DIR / f"season={folder_label}"
         base_path.mkdir(parents=True, exist_ok=True)
 
         # Guardar partidos crudos
         _save_json(matches, base_path / f"matches_batch_{batch_id}.json")
 
+        # Filtrar por fecha si se especifica from_date
+        if from_date_obj:
+            matches = [m for m in matches if _get_match_date(m) and _get_match_date(m) >= from_date_obj]
+            print(f"  [+] {len(matches)} partidos después de {from_date}")
+
+        # Caché de DB
+        scraped_ids = get_scraped_sofascore_match_ids() if not full_refresh else set()
+        skipped_matches = 0
+
         for i, m in enumerate(matches, 1):
             match_id = m["id"]
             home     = m.get("homeTeam", {}).get("name", "?")
             away     = m.get("awayTeam", {}).get("name", "?")
+            
+            if not full_refresh and match_id in scraped_ids:
+                skipped_matches += 1
+                continue
+                
             print(f"  [{i}/{len(matches)}] Match {match_id}: {home} vs {away}")
 
             match_dir = base_path / f"match_{match_id}" / f"batch_id={batch_id}"
@@ -243,10 +309,29 @@ def scrape_sofascore(
                 _save_json(lineups_raw, match_dir / "lineups.json")
                 all_lineups.append({"match_id": match_id, "data": lineups_raw})
             except Exception as e:
-                log.warning("Lineups failed match %d: %s", match_id, e)
+                log.warning("Fallo general en partido %d: %s", match_id, e)
 
     finally:
         driver.quit()
+
+    if not full_refresh:
+        print(f"\n  [INFO] Partidos omitidos (ya en DB): {skipped_matches}")
+
+    if matches:
+        df_matches = transform_matches(matches)
+        df_shots   = transform_shots(all_shots)
+        df_events  = transform_events(all_events)
+        df_teams   = extract_teams(matches)
+        df_players = extract_players(df_shots, df_events)
+
+        season_dir = OUTPUT_DIR / f"season={season_name.replace('/', '_')}"
+        season_dir.mkdir(parents=True, exist_ok=True)
+
+        df_matches.to_csv(season_dir / "matches_clean.csv", index=False, encoding="utf-8-sig")
+        df_shots.to_csv(season_dir / "shots_clean.csv",   index=False, encoding="utf-8-sig")
+        df_events.to_csv(season_dir / "events_clean.csv",  index=False, encoding="utf-8-sig")
+        df_teams.to_csv(season_dir / "teams.csv",   index=False, encoding="utf-8-sig")
+        df_players.to_csv(season_dir / "players.csv", index=False, encoding="utf-8-sig")
 
     return matches, all_shots, all_events, all_lineups
 
@@ -469,17 +554,6 @@ def main():
         print(f"Archivos guardados en {season_dir}")
 
     print(f"\n Descarga de SofaScore completada")
-
-
-def main_with_args(tournament_id: int = None, season_name: str = None):
-    """Versión de main que acepta parámetros."""
-    if tournament_id is None:
-        tournament_id = TOURNAMENT_ID
-    if season_name is None:
-        season_name = SEASON_NAMES[0]
-    
-    print(f"[INFO] Scraping SofaScore - Tournament ID: {tournament_id}, Temporada: {season_name}")
-    scrape_sofascore(season_name=season_name, tournament_id=tournament_id)
 
 
 if __name__ == "__main__":

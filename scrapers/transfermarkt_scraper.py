@@ -1,4 +1,4 @@
-﻿"""
+"""
 scrapers/transfermarkt_scraper.py
 ===================================
 Scraper unificado de Transfermarkt. Sigue el mismo patrÃ³n que understat_scraper.py:
@@ -53,7 +53,7 @@ log = logging.getLogger(__name__)
 # â”€â”€ CONSTANTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 LEAGUE_CODE = "ES1"       # La Liga en Transfermarkt
-SEASONS     = [2020, 2021, 2022, 2023, 2024]  # aÃ±os de inicio de temporadas (20/21 a 24/25)
+SEASONS     = [2020, 2021, 2022, 2023, 2024, 2025]  # aÃ±os de inicio de temporadas (20/21 a 25/26)
 DELAY_MIN   = 1.0         # pausa mÃ­nima entre peticiones (segundos)
 DELAY_MAX   = 2.0         # pausa mÃ¡xima entre peticiones (segundos)
 MAX_RETRIES = 3
@@ -61,6 +61,20 @@ MAX_RETRIES = 3
 # Absolute path robusto para que funcione sin importar desde dÃ³nde de la terminal lo lances
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_DIR  = PROJECT_ROOT / "data" / "raw" / "transfermarkt"
+CACHE_FILE  = OUTPUT_DIR / "last_scraped.json"
+
+def load_cache() -> dict:
+    if CACHE_FILE.exists():
+        try:
+            with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_cache(cache: dict):
+    with open(CACHE_FILE, "w", encoding="utf-8") as f:
+        json.dump(cache, f)
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -310,19 +324,35 @@ def scrape_transfermarkt(
     league_code: str = LEAGUE_CODE,
     season: int      = None,
     teams: Optional[dict[str, int]] = None,
+    from_date: Optional[str] = None,
+    full_refresh: bool = False,
+    season_label: str = None,
 ) -> tuple[list[dict], list[dict]]:
     """Orquestador principal: descarga plantillas y lesiones de todos los equipos.
 
     Args:
-        league_code: CÃ³digo de liga en Transfermarkt (p.ej. 'ES1')
-        season:      AÃ±o de inicio de la temporada (p.ej. 2020). Si es None, usa la primera.
+        league_code: Código de liga en Transfermarkt (p.ej. 'ES1')
+        season:      Año de inicio de la temporada (p.ej. 2020). Si es None, usa la primera.
         teams:       Dict {slug: id} de equipos. Si es None, se auto-descubren.
+        from_date:   Fecha mínima para lesiones (formato YYYY-MM-DD). Lesiones desde esta fecha.
 
     Returns:
-        (all_players, all_injuries) â€” listas de dicts con datos crudos.
+        (all_players, all_injuries) — listas de dicts con datos crudos.
     """
+    # Parse from_date if provided
+    from_date_obj = None
+    if from_date:
+        from datetime import datetime
+        from_date_obj = datetime.strptime(from_date, "%Y-%m-%d").date()
+        log.info("Filtrando lesiones desde: %s", from_date_obj)
     if season is None:
         season = SEASONS[0]
+    
+    if season_label is None:
+        season_label = f"{season}_{season+1}"
+    
+    # Normalizar season_label para carpetas (evitar '/')
+    folder_season = season_label.replace("/", "_")
     
     from utils.batch import generate_batch_id
     batch_id = generate_batch_id()
@@ -334,15 +364,27 @@ def scrape_transfermarkt(
         log.info("Auto-descubiertos %d equipos para %s %d", len(teams), league_code, season)
 
     print("=" * 55)
-    print(f"  Transfermarkt scraper â€” {league_code} {season}/{season+1}")
+    print(f"  Transfermarkt scraper â€” {league_code} {season_label}")
     print("=" * 55)
 
     all_players:  list[dict] = []
     all_injuries: list[dict] = []
     failed: list[str] = []
 
+    cache = load_cache() if not full_refresh else {}
+    today_str = str(date.today())
+    skipped_players = 0
+
+    # Directorio de la temporada
+    season_dir = OUTPUT_DIR / f"season={folder_season}"
+    season_dir.mkdir(parents=True, exist_ok=True)
+
     for team_slug, team_id in teams.items():
         print(f"\n[INFO] Equipo: {team_slug} (id={team_id})")
+
+        # Directorio del equipo/batch
+        team_dir = season_dir / team_slug / f"batch_id={batch_id}"
+        team_dir.mkdir(parents=True, exist_ok=True)
 
         # Plantilla â€” con reintentos
         players = None
@@ -368,8 +410,53 @@ def scrape_transfermarkt(
         # Lesiones por jugador
         team_injuries: list[dict] = []
         for p in players:
+            player_id_str = str(p["player_id"])
+            last_scraped = cache.get(player_id_str)
+            
+            # Si no es full_refresh, comprobar si pasaron menos de 7 días
+            if not full_refresh and last_scraped:
+                days_since = (date.today() - datetime.strptime(last_scraped, "%Y-%m-%d").date()).days
+                if days_since < 7:
+                    skipped_players += 1
+                    continue
+            
             try:
                 injuries = get_player_injuries(p["player_slug"], p["player_id"])
+                # Actualizamos caché
+                cache[player_id_str] = today_str                
+                # Filter injuries by from_date if provided
+                if from_date_obj:
+                    from datetime import datetime
+                    filtered_injuries = []
+                    for inj in injuries:
+                        date_from = inj.get("date_from")
+                        if date_from:
+                            try:
+                                # Handle various date formats from Transfermarkt
+                                if isinstance(date_from, str):
+                                    # Try common formats
+                                    for fmt in ["%d.%m.%Y", "%Y-%m-%d", "%d/%m/%Y"]:
+                                        try:
+                                            inj_date = datetime.strptime(date_from, fmt).date()
+                                            break
+                                        except ValueError:
+                                            continue
+                                    else:
+                                        # Could not parse date, include it
+                                        filtered_injuries.append(inj)
+                                        continue
+                                else:
+                                    inj_date = date_from
+
+                                if inj_date >= from_date_obj:
+                                    filtered_injuries.append(inj)
+                            except Exception:
+                                # If we can't parse, include it
+                                filtered_injuries.append(inj)
+                        else:
+                            filtered_injuries.append(inj)
+                    injuries = filtered_injuries
+
                 for inj in injuries:
                     inj["player_id_tm"] = p["player_id"]
                     inj["player_name"]  = p["player_name"]
@@ -380,7 +467,6 @@ def scrape_transfermarkt(
                 log.warning("%s â€” lesiones fallidas: %s", p["player_name"], e)
 
         # Guardar JSON crudos por equipo
-        team_dir = OUTPUT_DIR / f"season={season}" / team_slug / f"batch_id={batch_id}"
         _save_json(players,       team_dir / "players.json")
         _save_json(team_injuries, team_dir / "injuries.json")
 
@@ -390,8 +476,21 @@ def scrape_transfermarkt(
         print(f"  [OK] {len(players)} jugadores | {len(team_injuries)} lesiones")
 
     print(f"\n  Equipos procesados: {len(teams) - len(failed)}/{len(teams)}")
+    if not full_refresh:
+        print(f"  Jugadores omitidos por caché (<7 días): {skipped_players}")
     if failed:
         print(f"  [WARNING] Fallidos: {failed}")
+
+    # Guardar estado de caché
+    save_cache(cache)
+
+    if all_players:
+        df_players = transform_players(all_players)
+        df_injuries = transform_injuries(all_injuries)
+        season_dir = OUTPUT_DIR / f"season={season}"
+        season_dir.mkdir(parents=True, exist_ok=True)
+        df_players.to_csv(season_dir / "transfermarkt_players.csv", index=False, encoding="utf-8-sig")
+        df_injuries.to_csv(season_dir / "transfermarkt_injuries.csv", index=False, encoding="utf-8-sig")
 
     return all_players, all_injuries
 
@@ -513,17 +612,6 @@ def main():
     print(f"  {injuries_path}  ({len(df_injuries)} filas)")
 
     print(f"\nðŸŽ‰ Descarga de Transfermarkt completada")
-
-
-def main_with_args(league_code: str = None, season: int = None):
-    """Versión de main que acepta parámetros."""
-    if league_code is None:
-        league_code = LEAGUE_CODE
-    if season is None:
-        season = SEASONS[0]
-    
-    print(f"[INFO] Scraping Transfermarkt - Liga: {league_code}, Temporada: {season}")
-    scrape_transfermarkt(league_code=league_code, season=season)
 
 
 if __name__ == "__main__":

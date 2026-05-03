@@ -139,10 +139,9 @@ def _safe_float(val) -> Optional[float]:
 # ── FACT_SHOTS ────────────────────────────────────────────────────────────────
 
 def _load_shots_sofascore(conn) -> int:
-    """Carga tiros de SofaScore desde shots_clean.csv."""
-    files = list(RAW_SS.glob("**/shots_clean.csv"))
+    files = list(RAW_SS.glob("**/*shots*.csv"))
     if not files:
-        log.info("fact_shots: no hay shots_clean.csv de SofaScore")
+        log.info("fact_shots: no hay archivos de tiros de SofaScore")
         return 0
 
     all_rows: list[dict] = []
@@ -196,14 +195,14 @@ def _load_shots_sofascore(conn) -> int:
 
 
 def _load_shots_understat(conn) -> int:
-    """Carga tiros de Understat desde understat_shots_laliga.csv."""
-    f = RAW_US / "understat_shots_laliga.csv"
-    if not f.exists():
-        log.info("fact_shots: no hay understat_shots_laliga.csv")
+    files = list(RAW_US.glob("**/*shots*.csv"))
+    if not files:
+        log.info("fact_shots: no hay archivos de tiros de understat")
         return 0
 
     try:
-        df = pd.read_csv(f)
+        dfs = [pd.read_csv(f) for f in files]
+        df = pd.concat(dfs, ignore_index=True)
     except Exception as e:
         log.error("Error reading understat shots: %s", e)
         return 0
@@ -271,10 +270,10 @@ def load_shots(conn) -> int:
 # ── FACT_EVENTS ───────────────────────────────────────────────────────────────
 
 def _load_events_source(conn, source: str, file_pattern: str, files_dir: Path) -> int:
-    """Carga eventos de una fuente genérica desde events_clean.json."""
-    files = list(files_dir.glob(file_pattern.replace(".json", ".csv")))
+    """Carga eventos de una fuente genérica."""
+    files = list(files_dir.glob(file_pattern))
     if not files:
-        log.info("fact_events: no hay %s en %s", file_pattern.replace(".json", ".csv"), files_dir)
+        log.info("fact_events: no hay archivos %s en %s", file_pattern, files_dir)
         return 0
 
     all_rows: list[dict] = []
@@ -361,9 +360,9 @@ def load_events(conn) -> int:
     """Carga fact_events desde SofaScore, StatsBomb y WhoScored."""
     log.info("[START] Cargando fact_events...")
     total = 0
-    total += _load_events_source(conn, "sofascore", "**/events_clean.json", RAW_SS)
-    total += _load_events_source(conn, "statsbomb",  "**/events_clean.json", RAW_SB)
-    total += _load_events_source(conn, "whoscored",  "events_clean.json",   RAW_WS)
+    total += _load_events_source(conn, "sofascore", "**/*events*.csv", RAW_SS)
+    total += _load_events_source(conn, "statsbomb", "**/*events*.csv", RAW_SB)
+    total += _load_events_source(conn, "whoscored", "**/*events*.csv", RAW_WS)
     log.info("[OK] fact_events completado — %d eventos insertados", total)
     return total
 
@@ -373,12 +372,10 @@ def load_events(conn) -> int:
 def load_injuries(conn) -> int:
     """Carga fact_injuries desde injuries_clean.json de Transfermarkt."""
     log.info("[START] Cargando fact_injuries...")
-    #
-    files = list((RAW_TM / "champions").glob("**/transfermarkt_champions_injuries.csv"))
+    files = list(RAW_TM.glob("**/*injuries*.csv"))
 
-    # files = list(RAW_TM.glob("**/injuries_clean.csv"))
     if not files:
-        log.warning("fact_injuries: no hay injuries_clean.csv en %s", RAW_TM)
+        log.warning("fact_injuries: no hay archivos de injuries en %s", RAW_TM)
         return 0
 
     all_rows: list[dict] = []
@@ -441,6 +438,6 @@ def load_injuries(conn) -> int:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s - %(message)s")
     with engine.begin() as conn:
-        #load_shots(conn)
-        #load_events(conn)
+        load_shots(conn)
+        load_events(conn)
         load_injuries(conn)

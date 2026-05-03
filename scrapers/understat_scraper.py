@@ -1,42 +1,50 @@
-﻿import re 
-import pandas as pd
+"""
+scrapers/understat_scraper.py
+==============================
+Scraper de Understat. Extrae partidos y tiros de una liga/temporada.
 
-import os 
-import json 
+Salida (data/raw/understat/):
+    understat_matches_laliga.csv
+    understat_shots_laliga.csv
+    understat_players_laliga.csv
+    understat_teams_laliga.csv
+"""
+
+import re
+import os
+import json
 import sys
-from pathlib import Path
-from typing import Optional
 import asyncio
 import aiohttp
+from pathlib import Path
+from typing import Optional
 from urllib.parse import quote
+
+import pandas as pd
 
 # Allow running directly as a script
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-""" 
-Metodos de aiohttp
-resp.raise_for_status()   # NO necesita await. Raise for status si se manda un codigo de error lanza una excepcion
-resp.status               # NO necesita await, es un atributo, devuelve 200, 404...
-
-await resp.text()         # SÃ necesita await, leer el cuerpo es asÃ­ncrono
-await resp.json()         # SÃ necesita await, leer el cuerpo es asÃ­ncrono
-"""
-
+# Valores por defecto
+LEAGUE_DEFAULT  = "La_Liga"
+SEASONS_DEFAULT = [2020, 2021, 2022, 2023, 2024]
+DELAY_SEC       = 1.5
+PROJECT_ROOT    = Path(__file__).resolve().parent.parent
+OUTPUT_DIR      = PROJECT_ROOT / "data" / "raw" / "understat"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
-# Valores por defecto (La Liga)
-LEAGUE_DEFAULT = "La_Liga"  # Formato Understat: "La_Liga", "EPL", "Bundesliga", etc.
-SEASONS_DEFAULT = [2020, 2021, 2022, 2023, 2024]   # año de inicio de temporada (20/21 a 24/25)
-
-# Para compatibilidad hacia atrás
-LEAGUE = "La liga"
-SEASONS = SEASONS_DEFAULT
-# pausa entre requests para no saturar el servidor
-# Es uan protecccion para  evitar  que unserStar bloquea las peticiones por hacer muchas en poco tiempo 
-DELAY_SEC   = 1.5   
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-OUTPUT_DIR  = PROJECT_ROOT / "data" / "raw" / "understat"
-os.makedirs(OUTPUT_DIR, exist_ok=True)  # directorio de salida
+def _parse_understat_date(date_str: str) -> "date | None":
+    """Parsea fecha de Understat (formato: '2025-05-25 00:00:00')."""
+    from datetime import datetime
+    if not date_str:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(date_str[:19], fmt).date()
+        except ValueError:
+            continue
+    return None
 
 
 
@@ -179,7 +187,7 @@ async def get_league_matches(session: aiohttp.ClientSession, season: int, league
     Se llama en scrape_laliga()
     """
     # Usar el valor por defecto o el pasado como parámetro
-    league_code = league if league else LEAGUE
+    league_code = league if league else LEAGUE_DEFAULT
     
     url = f"https://understat.com/getLeagueData/{quote(league_code)}/{season}"
 
@@ -291,7 +299,7 @@ async def get_match_shots(session: aiohttp.ClientSession, understat_match_id: st
 
 # â”€â”€ Orquestador principal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-async def scrape_laliga(seasons: list[int], league: str = None) -> tuple[pd.DataFrame, pd.DataFrame]:
+async def scrape_laliga(seasons: list[int], league: str = None, from_date: str = None) -> tuple[pd.DataFrame, pd.DataFrame]:
     r"""
     Orquestador principal del scraping. Recibe la lista de temporadas y devuelve
     dos DataFrames: uno con los partidos y otro con los tiros.
@@ -300,6 +308,7 @@ async def scrape_laliga(seasons: list[int], league: str = None) -> tuple[pd.Data
         seasons: Lista de años de inicio de temporada (ej: [2020, 2021, 2022])
         league: Código de la liga en formato Understat (ej: "La_Liga", "EPL", "Bundesliga")
                 Si es None, usa la constante global LEAGUE (para compatibilidad)
+        from_date: Fecha inicial (YYYY-MM-DD). Descarga solo partidos desde esta fecha.
 
     Crea una sesiÃ³n HTTP compartida con:
     - TCPConnector(limit=3): mÃ¡ximo 3 conexiones paralelas para no saturar el servidor
@@ -315,7 +324,13 @@ async def scrape_laliga(seasons: list[int], league: str = None) -> tuple[pd.Data
         df_matches, df_shots = await scrape_laliga(SEASONS)
     """
     # Usar el valor por defecto o el pasado como parámetro
-    league_code = league if league else LEAGUE
+    league_code = league if league else LEAGUE_DEFAULT
+
+    from_date_obj = None
+    if from_date:
+        from datetime import datetime
+        from_date_obj = datetime.strptime(from_date, "%Y-%m-%d").date()
+        print(f"\n[FILTER] Descargando solo partidos desde: {from_date}")
 
     all_matches = []
     all_shots   = []
@@ -341,21 +356,35 @@ async def scrape_laliga(seasons: list[int], league: str = None) -> tuple[pd.Data
                 continue
 
             print(f"  [+] {len(matches)} partidos encontrados")
+            
+            # Filtrar por fecha si se especifica from_date
+            if from_date_obj:
+                original_count = len(matches)
+                matches = [m for m in matches if m.get("datetime") and _parse_understat_date(m["datetime"]) >= from_date_obj]
+                print(f"  [+] {len(matches)} partidos después de {from_date} (filtrados {original_count - len(matches)})")
+            
             all_matches.extend(matches)
 
+            from datetime import date
+            processed_count = 0
             for i, match in enumerate(matches, 1):
                 # extrae el id de cada partido 
                 mid = match["understat_match_id"]
+                match_date = _parse_understat_date(match.get("datetime"))
+                if match_date and match_date > date.today():
+                    continue
+
                 try:
-                    # obtiene los tiros de lso partidos y aÃ±ade la temporada a cada tiro 
+                    # obtiene los tiros de los partidos y aÃ±ade la temporada a cada tiro 
                     shots = await get_match_shots(session, mid)
                     for s in shots:
                         s["season"] = season
                     all_shots.extend(shots)
+                    processed_count += 1
                     
-                    #Esto se usa mucho para logs de progreso en loops grandes para no imprimir en cada iteraciÃ³n.
-                    if i % 20 == 0:
-                        print(f"  -> {i}/{len(matches)} partidos procesados | tiros acumulados: {len(all_shots)}")
+                    # Esto se usa mucho para logs de progreso en loops grandes para no imprimir en cada iteraciÃ³n.
+                    if processed_count % 20 == 0:
+                        print(f"  -> {processed_count}/{len(matches)} partidos procesados | tiros acumulados: {len(all_shots)}")
 
                     await asyncio.sleep(DELAY_SEC)
 
@@ -464,16 +493,31 @@ def extract_teams(df_matches: pd.DataFrame) -> pd.DataFrame:
         .reset_index(drop=True)
     )
 
-# â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+def save_understat_data(df_matches: pd.DataFrame, df_shots: pd.DataFrame) -> None:
+    """Guarda los CSV de Understat en data/raw/understat."""
+    df_shots_clean = transform_shots(df_shots, df_matches)
+    df_players = extract_players(df_shots)
+    df_teams = extract_teams(df_matches)
+
+    shots_path = OUTPUT_DIR / "understat_shots_laliga.csv"
+    matches_path = OUTPUT_DIR / "understat_matches_laliga.csv"
+    players_path = OUTPUT_DIR / "understat_players_laliga.csv"
+    teams_path = OUTPUT_DIR / "understat_teams_laliga.csv"
+
+    df_shots_clean.to_csv(shots_path, index=False, encoding="utf-8-sig")
+    df_matches.to_csv(matches_path, index=False, encoding="utf-8-sig")
+    df_players.to_csv(players_path, index=False, encoding="utf-8-sig")
+    df_teams.to_csv(teams_path, index=False, encoding="utf-8-sig")
+
+# â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ã
 
 async def main():
     print("=" * 55)
-    print(f"  Understat scraper - {LEAGUE} {SEASONS[0]}-{SEASONS[-1]}")
+    print(f"  Understat scraper - {LEAGUE_DEFAULT} {SEASONS_DEFAULT[0]}-{SEASONS_DEFAULT[-1]}")
     print("=" * 55)
 
-    # scrape_lalida devuelve una tupla con dos DataFrames.
-    # Aqui se hace unpacking de la tupla
-    df_matches, df_shots = await scrape_laliga(SEASONS)
+    df_matches, df_shots = await scrape_laliga(SEASONS_DEFAULT)
 
     if df_shots.empty:
         print("\n[!] No se obtuvieron datos. Revisa la conexiÃ³n o las URLs.")
@@ -510,16 +554,6 @@ async def main():
     print(df_shots_clean.head(3).to_string(index=False))
 
 
-def main_with_args(league: str = None, seasons: list[int] = None):
-    """Versión de main que acepta parámetros."""
-    import sys
-    if league is None:
-        league = LEAGUE
-    if seasons is None:
-        seasons = SEASONS
-    
-    print(f"[INFO] Scraping Understat - Liga: {league}, Temporadas: {seasons}")
-    asyncio.run(scrape_laliga(seasons, league))
 
 
 if __name__ == "__main__":
@@ -542,8 +576,7 @@ if __name__ == "__main__":
     else:
         seasons = SEASONS_DEFAULT
     
-    # Usar el league code pasado o el valor por defecto
-    league = args.league if args.league else LEAGUE
-    
+    league = args.league if args.league else LEAGUE_DEFAULT
+
     asyncio.run(scrape_laliga(seasons, league))
 

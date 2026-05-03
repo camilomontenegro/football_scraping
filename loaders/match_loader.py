@@ -193,15 +193,16 @@ def _load_from_understat(conn) -> int:
         Buscar dim_match por (match_date, home_team_id, away_team_id) donde
         equipos se resuelven via id_understat en dim_team.
     """
-    f = RAW_US / "understat_matches_laliga.csv"
-    if not f.exists():
-        log.info("match_loader: no hay understat_matches_laliga.csv")
+    files = list(RAW_US.glob("**/*matches*.csv"))
+    if not files:
+        log.info("match_loader: no hay archivos de matches de understat")
         return 0
 
     try:
-        df = pd.read_csv(f)
+        dfs = [pd.read_csv(f) for f in files]
+        df = pd.concat(dfs, ignore_index=True)
     except Exception as e:
-        log.warning("Error leyendo %s: %s", f, e)
+        log.warning("Error leyendo archivos de understat: %s", e)
         return 0
 
     linked = 0
@@ -353,20 +354,17 @@ def _load_from_whoscored(conn) -> int:
     
     Como el CSV de matches de WS no tiene equipos, los extraemos de los eventos.
     """
-    f = RAW_WS / "whoscored_events_laliga.csv"
-    if not f.exists():
+    files = list(RAW_WS.glob("**/*events*.csv"))
+    if not files:
         return 0
 
     log.info("Analizando eventos de WhoScored para vincular partidos...")
     
-    # 1. Mapear match_id -> (home_team_ws_id, away_team_ws_id, season)
-    # Heurística: Los eventos de 'Start' vienen ordenados. 
-    # El primero suele ser el local en la estructura de WS.
     match_map: dict[str, dict] = {}
     
     try:
-        # Leemos en trozos si es muy grande, pero aquí procesaremos nombres de equipos e IDs
-        df = pd.read_csv(f)
+        dfs = [pd.read_csv(f) for f in files]
+        df = pd.concat(dfs, ignore_index=True)
         
         for mid, group in df.groupby("whoscored_match_id"):
             # Obtener IDs de equipos únicos en el orden en que aparecen

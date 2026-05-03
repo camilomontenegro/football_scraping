@@ -2,7 +2,7 @@
 Diccionario de Competiciones
 =============================
 Unifica los IDs de todas las fuentes de datos para cada competición.
-Esto permite que el sistema trabaje con cualquier liga de forma consistente.
+Permite que el sistema trabaje con cualquier liga de forma consistente.
 
 Estructura:
     - name: Nombre oficial de la competición
@@ -10,15 +10,12 @@ Estructura:
     - sources: IDs específicos de cada fuente
 
 Uso:
-    from config.competitions import COMPETITIONS, get_competition
-    
-    # Obtener config de La Liga
+    from scripts.competitions import COMPETITIONS, get_competition
+
     laliga = get_competition("La Liga")
-    
-    # Obtener todos los IDs de una fuente
-    tm_id = laliga["sources"]["transfermarkt"]["league_code"]  # "ES1"
+    tm_id  = laliga["sources"]["transfermarkt"]["league_code"]  # "ES1"
 """
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 # ═══════════════════════════════════════════════════════════════════════
 # DICCIONARIO DE COMPETICIONES
@@ -28,7 +25,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
     # ═══════════════════════════════════════════════════════════════════
     # ESPAÑA
     # ═══════════════════════════════════════════════════════════════════
-    
+
     "La Liga": {
         "name": "LaLiga",
         "country": "Spain",
@@ -57,7 +54,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             },
         },
     },
-    
+
     "Segunda División": {
         "name": "Segunda División",
         "country": "Spain",
@@ -72,11 +69,11 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "LaLiga2",
             },
             "understat": {
-                "league": "La_Liga",
-                "name": "La Liga",  # Understat no tiene Segunda
+                "league": None,
+                "name": "La Liga",
             },
             "statsbomb": {
-                "competition_id": None,  # Verificar
+                "competition_id": None,
                 "name": "Segunda División",
             },
             "whoscored": {
@@ -86,11 +83,11 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             },
         },
     },
-    
+
     # ═══════════════════════════════════════════════════════════════════
     # INGLATERRA
     # ═══════════════════════════════════════════════════════════════════
-    
+
     "Premier League": {
         "name": "Premier League",
         "country": "England",
@@ -119,7 +116,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             },
         },
     },
-    
+
     "Championship": {
         "name": "Championship",
         "country": "England",
@@ -134,7 +131,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Championship",
             },
             "understat": {
-                "league": "EPL",  # Understat no tiene Championship
+                "league": None,
                 "name": "Championship",
             },
             "statsbomb": {
@@ -148,11 +145,11 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             },
         },
     },
-    
+
     # ═══════════════════════════════════════════════════════════════════
     # ALEMANIA
     # ═══════════════════════════════════════════════════════════════════
-    
+
     "Bundesliga": {
         "name": "Bundesliga",
         "country": "Germany",
@@ -181,11 +178,11 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             },
         },
     },
-    
+
     # ═══════════════════════════════════════════════════════════════════
     # ITALIA
     # ═══════════════════════════════════════════════════════════════════
-    
+
     "Serie A": {
         "name": "Serie A",
         "country": "Italy",
@@ -214,11 +211,11 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             },
         },
     },
-    
+
     # ═══════════════════════════════════════════════════════════════════
     # FRANCIA
     # ═══════════════════════════════════════════════════════════════════
-    
+
     "Ligue 1": {
         "name": "Ligue 1",
         "country": "France",
@@ -247,11 +244,11 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             },
         },
     },
-    
+
     # ═══════════════════════════════════════════════════════════════════
     # PORTUGAL
     # ═══════════════════════════════════════════════════════════════════
-    
+
     "Primeira Liga": {
         "name": "Primeira Liga",
         "country": "Portugal",
@@ -280,11 +277,11 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             },
         },
     },
-    
+
     # ═══════════════════════════════════════════════════════════════════
     # PAÍSES BAJOS
     # ═══════════════════════════════════════════════════════════════════
-    
+
     "Eredivisie": {
         "name": "Eredivisie",
         "country": "Netherlands",
@@ -313,11 +310,11 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             },
         },
     },
-    
+
     # ═══════════════════════════════════════════════════════════════════
     # COMPETICIONES EUROPEAS
     # ═══════════════════════════════════════════════════════════════════
-    
+
     "Champions League": {
         "name": "UEFA Champions League",
         "country": "Europe",
@@ -340,13 +337,13 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Champions League",
             },
             "whoscored": {
-                "region_id": 2,
-                "tournament_id": 3,
+                "region_id": 250,
+                "tournament_id": 12,
                 "name": "Champions League",
             },
         },
     },
-    
+
     "Europa League": {
         "name": "UEFA Europa League",
         "country": "Europe",
@@ -369,13 +366,13 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Europa League",
             },
             "whoscored": {
-                "region_id": 2,
-                "tournament_id": 404,
+                "region_id": 250,
+                "tournament_id": 30,
                 "name": "Europa League",
             },
         },
     },
-    
+
     "Europa Conference League": {
         "name": "UEFA Europa Conference League",
         "country": "Europe",
@@ -406,14 +403,12 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
     },
 }
 
-# he cambiado el tipo de dato de  ind_understat en dim_competition a VARCHAR para poder meter el codigo 
-# de understat. Probablemente seria mejor, dejarlo en None en el propio dictionarip
 
 # ═══════════════════════════════════════════════════════════════════════
 # FUNCIONES DE CONSULTA
 # ═══════════════════════════════════════════════════════════════════════
 
-def get_competition(name: str) -> Dict[str, Any] | None:
+def get_competition(name: str) -> Optional[Dict[str, Any]]:
     """Obtiene la configuración de una competición por nombre."""
     return COMPETITIONS.get(name)
 
@@ -435,6 +430,41 @@ def get_source_ids(competition_name: str, source: str) -> Dict[str, Any]:
     return {}
 
 
+def get_source_config(competition_name: str, source: str) -> Dict[str, Any]:
+    """Alias de get_source_ids para claridad semántica."""
+    return get_source_ids(competition_name, source)
+
+
+def get_season_start_year(season: str) -> int:
+    """Extrae el año de inicio de una temporada en formato '2024/2025' o '24/25'.
+
+    Ejemplos:
+        '2024/2025' -> 2024
+        '24/25'     -> 2024
+        '2024'      -> 2024
+    """
+    if not season:
+        return 2024
+    part = season.split("/")[0].strip()
+    try:
+        year = int(part)
+        # Si viene en formato corto (p.ej. '24'), expandir a año completo
+        if year < 100:
+            year += 2000
+        return year
+    except ValueError:
+        return 2024
+
+
+def get_available_seasons(start_year: int = 2020, end_year: int = 2024) -> list[str]:
+    """Genera la lista de temporadas desde start_year hasta end_year (inclusive).
+
+    Ejemplo: get_available_seasons(2020, 2024) ->
+        ['2020/2021', '2021/2022', '2022/2023', '2023/2024', '2024/2025']
+    """
+    return [f"{y}/{y + 1}" for y in range(start_year, end_year + 1)]
+
+
 def list_competitions() -> list[Dict[str, Any]]:
     """Lista todas las competiciones disponibles."""
     return [
@@ -444,74 +474,13 @@ def list_competitions() -> list[Dict[str, Any]]:
             "country_code": comp.get("country_code"),
             "has_transfermarkt": "league_code" in comp.get("sources", {}).get("transfermarkt", {}),
             "has_sofascore": comp.get("sources", {}).get("sofascore", {}).get("tournament_id") is not None,
-            "has_understat": "league" in comp.get("sources", {}).get("understat", {}),
+            "has_understat": bool(comp.get("sources", {}).get("understat", {}).get("league")),
             "has_statsbomb": comp.get("sources", {}).get("statsbomb", {}).get("competition_id") is not None,
         }
         for name, comp in COMPETITIONS.items()
     ]
 
 
-def get_available_seasons(start_year: int = 2020, end_year: int = 2025) -> list[str]:
-    """Genera lista de temporadas en formato '2020/21'."""
-    return [f"{year}/{year + 1}" for year in range(start_year, end_year + 1)]
-
-
-def get_season_start_year(season: str) -> int:
-    """Convierte '2024/25' -> 2024."""
-    return int(season.split("/")[0])
-
-
-def get_source_config(competition_name: str, source: str) -> Dict[str, Any]:
-    """Obtiene la configuración completa de una fuente para una competición.
-    
-    Args:
-        competition_name: Nombre de la competición (ej: "La Liga")
-        source: Nombre de la fuente (ej: "sofascore", "transfermarkt")
-    
-    Returns:
-        Dict con los IDs de la fuente para esa competición
-    
-    Raises:
-        ValueError: Si la competición o fuente no existe
-    """
-    comp = get_competition(competition_name)
-    if not comp:
-        available = ", ".join(COMPETITIONS.keys())
-        raise ValueError(f"Competición '{competition_name}' no encontrada. Disponibles: {available}")
-    
-    if source not in comp.get("sources", {}):
-        available_sources = list(comp.get("sources", {}).keys())
-        raise ValueError(f"Fuente '{source}' no disponible para '{competition_name}'. Disponibles: {available_sources}")
-    
-    return comp["sources"][source]
-
-
-def check_source_available(competition_name: str, source: str) -> bool:
-    """Verifica si una fuente está disponible para una competición."""
-    try:
-        config = get_source_config(competition_name, source)
-        # Verificar que tenga al menos un ID válido
-        return any(v is not None for v in config.values())
-    except ValueError:
-        return False
-
-
 def get_all_sources() -> list[str]:
     """Lista todas las fuentes de datos disponibles."""
     return ["transfermarkt", "sofascore", "understat", "statsbomb", "whoscored"]
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# COMPATIBILIDAD CON CÓDIGO EXISTENTE
-# ═══════════════════════════════════════════════════════════════════════
-
-# Alias para La Liga (compatibilidad con código actual)
-LALIGA = COMPETITIONS["La Liga"]
-
-# IDs de La Liga para cada fuente (para uso directo)
-LALIGA_IDS = {
-    "transfermarkt": LALIGA["sources"]["transfermarkt"]["league_code"],  # "ES1"
-    "sofascore": LALIGA["sources"]["sofascore"]["tournament_id"],        # 8
-    "understat": LALIGA["sources"]["understat"]["league"],               # "La_Liga"
-    "statsbomb": LALIGA["sources"]["statsbomb"]["competition_id"],       # 11
-}

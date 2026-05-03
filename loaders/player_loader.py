@@ -83,8 +83,7 @@ def _load_phase1_transfermarkt(conn) -> int:
     Returns:
         Número de jugadores insertados/actualizados.
     """
-    #files = list(RAW_TM.glob("**/players_clean.csv"))
-    files = list((RAW_TM / "champions").glob("**/transfermarkt_champions_players.csv"))
+    files = list(RAW_TM.glob("**/*players*.csv"))
 
     if not files:
         log.warning("player_loader fase 1: no se encontró players_clean.csv en %s", RAW_TM)
@@ -298,18 +297,17 @@ def _load_phase4_statsbomb(conn) -> tuple[int, int]:
 
 def _load_phase5_whoscored(conn) -> tuple[int, int]:
     """Enlaza id_whoscored a jugadores existentes de TM via resolución de nombre."""
-   
-    #f = RAW_WS / "whoscored_players_laliga.csv"
-    f = RAW_WS / "champions" / "whoscored_champions_players.csv"
+    files = list(RAW_WS.glob("**/*players*.csv"))
 
-    if not f.exists():
-        log.info("player_loader fase 5: no hay whoscored_players_laliga.csv")
+    if not files:
+        log.info("player_loader fase 5: no hay archivos de WhoScored")
         return 0, 0
 
     try:
-        df = pd.read_csv(f)
+        dfs = [pd.read_csv(f) for f in files]
+        df = pd.concat(dfs, ignore_index=True)
     except Exception as e:
-        log.warning("Error leyendo %s: %s", f, e)
+        log.warning("Error leyendo archivos de WhoScored: %s", e)
         return 0, 0
 
     linked = queued = 0
@@ -351,13 +349,13 @@ def load_players(conn) -> int:
     _load_phase1_transfermarkt(conn)
 
     # Fase 2 — SofaScore (enlace por nombre)
-    #_load_phase2_sofascore(conn)
+    _load_phase2_sofascore(conn)
 
     # Fase 3 — Understat (enlace por nombre)
-    #_load_phase3_understat(conn)
+    _load_phase3_understat(conn)
 
     # Fase 4 — StatsBomb (enlace por nombre)
-   # _load_phase4_statsbomb(conn)
+    _load_phase4_statsbomb(conn)
 
     # Fase 5 — WhoScored (enlace por nombre)
     _load_phase5_whoscored(conn)

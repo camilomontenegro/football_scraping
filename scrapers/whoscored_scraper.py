@@ -1,19 +1,17 @@
-﻿"""
+"""
 whoscored_scraper.py
 ====================
 Scraper de WhoScored usando Selenium + BeautifulSoup.
 Extrae eventos de partidos (pases, tiros, presiones, duelos...)
 con coordenadas X,Y del objeto matchCentreData.
 
-La Liga â€” temporadas 2020/21 hasta 2025/26 â€” todos los equipos.
+Guarda 4 CSVs en data/raw/whoscored/<competicion>/:
+    - whoscored_events_<competicion>.csv
+    - whoscored_matches_<competicion>.csv
+    - whoscored_players_<competicion>.csv
+    - whoscored_teams_<competicion>.csv
 
-Guarda 4 CSVs en data/raw/whoscored/:
-    - whoscored_events_laliga.csv   â†’ todos los eventos con coordenadas
-    - whoscored_matches_laliga.csv  â†’ partidos con IDs
-    - whoscored_players_laliga.csv  â†’ jugadores con IDs de WhoScored
-    - whoscored_teams_laliga.csv    â†’ equipos con IDs de WhoScored
-
-IMPORTANTE: WhoScored tiene protecciÃ³n anti-bot.
+IMPORTANTE: WhoScored tiene protección anti-bot.
 Si falla, prueba a poner HEADLESS = False para ver el navegador.
 """
 
@@ -23,6 +21,8 @@ import re
 import time
 import random
 import logging
+from pathlib import Path
+from typing import Optional, Tuple, List, Dict
 
 import pandas as pd
 from bs4 import BeautifulSoup
@@ -34,36 +34,45 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 
+from scripts.competitions import get_competition
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
-# â”€â”€ CONFIGURACIÃ“N â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── CONFIGURACIÓN ──────────────────────────────────────────────────────────────
 
-# URLs exactas de fixtures de La Liga por temporada (versiÃ³n espaÃ±ola)
-SEASON_URLS = {
-    "2020/21": "https://es.whoscored.com/regions/206/tournaments/4/seasons/8321/stages/18851/fixtures/espa%C3%B1a-laliga-2020-2021",
-    "2021/22": "https://es.whoscored.com/regions/206/tournaments/4/seasons/8681/stages/19895/fixtures/espa%C3%B1a-laliga-2021-2022",
-    "2022/23": "https://es.whoscored.com/regions/206/tournaments/4/seasons/9149/stages/21073/fixtures/espa%C3%B1a-laliga-2022-2023",
-    "2023/24": "https://es.whoscored.com/regions/206/tournaments/4/seasons/9682/stages/22176/fixtures/espa%C3%B1a-laliga-2023-2024",
-    "2024/25": "https://es.whoscored.com/regions/206/tournaments/4/seasons/10317/stages/23401/fixtures/espa%C3%B1a-laliga-2024-2025",
-    "2025/26": "https://es.whoscored.com/regions/206/tournaments/4/seasons/10803/stages/24622/fixtures/espa%C3%B1a-laliga-2025-2026",
+# URLs exactas de fixtures de WhoScored por competición y temporada
+WHOSCORED_URLS = {
+    "LaLiga": {
+        "2020/2021": "https://es.whoscored.com/regions/206/tournaments/4/seasons/8321/stages/18851/fixtures/espa%C3%B1a-laliga-2020-2021",
+        "2021/2022": "https://es.whoscored.com/regions/206/tournaments/4/seasons/8681/stages/19895/fixtures/espa%C3%B1a-laliga-2021-2022",
+        "2022/2023": "https://es.whoscored.com/regions/206/tournaments/4/seasons/9149/stages/21073/fixtures/espa%C3%B1a-laliga-2022-2023",
+        "2023/2024": "https://es.whoscored.com/regions/206/tournaments/4/seasons/9682/stages/22176/fixtures/espa%C3%B1a-laliga-2023-2024",
+        "2024/2025": "https://es.whoscored.com/regions/206/tournaments/4/seasons/10317/stages/23401/fixtures/espa%C3%B1a-laliga-2024-2025",
+        "2025/2026": "https://es.whoscored.com/regions/206/tournaments/4/seasons/10803/stages/24622/fixtures/espa%C3%B1a-laliga-2025-2026",
+    },
+    "UEFA Champions League": {
+        "2020/2021": "https://es.whoscored.com/regions/250/tournaments/12/seasons/8177/stages/19130/fixtures/europe-champions-league-2020-2021",
+        "2021/2022": "https://es.whoscored.com/regions/250/tournaments/12/seasons/8623/stages/20265/fixtures/europe-champions-league-2021-2022",
+        "2022/2023": "https://es.whoscored.com/regions/250/tournaments/12/seasons/9086/stages/20969/fixtures/europe-champions-league-2022-2023",
+        "2023/2024": "https://es.whoscored.com/regions/250/tournaments/12/seasons/9664/stages/22686/fixtures/europe-champions-league-2023-2024",
+        "2024/2025": "https://es.whoscored.com/regions/250/tournaments/12/seasons/10456/stages/24083/fixtures/europe-champions-league-2024-2025",
+        "2025/2026": "https://es.whoscored.com/regions/250/tournaments/12/seasons/10903/stages/24797/fixtures/europe-champions-league-2025-2026",
+    }
 }
 
-# Pausa entre requests para evitar bloqueos
 DELAY_MIN = 3.0
 DELAY_MAX = 6.0
-
-# Poner False si WhoScored bloquea â€” verÃ¡s el navegador abrirse
 HEADLESS = False
 
-OUTPUT_DIR = r'D:\Prueba scraping unders\data\raw\whoscored'
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+BASE_OUTPUT_DIR = PROJECT_ROOT / "data" / "raw" / "whoscored"
 
 
-# â”€â”€ DRIVER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── DRIVER ─────────────────────────────────────────────────────────────────────
 
 def create_driver() -> webdriver.Chrome:
-    """Crea un driver de Chrome con configuraciÃ³n anti-detecciÃ³n."""
+    """Crea un driver de Chrome con configuración anti-detección."""
     options = Options()
 
     if HEADLESS:
@@ -75,6 +84,13 @@ def create_driver() -> webdriver.Chrome:
     options.add_argument('--disable-blink-features=AutomationControlled')
     options.add_experimental_option('excludeSwitches', ['enable-automation'])
     options.add_experimental_option('useAutomationExtension', False)
+    
+    # Bloquear imágenes y CSS para mayor rapidez
+    prefs = {
+        "profile.managed_default_content_settings.images": 2,
+        "profile.managed_default_content_settings.stylesheet": 2,
+    }
+    options.add_experimental_option("prefs", prefs)
     options.add_argument(
         'user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
         'AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -93,12 +109,10 @@ def create_driver() -> webdriver.Chrome:
 
 
 def random_sleep():
-    """Pausa aleatoria para evitar bloqueos."""
     time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
 
 
 def accept_cookies(driver: webdriver.Chrome):
-    """Acepta el popup de cookies si aparece."""
     try:
         cookie_btn = WebDriverWait(driver, 8).until(
             EC.element_to_be_clickable(
@@ -106,77 +120,83 @@ def accept_cookies(driver: webdriver.Chrome):
             )
         )
         cookie_btn.click()
-        log.info("  Cookies aceptadas âœ“")
+        log.info("  Cookies aceptadas ✓")
         time.sleep(2)
     except Exception:
-        log.info("  Sin popup de cookies")
+        pass
 
 
-# â”€â”€ OBTENER PARTIDOS DE LA TEMPORADA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── BASE DE DATOS (INCREMENTAL) ──────────────────────────────────────────────
 
-def get_season_matches(driver: webdriver.Chrome, season_name: str, url: str) -> list[dict]:
-    """
-    Obtiene la lista de IDs de partidos de La Liga para una temporada.
-    Usa JavaScript para extraer los IDs de los links /matches/ de la pÃ¡gina.
-    """
+def get_existing_whoscored_match_ids() -> set:
+    """Devuelve un conjunto con los IDs de WhoScored que ya están en la base de datos."""
+    try:
+        from sqlalchemy import text
+        from loaders.common import engine
+        with engine.connect() as conn:
+            rows = conn.execute(text("SELECT id_whoscored FROM dim_match WHERE id_whoscored IS NOT NULL")).fetchall()
+            return {str(r[0]) for r in rows}
+    except Exception as e:
+        log.warning("No se pudo consultar la BD para IDs existentes (¿DB apagada?): %s", e)
+        return set()
+
+
+# ── SCRAPING ───────────────────────────────────────────────────────────────────
+
+def get_season_matches(driver: webdriver.Chrome, season_name: str, url: str) -> List[Dict]:
+    """Obtiene la lista de IDs de partidos navegando por el calendario."""
     log.info("  Obteniendo partidos de temporada %s...", season_name)
+    all_match_ids = set()
 
     try:
         driver.get(url)
-        time.sleep(10)  # espera a que cargue el JS
-
-        # Acepta cookies si aparece
+        time.sleep(10)
         accept_cookies(driver)
 
-        # Scroll para activar carga dinÃ¡mica
-        driver.execute_script("window.scrollBy(0, 500);")
-        time.sleep(2)
-        driver.execute_script("window.scrollBy(0, -200);")
-        time.sleep(2)
+        MONTHS_TO_NAVIGATE = 10  # Suficiente para Liga (Ago-May) o Champions (Sep-Jun)
 
-        # Extrae IDs de partidos con JS â€” usa minÃºsculas /matches/
-        script_js = r'''
-        var ids = [];
-        var links = document.querySelectorAll('a[href*="/matches/"]');
-        links.forEach(function(l) {
-            var m = l.href.match(/\/matches\/(\d+)/i);
-            if (m) ids.push(m[1]);
-        });
-        return [...new Set(ids)];
-        '''
-        match_ids = driver.execute_script(script_js)
+        for month_idx in range(MONTHS_TO_NAVIGATE):
+            driver.execute_script("window.scrollBy(0, 500);")
+            time.sleep(2)
+        
+            script_js = r'''
+            var ids = [];
+            var links = document.querySelectorAll('a[href*="/matches/"]');
+            links.forEach(function(l) {
+                var m = l.href.match(/\/matches\/(\d+)/i);
+                if (m) ids.push(m[1]);
+            });
+            return [...new Set(ids)];
+            '''
+            ids = driver.execute_script(script_js)
 
-        if not match_ids:
-            log.warning("  âš  0 partidos en %s", season_name)
-            driver.save_screenshot(
-                os.path.join(OUTPUT_DIR, f"error_{season_name.replace('/', '-')}.png")
-            )
-            return []
+            if ids:
+                all_match_ids.update(ids)
+                log.info("    Mes %d: %d partidos (total: %d)", month_idx + 1, len(ids), len(all_match_ids))
+                
+            try:
+                prev_btn = driver.find_element(By.ID, "dayChangeBtn-prev")
+                driver.execute_script("arguments[0].click();", prev_btn)
+                time.sleep(4)
+            except Exception:
+                break
 
-        matches = [{'whoscored_match_id': mid, 'season': season_name} for mid in match_ids]
-        log.info("  âœ“ %d partidos encontrados para %s", len(matches), season_name)
+        matches = [{'whoscored_match_id': mid, 'season': season_name} for mid in all_match_ids]
+        log.info("   ✓ %d partidos totales extraídos para %s", len(matches), season_name)
         return matches
-
+    
     except Exception as e:
         log.error("  Error en temporada %s: %s", season_name, e)
         return []
 
 
-# â”€â”€ OBTENER EVENTOS DE UN PARTIDO â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
 def get_match_data(driver: webdriver.Chrome, match_id: str, season_name: str) -> dict:
-    """
-    Obtiene los datos de un partido desde matchCentreData.
-    WhoScored incrusta todos los datos en un objeto JS dentro del HTML.
-    """
-    # Usa la URL en minÃºsculas que es la que funciona
+    """Obtiene los datos de un partido desde matchCentreData."""
     url = f"https://es.whoscored.com/matches/{match_id}/live"
 
     try:
         driver.get(url)
         random_sleep()
-
-        # Acepta cookies si aparece
         accept_cookies(driver)
 
         WebDriverWait(driver, 15).until(
@@ -184,18 +204,13 @@ def get_match_data(driver: webdriver.Chrome, match_id: str, season_name: str) ->
         )
 
         soup = BeautifulSoup(driver.page_source, 'html.parser')
-
-        # Busca el script que contiene matchCentreData
         script = soup.find('script', string=re.compile('matchCentreData'))
         if not script:
-            log.warning("  No se encontrÃ³ matchCentreData para partido %s", match_id)
             return {}
 
-        # Extrae el JSON del objeto matchCentreData
         pattern = r'matchCentreData\s*:\s*(\{.*?\})\s*,\s*\n'
         m = re.search(pattern, script.string, re.DOTALL)
         if not m:
-            log.warning("  No se pudo extraer matchCentreData para partido %s", match_id)
             return {}
 
         data = json.loads(m.group(1))
@@ -204,14 +219,13 @@ def get_match_data(driver: webdriver.Chrome, match_id: str, season_name: str) ->
         return data
 
     except Exception as e:
-        log.error("  Error en partido %s: %s", match_id, e)
+        log.error("  Error extrayendo matchCentreData para partido %s: %s", match_id, e)
         return {}
 
 
-# â”€â”€ TRANSFORMACIÃ“N â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── TRANSFORMACIÓN ─────────────────────────────────────────────────────────────
 
 def extract_events(match_data: dict) -> list[dict]:
-    """Extrae eventos con coordenadas normalizadas a 0-1."""
     match_id = match_data.get('whoscored_match_id')
     season   = match_data.get('season')
     events   = match_data.get('events', [])
@@ -219,10 +233,8 @@ def extract_events(match_data: dict) -> list[dict]:
     result = []
     for e in events:
         try:
-            x = e.get('x')
-            y = e.get('y')
-            end_x = e.get('endX')
-            end_y = e.get('endY')
+            x, y = e.get('x'), e.get('y')
+            end_x, end_y = e.get('endX'), e.get('endY')
 
             result.append({
                 'whoscored_match_id':  match_id,
@@ -242,15 +254,12 @@ def extract_events(match_data: dict) -> list[dict]:
                 'season':              season,
                 'source':              'whoscored',
             })
-        except Exception as ex:
-            log.warning("  Error procesando evento: %s", ex)
+        except Exception:
             continue
-
     return result
 
 
 def extract_players_from_match(match_data: dict) -> list[dict]:
-    """Extrae jugadores de ambos equipos."""
     players = []
     for side in ('home', 'away'):
         team_data = match_data.get(side, {})
@@ -269,7 +278,6 @@ def extract_players_from_match(match_data: dict) -> list[dict]:
 
 
 def extract_teams_from_match(match_data: dict) -> list[dict]:
-    """Extrae equipos del partido."""
     teams = []
     for side in ('home', 'away'):
         team_data = match_data.get(side, {})
@@ -281,154 +289,128 @@ def extract_teams_from_match(match_data: dict) -> list[dict]:
     return teams
 
 
-# â”€â”€ ORQUESTADOR PRINCIPAL â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── ORQUESTADOR PRINCIPAL ──────────────────────────────────────────────────────
 
-def scrape_whoscored():
-    """Orquestador principal. Recorre todas las temporadas y partidos."""
-    all_matches = []
-    all_events  = []
-    all_players = []
-    all_teams   = []
+def scrape_whoscored(competition: str, season: str = None, from_date: str = None, match_ids: list = None):
+    """
+    Ejecuta el scraper de WhoScored.
+    
+    Args:
+        competition: Nombre de la competición (ej: "La Liga")
+        season:      Temporada a scrapear (ej: "2024/2025"). Si None, scrapea todas.
+        from_date:   (Ignorado por eficiencia, en su lugar verificamos la BD)
+        match_ids:   Lista de IDs específicos a descargar (opcional).
+    """
+    # 1. Obtener URLs de la competición
+    comp_config = get_competition(competition)
+    comp_name = comp_config["name"] if comp_config else competition
+    urls_dict = WHOSCORED_URLS.get(comp_name)
+    
+    if not urls_dict:
+        log.error("WhoScored no tiene URLs configuradas para '%s'", comp_name)
+        return
 
+    seasons_to_scrape = {season: urls_dict[season]} if season and season in urls_dict else urls_dict
+
+    # 2. Configurar directorio de salida
+    comp_slug = comp_name.lower().replace(" ", "-")
+    
+    # Si se especifica temporada, crear subcarpeta estandarizada
+    if season:
+        folder_season = season.replace("/", "_")
+        out_dir = BASE_OUTPUT_DIR / comp_slug / f"season={folder_season}"
+    else:
+        out_dir = BASE_OUTPUT_DIR / comp_slug
+        
+    os.makedirs(out_dir, exist_ok=True)
+
+    all_matches, all_events, all_players, all_teams = [], [], [], []
     driver = create_driver()
 
     try:
-        log.info("Iniciando navegador...")
+        log.info("Iniciando navegador para WhoScored...")
         driver.get("https://es.whoscored.com")
         time.sleep(5)
         accept_cookies(driver)
 
-        for season_name, url in SEASON_URLS.items():
-            log.info("\nðŸ“… Temporada %s", season_name)
+        # 3. Obtener partidos que ya tenemos en BD (incremental)
+        existing_ids = get_existing_whoscored_match_ids()
+        if existing_ids:
+            log.info("[UPDATE] %d partidos de WhoScored ya están en BD. Se omitirán.", len(existing_ids))
 
-            matches = get_season_matches(driver, season_name, url)
+        for season_name, url in seasons_to_scrape.items():
+            log.info("\n📅 Temporada %s", season_name)
+
+            if match_ids:
+                matches = [{'whoscored_match_id': str(mid), 'season': season_name} for mid in match_ids]
+            else:
+                matches = get_season_matches(driver, season_name, url)
+
             if not matches:
                 continue
 
             all_matches.extend(matches)
-
+            
+            # 4. Procesar solo los nuevos
             for i, match in enumerate(matches, 1):
-                mid = match['whoscored_match_id']
-                log.info("  [%d/%d] Partido %s", i, len(matches), mid)
+                mid = str(match['whoscored_match_id'])
+                
+                # ¡Magia incremental! Si ya existe, saltamos la descarga de Selenium (que es lenta)
+                if mid in existing_ids and not match_ids:
+                    log.info("  [%d/%d] Partido %s ya en BD -> OMITIDO", i, len(matches), mid)
+                    continue
+
+                log.info("  [%d/%d] Partido %s -> DESCARGANDO", i, len(matches), mid)
 
                 match_data = get_match_data(driver, mid, season_name)
                 if not match_data or 'events' not in match_data:
+                    log.warning("    No se encontraron eventos")
                     continue
 
-                all_events.extend(extract_events(match_data))
+                events = extract_events(match_data)
+                all_events.extend(events)
                 all_players.extend(extract_players_from_match(match_data))
                 all_teams.extend(extract_teams_from_match(match_data))
 
-                if i % 10 == 0:
-                    log.info("  â†’ %d/%d partidos | eventos: %d",
-                             i, len(matches), len(all_events))
+                log.info("    -> %d eventos guardados", len(events))
 
-            log.info("  âœ“ Temporada %s completa", season_name)
+            log.info("  ✓ Temporada %s completa", season_name)
 
     except Exception as e:
-        log.error("Error fatal: %s", e)
+        log.error("Error fatal en WhoScored: %s", e)
     finally:
         driver.quit()
         log.info("Driver cerrado.")
 
-    df_players = pd.DataFrame(all_players)
-    df_teams   = pd.DataFrame(all_teams)
-
-    return (
-        pd.DataFrame(all_matches),
-        pd.DataFrame(all_events),
-        df_players.drop_duplicates(subset=['whoscored_player_id']) if not df_players.empty else df_players,
-        df_teams.drop_duplicates(subset=['whoscored_team_id']) if not df_teams.empty else df_teams,
-    )
-
-
-# â”€â”€ MAIN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-def main():
-    print("=" * 55)
-    print(f"  WhoScored scraper â€” La Liga 2020/21 â†’ 2025/26")
-    print("=" * 55)
-
-    df_matches, df_events, df_players, df_teams = scrape_whoscored()
-
-    if df_matches.empty:
-        print("\nâš  No se obtuvieron datos.")
+    # 5. Guardar CSVs
+    if not all_matches:
+        log.warning("No se extrajeron datos de WhoScored.")
         return
 
-    matches_path = os.path.join(OUTPUT_DIR, "whoscored_matches_laliga.csv")
-    events_path  = os.path.join(OUTPUT_DIR, "whoscored_events_laliga.csv")
-    players_path = os.path.join(OUTPUT_DIR, "whoscored_players_laliga.csv")
-    teams_path   = os.path.join(OUTPUT_DIR, "whoscored_teams_laliga.csv")
+    df_matches = pd.DataFrame(all_matches)
+    df_events = pd.DataFrame(all_events)
+    df_players = pd.DataFrame(all_players).drop_duplicates(subset=['whoscored_player_id']) if all_players else pd.DataFrame()
+    df_teams = pd.DataFrame(all_teams).drop_duplicates(subset=['whoscored_team_id']) if all_teams else pd.DataFrame()
 
-    df_matches.to_csv(matches_path, index=False)
-    df_events.to_csv( events_path,  index=False)
-    df_players.to_csv(players_path, index=False)
-    df_teams.to_csv(  teams_path,   index=False)
+    df_matches.to_csv(out_dir / f"whoscored_matches.csv", index=False)
+    if not df_events.empty:
+        df_events.to_csv(out_dir / f"whoscored_events.csv", index=False)
+    if not df_players.empty:
+        df_players.to_csv(out_dir / f"whoscored_players.csv", index=False)
+    if not df_teams.empty:
+        df_teams.to_csv(out_dir / f"whoscored_teams.csv", index=False)
 
-    print(f"\nâœ… Scraping finalizado")
-    print(f"  Partidos: {len(df_matches)}")
-    print(f"  Eventos:  {len(df_events)}")
-    print(f"  Jugadores:{len(df_players)}")
-    print(f"  Equipos:  {len(df_teams)}")
-    print(f"\nðŸ“ Archivos en: {OUTPUT_DIR}")
-
-
-def scrape_whoscored_with_args(
-    region_id: int = None,
-    tournament_id: int = None,
-    seasons: list[str] = None,
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Versión de scrape_whoscored que acepta parámetros.
-    
-    Args:
-        region_id: ID de región en WhoScored (ej: 206 para España)
-        tournament_id: ID de torneo en WhoScored (ej: 4 para La Liga)
-        seasons: Lista de temporadas (ej: ["2024/25"])
-    
-    Returns:
-        (df_matches, df_events, df_players, df_teams)
-    """
-    # Valores por defecto (La Liga)
-    if region_id is None:
-        region_id = 206
-    if tournament_id is None:
-        tournament_id = 4
-    if seasons is None:
-        seasons = list(SEASON_URLS.keys())
-    
-    # Generar URLs dinámicamente
-    dynamic_urls = {}
-    for season in seasons:
-        # URL base - el formato puede variar según la competición
-        dynamic_urls[season] = f"https://es.whoscored.com/regions/{region_id}/tournaments/{tournament_id}/seasons/"
-    
-    # Usar las URLs generadas o las predefinidas
-    urls_to_use = dynamic_urls if dynamic_urls != {"2020/21": "https://es.whoscored.com/regions/206/tournaments/4/seasons/"} else SEASON_URLS
-    
-    return scrape_whoscored()
+    log.info("\n✅ Scraping WhoScored finalizado")
+    log.info("  Partidos encontrados: %d", len(df_matches))
+    log.info("  Eventos nuevos:       %d", len(df_events))
+    log.info("  Archivos en: %s", out_dir)
 
 
 if __name__ == "__main__":
     import argparse
-    
     parser = argparse.ArgumentParser(description="Scraper de WhoScored")
-    parser.add_argument("--region-id", "-r", type=int, default=None,
-                        help="ID de región en WhoScored (ej: 206 para España)")
-    parser.add_argument("--tournament-id", "-t", type=int, default=None,
-                        help="ID de torneo en WhoScored (ej: 4 para La Liga)")
-    parser.add_argument("--seasons", "-s", type=str, default=None,
-                        help="Temporadas a scrapear separadas por coma (ej: 2024/25,2023/24)")
-    
+    parser.add_argument("--competition", "-c", type=str, default="La Liga", help="Competición (ej: La Liga, UEFA Champions League)")
+    parser.add_argument("--season", "-s", type=str, default=None, help="Temporada (ej: 2024/2025). Si no, todas.")
     args = parser.parse_args()
     
-    # Procesar temporadas
-    if args.seasons:
-        seasons = [s.strip() for s in args.seasons.split(",")]
-    else:
-        seasons = None
-    
-    scrape_whoscored_with_args(
-        region_id=args.region_id,
-        tournament_id=args.tournament_id,
-        seasons=seasons
-    )
+    scrape_whoscored(competition=args.competition, season=args.season)
