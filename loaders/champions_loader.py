@@ -4,8 +4,7 @@ loaders/champions_loader.py
 Carga los datos de la UEFA Champions League en la base de datos.
 
 La idea es tener un archivo de carga por competicion ( u)
-Se mantienn  los loaders de dimensiones y hechos genericos, con metodos genericos que toman el id de la competicion y la ruta 
-(player_loader, match_loader, team_loader, etc)
+Se mantienen los loaders de dimensiones y hechos genericos, con metodos genericos que toman el id de la competicion y la ruta (player_loader_generico, match_loader_generico, team_loader_generico, etc)
 
 """
 import logging
@@ -37,10 +36,11 @@ def _get_competition_id(conn) -> int:
     )).scalar()
 
 
-def _load_dimensions(conn, competition_id: int) -> None:
+def _load_dimensions(competition_id: int) -> None:
     """
     Menú para cargar las tablas de dimensiones de la Champions League.
     Debe ejecutarse antes que los hechos.
+    Cada operación abre su propia conexión y hace commit al terminar.
     """
     opcion = None
     while opcion != "4":
@@ -54,22 +54,26 @@ def _load_dimensions(conn, competition_id: int) -> None:
 
         if opcion == "1":
             log.info("Cargando teams...")
-            load_teams(conn, ss_path=SS_CHAMPIONS, tm_path=TM_CHAMPIONS, ws_path=WS_CHAMPIONS)
+            with engine.begin() as conn:
+                load_teams(conn, ss_path=SS_CHAMPIONS, tm_path=TM_CHAMPIONS, ws_path=WS_CHAMPIONS)
             log.info("Teams completado.")
         elif opcion == "2":
             log.info("Cargando players...")
-            load_players(conn, tm_path=TM_CHAMPIONS, ss_path=SS_CHAMPIONS, ws_path=WS_CHAMPIONS)
+            with engine.begin() as conn:
+                load_players(conn, tm_path=TM_CHAMPIONS, ss_path=SS_CHAMPIONS, ws_path=WS_CHAMPIONS)
             log.info("Players completado.")
         elif opcion == "3":
             log.info("Cargando matches...")
-            load_matches(conn, ss_path=SS_CHAMPIONS, competition_id=competition_id, ws_path=WS_CHAMPIONS)
+            with engine.begin() as conn:
+                load_matches(conn, ss_path=SS_CHAMPIONS, competition_id=competition_id, ws_path=WS_CHAMPIONS)
             log.info("Matches completado.")
 
 
-def _load_facts(conn, competition_id: int) -> None:
+def _load_facts(competition_id: int) -> None:
     """
     Menú para cargar las tablas de hechos de la Champions League.
     Requiere que las dimensiones estén cargadas previamente.
+    Cada operación abre su propia conexión y hace commit al terminar.
     """
     opcion = None
     while opcion != "4":
@@ -83,15 +87,18 @@ def _load_facts(conn, competition_id: int) -> None:
 
         if opcion == "1":
             log.info("Cargando shots...")
-            load_shots(conn, ss_path=SS_CHAMPIONS, competition_id=competition_id)
+            with engine.begin() as conn:
+                load_shots(conn, ss_path=SS_CHAMPIONS, competition_id=competition_id)
             log.info("Shots completado.")
         elif opcion == "2":
             log.info("Cargando events...")
-            load_events(conn, ws_path=WS_CHAMPIONS)
+            with engine.begin() as conn:
+                load_events(conn, ws_path=WS_CHAMPIONS)
             log.info("Events completado.")
         elif opcion == "3":
             log.info("Cargando injuries...")
-            load_injuries(conn, tm_path=TM_CHAMPIONS)
+            with engine.begin() as conn:
+                load_injuries(conn, tm_path=TM_CHAMPIONS)
             log.info("Injuries completado.")
 
 
@@ -100,8 +107,9 @@ def main() -> None:
 
     with engine.begin() as conn:
         competition_id = _get_competition_id(conn)
-        _load_dimensions(conn, competition_id)
-        _load_facts(conn, competition_id)
+
+    _load_dimensions(competition_id)
+    _load_facts(competition_id)
 
 
 if __name__ == "__main__":
