@@ -29,14 +29,22 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
     # ESPAÑA
     # ═══════════════════════════════════════════════════════════════════
     
+
+
     "La Liga": {
         "name": "LaLiga",
         "country": "Spain",
         "country_code": "ES",
         "sources": {
+
+            # En  transfermarkt  las url usan slugs. 
+            # hay que añadir el slug de la competición al diccionario
+            # Se añade el slug en todos los diccionarios 
+
             "transfermarkt": {
                 "league_code": "ES1",
                 "name": "LaLiga",
+                "slug":"laliga",
             },
             "sofascore": {
                 "tournament_id": 8,
@@ -66,6 +74,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             "transfermarkt": {
                 "league_code": "ES2",
                 "name": "LaLiga2",
+                "slug": "laliga2",
             },
             "sofascore": {
                 "tournament_id": 39,
@@ -100,6 +109,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             "transfermarkt": {
                 "league_code": "GB1",
                 "name": "Premier League",
+                "slug": "premier-league",
             },
             "sofascore": {
                 "tournament_id": 2,
@@ -129,6 +139,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             "transfermarkt": {
                 "league_code": "GB2",
                 "name": "Championship",
+                "slug":"championship",
             },
             "sofascore": {
                 "tournament_id": 35,
@@ -162,6 +173,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             "transfermarkt": {
                 "league_code": "L1",
                 "name": "Bundesliga",
+                "slug": "bundesliga",
             },
             "sofascore": {
                 "tournament_id": 3,
@@ -195,6 +207,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             "transfermarkt": {
                 "league_code": "IT1",
                 "name": "Serie A",
+                "slug":"serie-a",
             },
             "sofascore": {
                 "tournament_id": 4,
@@ -228,6 +241,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             "transfermarkt": {
                 "league_code": "FR1",
                 "name": "Ligue 1",
+                "slug":"ligue-1",
             },
             "sofascore": {
                 "tournament_id": 5,
@@ -260,7 +274,9 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
         "sources": {
             "transfermarkt": {
                 "league_code": "PO1",
+                 #LigaPortugal pone en la web 
                 "name": "Primeira Liga",
+                "slug": "liga-nos",
             },
             "sofascore": {
                 "tournament_id": 314,
@@ -294,6 +310,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             "transfermarkt": {
                 "league_code": "NL1",
                 "name": "Eredivisie",
+                "slug":"eredivisie",
             },
             "sofascore": {
                 "tournament_id": 9,
@@ -327,6 +344,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             "transfermarkt": {
                 "league_code": "CL",
                 "name": "Champions League",
+                "slug": "uefa-champions-league",
             },
             "sofascore": {
                 "tournament_id": 7,
@@ -341,8 +359,8 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Champions League",
             },
             "whoscored": {
-                "region_id": 2,
-                "tournament_id": 3,
+                "region_id": 250, #cambiado. antes era 2
+                "tournament_id": 12, # cambiado. antes era 3
                 "name": "Champions League",
             },
         },
@@ -356,6 +374,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             "transfermarkt": {
                 "league_code": "EL",
                 "name": "Europa League",
+                "slug": "europa-league",
             },
             "sofascore": {
                 "tournament_id": 679,
@@ -385,6 +404,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             "transfermarkt": {
                 "league_code": "ECL",
                 "name": "Conference League",
+                "slug":"uefa-europa-conference-league"
             },
             "sofascore": {
                 "tournament_id": 2050,
@@ -436,6 +456,16 @@ def get_source_ids(competition_name: str, source: str) -> Dict[str, Any]:
     return {}
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# SLUG
+# ═══════════════════════════════════════════════════════════════════════
+def get_competition_slug_tranfermarkt (competition_name: str) -> str | None:
+    """Obtiene el slug de Transfermarkt para una competición."""
+    comp = get_competition(competition_name)
+    if comp:
+        return comp["sources"].get("transfermarkt", {}).get("slug")
+    return None
+
 def list_competitions() -> list[Dict[str, Any]]:
     """Lista todas las competiciones disponibles."""
     return [
@@ -471,3 +501,7 @@ LALIGA_IDS = {
     "understat": LALIGA["sources"]["understat"]["league"],               # "La_Liga"
     "statsbomb": LALIGA["sources"]["statsbomb"]["competition_id"],       # 11
 }
+
+
+
+
