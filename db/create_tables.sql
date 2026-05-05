@@ -30,7 +30,7 @@ WHERE
 
 CREATE UNIQUE INDEX ux_team_statsbomb ON dim_team (id_statsbomb)
 WHERE
-    id_statsbomb IS NOT NULL;
+    id_statsbomb IS NOT NULL
     AND id_statsbomb <> ''
     AND id_statsbomb <> '0';
 
