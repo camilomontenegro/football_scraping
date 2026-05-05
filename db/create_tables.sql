@@ -31,6 +31,8 @@ WHERE
 CREATE UNIQUE INDEX ux_team_statsbomb ON dim_team (id_statsbomb)
 WHERE
     id_statsbomb IS NOT NULL;
+    AND id_statsbomb <> ''
+    AND id_statsbomb <> '0';
 
 CREATE UNIQUE INDEX ux_team_whoscored ON dim_team (id_whoscored)
 WHERE
@@ -66,6 +68,8 @@ WHERE
 CREATE UNIQUE INDEX ux_player_statsbomb ON dim_player (id_statsbomb)
 WHERE
     id_statsbomb IS NOT NULL;
+    AND id_statsbomb <> ''
+    AND id_statsbomb <> '0';
 
 CREATE UNIQUE INDEX ux_player_whoscored ON dim_player (id_whoscored)
 WHERE
@@ -101,31 +105,36 @@ WHERE
 
 
 -- ── dim_competition ────────────────────────────────────────────
-CREATE TABLE dim_competition(
+CREATE TABLE dim_competition (
     canonical_id SERIAL PRIMARY KEY,
     canonical_name VARCHAR(150) NOT NULL,
     id_sofascore INTEGER,
     id_understat VARCHAR(50),
-    -- problema TF usa  string como codigo para las competiciones
-    id_transfermarkt INTEGER,
+    id_transfermarkt VARCHAR(50),
     id_statsbomb VARCHAR(50),
     id_whoscored INTEGER,
-    created_at TIMESTAMP DEFAULT NOW()
+    created_at TIMESTAMP DEFAULT NOW(),
+    country VARCHAR(100),
+    country_code VARCHAR(10)
 );
--- garantiza que no haya dos competiciones con el mismo nombre
+
 CREATE UNIQUE INDEX idx_dim_competition_name_unique 
 ON dim_competition(canonical_name);
 
+CREATE UNIQUE INDEX idx_dim_competition_transfermarkt_unique  
+ON dim_competition(id_transfermarkt) 
+WHERE id_transfermarkt IS NOT NULL 
+AND id_transfermarkt <> '';
 
-CREATE UNIQUE INDEX idx_dim_competition_transfermarkt_unique  ON dim_competition(id_transfermarkt) 
-WHERE id_transfermarkt IS NOT NULL;
-
-CREATE UNIQUE INDEX idx_dim_competition_sofascore_unique ON dim_competition(id_sofascore) 
-WHERE id_sofascore IS NOT NULL;  
+CREATE UNIQUE INDEX idx_dim_competition_sofascore_unique 
+ON dim_competition(id_sofascore) 
+WHERE id_sofascore IS NOT NULL 
+AND id_sofascore <> 0;
 
 CREATE UNIQUE INDEX idx_dim_competition_whoscored_unique
-ON dim_competition(id_whoscored) WHERE id_whoscored IS NOT NULL;
-
+ON dim_competition(id_whoscored) 
+WHERE id_whoscored IS NOT NULL 
+AND id_whoscored <> 0;
 
 
 -- ── dim_match ─────────────────────────────────────────────
@@ -157,6 +166,8 @@ WHERE
 CREATE UNIQUE INDEX ux_match_statsbomb ON dim_match (id_statsbomb)
 WHERE
     id_statsbomb IS NOT NULL;
+    AND id_statsbomb <> ''
+    AND id_statsbomb <> '0';
 
 CREATE UNIQUE INDEX ux_match_whoscored ON dim_match (id_whoscored)
 WHERE
