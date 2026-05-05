@@ -34,6 +34,20 @@ RAW_US = PROJECT_ROOT / "data" / "raw" / "understat"
 RAW_SB = PROJECT_ROOT / "data" / "raw" / "statsbomb"
 RAW_WS = PROJECT_ROOT / "data" / "raw" / "whoscored"
 
+def _get_src_slug(comp_name: str, source: str) -> str:
+    """Obtiene el slug/nombre de carpeta para una fuente y competición."""
+    from scripts.competitions import get_competition
+    cfg = get_competition(comp_name)
+    if not cfg:
+        return comp_name.lower().replace(" ", "-") # fallback
+    
+    src_cfg = cfg.get("sources", {}).get(source, {})
+    # Prioridad: slug > name > comp_name_slugificado
+    slug = src_cfg.get("slug") or src_cfg.get("name")
+    if slug:
+        return slug.lower().replace(" ", "-")
+    return comp_name.lower().replace(" ", "-")
+
 
 def _ensure_date(val) -> Optional[str]:
     """Asegura formato YYYY-MM-DD y maneja epochs numéricos."""
@@ -86,14 +100,16 @@ def _resolve_team_by_sb_id(conn, sb_id: str) -> Optional[int]:
 
 # ── Carga desde SofaScore ─────────────────────────────────────────────────────
 
-def _load_from_sofascore(conn) -> int:
+def _load_from_sofascore(conn, comp_name: str) -> int:
     """Lee matches_clean.csv de SofaScore → upsert en dim_match.
 
     SofaScore es la fuente master de partidos:
         - canonical_name de equipos via id_sofascore
         - match_date, competition, season, scores
     """
-    files = list(RAW_SS.glob("**/matches_clean.csv"))
+    slug = _get_src_slug(comp_name, "sofascore") if comp_name else None
+    target_dir = RAW_SS / slug if slug else RAW_SS
+    files = list(target_dir.glob("**/matches_clean.csv"))
     if not files:
         log.warning("match_loader: no se encontraron matches_clean.csv en %s", RAW_SS)
         return 0
@@ -186,14 +202,11 @@ def _load_from_sofascore(conn) -> int:
 
 # ── Carga desde Understat ─────────────────────────────────────────────────────
 
-def _load_from_understat(conn) -> int:
-    """Lee understat_matches_laliga.csv → añade id_understat a partidos SS ya cargados.
-
-    Estrategia de matching:
-        Buscar dim_match por (match_date, home_team_id, away_team_id) donde
-        equipos se resuelven via id_understat en dim_team.
-    """
-    files = list(RAW_US.glob("**/*matches*.csv"))
+def _load_from_understat(conn, comp_name: str) -> int:
+    """Lee matches.csv de Understat → enlaza id_understat a dim_match."""
+    slug = _get_src_slug(comp_name, "understat") if comp_name else None
+    target_dir = RAW_US / slug if slug else RAW_US
+    files = list(target_dir.glob("**/matches.csv"))
     if not files:
         log.info("match_loader: no hay archivos de matches de understat")
         return 0
@@ -276,9 +289,11 @@ def _load_from_understat(conn) -> int:
     return linked
 
 
-def _load_from_statsbomb(conn) -> int:
+def _load_from_statsbomb(conn, comp_name: str) -> int:
     """Lee matches_clean.csv de StatsBomb → añade id_statsbomb a partidos existentes."""
-    files = list(RAW_SB.glob("**/matches_clean.csv"))
+    slug = _get_src_slug(comp_name, "statsbomb") if comp_name else None
+    target_dir = RAW_SB / slug if slug else RAW_SB
+    files = list(target_dir.glob("**/matches_clean.csv"))
     if not files:
         return 0
 
@@ -349,12 +364,14 @@ def _load_from_statsbomb(conn) -> int:
     return linked
 
 
-def _load_from_whoscored(conn) -> int:
-    """Lee whoscored_events_laliga.csv → añade id_whoscored a partidos existentes.
+def _load_from_whoscored(conn, comp_name: str) -> int:
+    """Lee whoscored_events.csv → añade id_whoscored a partidos existentes.
     
     Como el CSV de matches de WS no tiene equipos, los extraemos de los eventos.
     """
-    files = list(RAW_WS.glob("**/*events*.csv"))
+    slug = _get_src_slug(comp_name, "whoscored") if comp_name else None
+    target_dir = RAW_WS / slug if slug else RAW_WS
+    files = list(target_dir.glob("**/*events*.csv"))
     if not files:
         return 0
 
@@ -433,19 +450,14 @@ def _load_from_whoscored(conn) -> int:
 
 # ── Punto de entrada ──────────────────────────────────────────────────────────
 
-def load_matches(conn) -> int:
-    """Carga dim_match desde SofaScore (master) y Understat (complementario).
-
-    Returns:
-        Número total de partidos en dim_match.
-    """
-    log.info("[START] Cargando dim_match...")
-    _load_from_sofascore(conn)
-    _load_from_understat(conn)
-    _load_from_statsbomb(conn)
-    _load_from_whoscored(conn)
-
-    total = conn.execute(text("SELECT COUNT(*) FROM dim_match")).scalar()
+def load_matches(conn, comp_name: str = None) -> int:
+    """Orquesta las fases de carga de partidos."""
+    log.info(f"[START] Cargando dim_match ({comp_name or 'todas'})...")
+    total = 0
+    total += _load_from_sofascore(conn, comp_name)
+    total += _load_from_understat(conn, comp_name)
+    total += _load_from_statsbomb(conn, comp_name)
+    total += _load_from_whoscored(conn, comp_name)
     log.info("[OK] dim_match completado — %d partidos", total)
     return total
 

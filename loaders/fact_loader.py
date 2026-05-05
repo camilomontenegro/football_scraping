@@ -42,6 +42,20 @@ RAW_US = Path("data/raw/understat")
 RAW_SB = Path("data/raw/statsbomb")
 RAW_WS = Path("data/raw/whoscored")
 
+def _get_src_slug(comp_name: str, source: str) -> str:
+    """Obtiene el slug/nombre de carpeta para una fuente y competición."""
+    from scripts.competitions import get_competition
+    cfg = get_competition(comp_name)
+    if not cfg:
+        return comp_name.lower().replace(" ", "-") # fallback
+    
+    src_cfg = cfg.get("sources", {}).get(source, {})
+    # Prioridad: slug > name > comp_name_slugificado
+    slug = src_cfg.get("slug") or src_cfg.get("name")
+    if slug:
+        return slug.lower().replace(" ", "-")
+    return comp_name.lower().replace(" ", "-")
+
 
 def _ensure_date(val) -> Optional[str]:
     """Asegura formato YYYY-MM-DD y maneja epochs numéricos."""
@@ -138,8 +152,10 @@ def _safe_float(val) -> Optional[float]:
 
 # ── FACT_SHOTS ────────────────────────────────────────────────────────────────
 
-def _load_shots_sofascore(conn) -> int:
-    files = list(RAW_SS.glob("**/*shots*.csv"))
+def _load_shots_sofascore(conn, comp_name: str) -> int:
+    slug = _get_src_slug(comp_name, "sofascore") if comp_name else None
+    target_dir = RAW_SS / slug if slug else RAW_SS
+    files = list(target_dir.glob("**/shots.csv"))
     if not files:
         log.info("fact_shots: no hay archivos de tiros de SofaScore")
         return 0
@@ -164,6 +180,12 @@ def _load_shots_sofascore(conn) -> int:
                 skipped += 1
                 continue
 
+            # Normalización a metros (105x68) si es SofaScore (que viene 0-100)
+            x_val = _safe_float(row.get("x"))
+            y_val = _safe_float(row.get("y"))
+            if x_val is not None: x_val *= 1.05
+            if y_val is not None: y_val *= 0.68
+
             conn.execute(text("""
                 INSERT INTO fact_shots
                     (match_id, player_id, team_id, minute, x, y, xg,
@@ -177,8 +199,8 @@ def _load_shots_sofascore(conn) -> int:
                 "pid":    pid,
                 "tid":    tid,
                 "min":    _safe_int(row.get("minute")),
-                "x":      _safe_float(row.get("x")),
-                "y":      _safe_float(row.get("y")),
+                "x":      x_val,
+                "y":      y_val,
                 "xg":     _safe_float(row.get("xg")),
                 "result": row.get("result") or None,
                 "stype":  row.get("shot_type") or None,
@@ -194,8 +216,10 @@ def _load_shots_sofascore(conn) -> int:
     return count
 
 
-def _load_shots_understat(conn) -> int:
-    files = list(RAW_US.glob("**/*shots*.csv"))
+def _load_shots_understat(conn, comp_name: str) -> int:
+    slug = _get_src_slug(comp_name, "understat") if comp_name else None
+    target_dir = RAW_US / slug if slug else RAW_US
+    files = list(target_dir.glob("**/*shots*.csv"))
     if not files:
         log.info("fact_shots: no hay archivos de tiros de understat")
         return 0
@@ -259,19 +283,21 @@ def _load_shots_understat(conn) -> int:
     return count
 
 
-def load_shots(conn) -> int:
+def load_shots(conn, comp_name: str = None) -> int:
     """Carga fact_shots desde SofaScore y Understat."""
-    log.info("[START] Cargando fact_shots...")
-    total = _load_shots_sofascore(conn) + _load_shots_understat(conn)
+    log.info(f"[START] Cargando fact_shots ({comp_name or 'todas'})...")
+    total = _load_shots_sofascore(conn, comp_name) + _load_shots_understat(conn, comp_name)
     log.info("[OK] fact_shots completado — %d tiros insertados", total)
     return total
 
 
 # ── FACT_EVENTS ───────────────────────────────────────────────────────────────
 
-def _load_events_source(conn, source: str, file_pattern: str, files_dir: Path) -> int:
+def _load_events_source(conn, source: str, file_pattern: str, files_dir: Path, comp_name: str = None) -> int:
     """Carga eventos de una fuente genérica."""
-    files = list(files_dir.glob(file_pattern))
+    slug = _get_src_slug(comp_name, source) if comp_name else None
+    target_dir = files_dir / slug if slug else files_dir
+    files = list(target_dir.glob(file_pattern))
     if not files:
         log.info("fact_events: no hay archivos %s en %s", file_pattern, files_dir)
         return 0
@@ -325,6 +351,19 @@ def _load_events_source(conn, source: str, file_pattern: str, files_dir: Path) -
             skipped += 1
             continue
 
+        # Normalización a metros (105x68) para SofaScore y WhoScored (0-100)
+        # StatsBomb suele usar 0-120 x 0-80, pero aquí nos centramos en SS/WS
+        x = _safe_float(row.get("x"))
+        y = _safe_float(row.get("y"))
+        ex = _safe_float(row.get("end_x"))
+        ey = _safe_float(row.get("end_y"))
+
+        if source in ["sofascore", "whoscored"]:
+            if x is not None:  x  *= 1.05
+            if y is not None:  y  *= 0.68
+            if ex is not None: ex *= 1.05
+            if ey is not None: ey *= 0.68
+
         conn.execute(text("""
             INSERT INTO fact_events
                 (match_id, player_id, team_id, event_type,
@@ -343,10 +382,10 @@ def _load_events_source(conn, source: str, file_pattern: str, files_dir: Path) -
             "etype": row.get("event_type") or None,
             "min":   _safe_int(row.get("minute")),
             "sec":   _safe_int(row.get("second")),
-            "x":     _safe_float(row.get("x")),
-            "y":     _safe_float(row.get("y")),
-            "ex":    _safe_float(row.get("end_x")),
-            "ey":    _safe_float(row.get("end_y")),
+            "x":     x,
+            "y":     y,
+            "ex":    ex,
+            "ey":    ey,
             "out":   row.get("outcome") or None,
             "src":   source,
         })
@@ -356,23 +395,25 @@ def _load_events_source(conn, source: str, file_pattern: str, files_dir: Path) -
     return count
 
 
-def load_events(conn) -> int:
+def load_events(conn, comp_name: str = None) -> int:
     """Carga fact_events desde SofaScore, StatsBomb y WhoScored."""
-    log.info("[START] Cargando fact_events...")
+    log.info(f"[START] Cargando fact_events ({comp_name or 'todas'})...")
     total = 0
-    total += _load_events_source(conn, "sofascore", "**/*events*.csv", RAW_SS)
-    total += _load_events_source(conn, "statsbomb", "**/*events*.csv", RAW_SB)
-    total += _load_events_source(conn, "whoscored", "**/*events*.csv", RAW_WS)
-    log.info("[OK] fact_events completado — %d eventos insertados", total)
+    total += _load_events_source(conn, "sofascore", "**/*events*.csv", RAW_SS, comp_name)
+    total += _load_events_source(conn, "statsbomb", "**/*events*.csv", RAW_SB, comp_name)
+    total += _load_events_source(conn, "whoscored", "**/*events*.csv", RAW_WS, comp_name)
+    log.info("[OK] fact_events completado - %d eventos insertados", total)
     return total
 
 
 # ── FACT_INJURIES ─────────────────────────────────────────────────────────────
 
-def load_injuries(conn) -> int:
+def load_injuries(conn, comp_name: str = None) -> int:
     """Carga fact_injuries desde injuries_clean.json de Transfermarkt."""
-    log.info("[START] Cargando fact_injuries...")
-    files = list(RAW_TM.glob("**/*injuries*.csv"))
+    log.info(f"[START] Cargando fact_injuries ({comp_name or 'todas'})...")
+    slug = _get_src_slug(comp_name, "transfermarkt") if comp_name else None
+    target_dir = RAW_TM / slug if slug else RAW_TM
+    files = list(target_dir.glob("**/*injuries*.csv"))
 
     if not files:
         log.warning("fact_injuries: no hay archivos de injuries en %s", RAW_TM)

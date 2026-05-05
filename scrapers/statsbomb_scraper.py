@@ -120,6 +120,7 @@ def get_lineups(match_id: int) -> dict:
 # â”€â”€ ORCHESTRATOR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def scrape_statsbomb(
+    competition_name: str = None,
     competition_id: int = COMPETITION_ID,
     season_id: int      = None,
     sleep_between: float = DELAY_SEC,
@@ -174,7 +175,22 @@ def scrape_statsbomb(
     print(f"  [OK] {len(matches_df)} partidos encontrados")
 
     # Directorio base
-    comp_dir = OUTPUT_DIR / f"competition_{competition_id}" / f"season_{season_id}"
+    from scripts.competitions import get_competition
+    comp_slug = "la-liga" # Default
+    if competition_name:
+        comp_slug = competition_name.lower().replace(" ", "-")
+    elif competition_id:
+        from scripts.competitions import COMPETITIONS
+        for key, config in COMPETITIONS.items():
+            if config.get("sources", {}).get("statsbomb", {}).get("competition_id") == competition_id:
+                comp_slug = key.lower().replace(" ", "-")
+                break
+
+    # StatsBomb uses simple season format like 2020_2021 if we had it, but season_id is an int.
+    # We'll try to get a better label if possible, or just use the ID for now.
+    folder_season = f"{season_id}" 
+    
+    comp_dir = OUTPUT_DIR / comp_slug / f"season={folder_season}"
 
     all_events:  list[dict] = []
     all_lineups: list[dict] = []

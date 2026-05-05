@@ -201,6 +201,7 @@ def get_scraped_sofascore_match_ids() -> set[int]:
 # ── ORCHESTRATOR ──────────────────────────────────────────────────────────────
 
 def scrape_sofascore(
+    competition_name: str = None,
     season_name: str  = None,
     tournament_id: int = TOURNAMENT_ID,
     from_date: str = None,
@@ -245,12 +246,30 @@ def scrape_sofascore(
         matches = get_matches(driver, tournament_id, season_id)
         print(f"  [+] {len(matches)} partidos encontrados")
 
-        # Normalizar label para carpetas
-        folder_label = season_label.replace("/", "_")
+        print(f"  [+] {len(matches)} partidos encontrados")
 
-        # Directorio base para la temporada
-        base_path = OUTPUT_DIR / f"season={folder_label}"
-        base_path.mkdir(parents=True, exist_ok=True)
+        # Configurar carpeta base con nombre de la competicion
+        from scripts.competitions import get_competition
+        comp_slug = "la-liga" # Default
+        if competition_name:
+            comp_slug = competition_name.lower().replace(" ", "-")
+        elif tournament_id:
+            # Intentar encontrar la competición por tournament_id
+            from scripts.competitions import COMPETITIONS
+            for key, config in COMPETITIONS.items():
+                if config.get("sources", {}).get("sofascore", {}).get("id") == tournament_id:
+                    comp_slug = key.lower().replace(" ", "-")
+                    break
+
+        # Convertir season "2024/2025" a "2024_2025"
+        if season_name:
+            folder_season = season_name.replace("/", "_")
+        else:
+            folder_season = season_label.replace("/", "_").replace(" ", "_")
+        
+        season_dir = OUTPUT_DIR / comp_slug / f"season={folder_season}"
+        season_dir.mkdir(parents=True, exist_ok=True)
+        base_path = season_dir
 
         # Guardar partidos crudos
         _save_json(matches, base_path / f"matches_batch_{batch_id}.json")

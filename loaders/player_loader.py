@@ -50,6 +50,20 @@ RAW_US = PROJECT_ROOT / "data" / "raw" / "understat"
 RAW_SB = PROJECT_ROOT / "data" / "raw" / "statsbomb"
 RAW_WS = PROJECT_ROOT / "data" / "raw" / "whoscored"
 
+def _get_src_slug(comp_name: str, source: str) -> str:
+    """Obtiene el slug/nombre de carpeta para una fuente y competición."""
+    from scripts.competitions import get_competition
+    cfg = get_competition(comp_name)
+    if not cfg:
+        return comp_name.lower().replace(" ", "-") # fallback
+    
+    src_cfg = cfg.get("sources", {}).get(source, {})
+    # Prioridad: slug > name > comp_name_slugificado
+    slug = src_cfg.get("slug") or src_cfg.get("name")
+    if slug:
+        return slug.lower().replace(" ", "-")
+    return comp_name.lower().replace(" ", "-")
+
 
 def _ensure_date(val) -> Optional[str]:
     """Asegura que el valor sea un string de fecha (YYYY-MM-DD).
@@ -74,7 +88,7 @@ def _ensure_date(val) -> Optional[str]:
 
 # ── FASE 1: Transfermarkt como master ──────────────────────────────────────
 
-def _load_phase1_transfermarkt(conn) -> int:
+def _load_phase1_transfermarkt(conn, comp_name: str) -> int:
     """Crea los registros canónicos de jugadores desde Transfermarkt.
 
     Transfermarkt es la fuente de verdad para:
@@ -83,7 +97,9 @@ def _load_phase1_transfermarkt(conn) -> int:
     Returns:
         Número de jugadores insertados/actualizados.
     """
-    files = list(RAW_TM.glob("**/*players*.csv"))
+    slug = _get_src_slug(comp_name, "transfermarkt") if comp_name else None
+    target_dir = RAW_TM / slug if slug else RAW_TM
+    files = list(target_dir.glob("**/*players*.csv"))
 
     if not files:
         log.warning("player_loader fase 1: no se encontró players_clean.csv en %s", RAW_TM)
@@ -155,17 +171,11 @@ def _load_phase1_transfermarkt(conn) -> int:
 
 # ── FASE 2: Linkear IDs de SofaScore ───────────────────────────────────────
 
-def _load_phase2_sofascore(conn) -> tuple[int, int]:
-    """Enlaza id_sofascore a jugadores existentes de TM via resolución de nombre.
-
-    - Match exacto  → UPDATE dim_player.id_sofascore
-    - Match fuzzy   → INSERT player_review (resolved=False)
-    - Sin match     → INSERT player_review para revisión
-
-    Returns:
-        (linked, queued) — enlaces directos y encolados en player_review.
-    """
-    files = list(RAW_SS.glob("**/players.csv"))
+def _load_phase2_sofascore(conn, comp_name: str) -> tuple[int, int]:
+    """Intenta enlazar IDs de SofaScore con dim_player."""
+    slug = _get_src_slug(comp_name, "sofascore") if comp_name else None
+    target_dir = RAW_SS / slug if slug else RAW_SS
+    files = list(target_dir.glob("**/players.csv"))
     if not files:
         log.info("player_loader fase 2: no hay players.csv de SofaScore")
         return 0, 0
@@ -209,21 +219,20 @@ def _load_phase2_sofascore(conn) -> tuple[int, int]:
 
 # ── FASE 3: Linkear IDs de Understat ──────────────────────────────────────
 
-def _load_phase3_understat(conn) -> tuple[int, int]:
-    """Enlaza id_understat a jugadores existentes de TM via resolución de nombre.
-
-    Returns:
-        (linked, queued)
-    """
-    f = RAW_US / "understat_players_laliga.csv"
-    if not f.exists():
-        log.info("player_loader fase 3: no hay understat_players_laliga.csv")
+def _load_phase3_understat(conn, comp_name: str) -> tuple[int, int]:
+    """Intenta enlazar IDs de Understat con dim_player."""
+    slug = _get_src_slug(comp_name, "understat") if comp_name else None
+    target_dir = RAW_US / slug if slug else RAW_US
+    files = list(target_dir.glob("**/understat_players*.csv"))
+    if not files:
+        log.info("player_loader fase 3: no hay understat_players.csv")
         return 0, 0
 
     try:
-        df = pd.read_csv(f)
+        dfs = [pd.read_csv(f) for f in files]
+        df = pd.concat(dfs, ignore_index=True)
     except Exception as e:
-        log.warning("Error leyendo %s: %s", f, e)
+        log.warning("Error leyendo archivos de Understat: %s", e)
         return 0, 0
 
     linked = queued = 0
@@ -253,9 +262,11 @@ def _load_phase3_understat(conn) -> tuple[int, int]:
 
 # ── FASE 4: Linkear IDs de StatsBomb ───────────────────────────────────────
 
-def _load_phase4_statsbomb(conn) -> tuple[int, int]:
-    """Enlaza id_statsbomb a jugadores existentes de TM via resolución de nombre."""
-    files = list(RAW_SB.glob("**/players.csv"))
+def _load_phase4_statsbomb(conn, comp_name: str) -> tuple[int, int]:
+    """Intenta enlazar IDs de StatsBomb con dim_player."""
+    slug = _get_src_slug(comp_name, "statsbomb") if comp_name else None
+    target_dir = RAW_SB / slug if slug else RAW_SB
+    files = list(target_dir.glob("**/players.csv"))
     if not files:
         log.info("player_loader fase 4: no hay players.csv de StatsBomb")
         return 0, 0
@@ -295,9 +306,11 @@ def _load_phase4_statsbomb(conn) -> tuple[int, int]:
 
 # ── FASE 5: Linkear IDs de WhoScored ───────────────────────────────────────
 
-def _load_phase5_whoscored(conn) -> tuple[int, int]:
-    """Enlaza id_whoscored a jugadores existentes de TM via resolución de nombre."""
-    files = list(RAW_WS.glob("**/*players*.csv"))
+def _load_phase5_whoscored(conn, comp_name: str) -> tuple[int, int]:
+    """Intenta enlazar IDs de WhoScored con dim_player."""
+    slug = _get_src_slug(comp_name, "whoscored") if comp_name else None
+    target_dir = RAW_WS / slug if slug else RAW_WS
+    files = list(target_dir.glob("**/whoscored_players*.csv"))
 
     if not files:
         log.info("player_loader fase 5: no hay archivos de WhoScored")
@@ -335,30 +348,24 @@ def _load_phase5_whoscored(conn) -> tuple[int, int]:
     return linked, queued
 
 
-# ── Punto de entrada ──────────────────────────────────────────────────────────
-
-def load_players(conn) -> int:
-    """Carga dim_player en 3 fases respetando la jerarquía de fuentes.
-
-    Returns:
-        Número total de jugadores en dim_player al finalizar.
-    """
-    log.info("[START] Cargando dim_player...")
+def load_players(conn, comp_name: str = None) -> int:
+    """Carga dim_player en 5 fases respetando la jerarquía de fuentes."""
+    log.info(f"[START] Cargando dim_player ({comp_name or 'todas'})...")
 
     # Fase 1 — TM como master (crea los registros canónicos)
-    _load_phase1_transfermarkt(conn)
+    _load_phase1_transfermarkt(conn, comp_name)
 
     # Fase 2 — SofaScore (enlace por nombre)
-    _load_phase2_sofascore(conn)
+    _load_phase2_sofascore(conn, comp_name)
 
     # Fase 3 — Understat (enlace por nombre)
-    _load_phase3_understat(conn)
+    _load_phase3_understat(conn, comp_name)
 
     # Fase 4 — StatsBomb (enlace por nombre)
-    _load_phase4_statsbomb(conn)
+    _load_phase4_statsbomb(conn, comp_name)
 
     # Fase 5 — WhoScored (enlace por nombre)
-    _load_phase5_whoscored(conn)
+    _load_phase5_whoscored(conn, comp_name)
 
     # Reporte final
     total = conn.execute(text("SELECT COUNT(*) FROM dim_player")).scalar()

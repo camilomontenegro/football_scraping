@@ -34,7 +34,6 @@ from typing import Optional
 from scripts.competitions import (
     COMPETITIONS,
     get_competition,
-    get_source_config,
     get_season_start_year,
     get_available_seasons,
     list_competitions,
@@ -285,16 +284,22 @@ def run_scraping(
     # Understat
     if source in ("all", "understat"):
         logger.info("[START] Scraping Understat...")
-        from scrapers.understat_scraper import scrape_laliga, save_understat_data
+        from scrapers.understat_scraper import scrape_understat
 
-        league_code = None
+        understat_cfg = None
         if comp_config:
-            league_code = comp_config["sources"].get("understat", {}).get("league")
+            understat_cfg = comp_config["sources"].get("understat", {})
 
-        df_matches, df_shots = asyncio.run(
-            scrape_laliga([season_start], league=league_code, from_date=from_date)
-        )
-        save_understat_data(df_matches, df_shots)
+        if not understat_cfg or not understat_cfg.get("league"):
+            logger.warning("[SKIP] '%s' no tiene configuración de Understat.", competition)
+        else:
+            asyncio.run(
+                scrape_understat(
+                    competition_name=competition or "La Liga",
+                    seasons=[season_start],
+                    update=bool(from_date),
+                )
+            )
 
     # SofaScore
     if source in ("all", "sofascore"):
@@ -306,6 +311,7 @@ def run_scraping(
             tournament_id = comp_config["sources"].get("sofascore", {}).get("tournament_id")
 
         scrape_sofascore(
+            competition_name=competition,
             season_name=season, 
             tournament_id=tournament_id, 
             from_date=from_date,
@@ -322,6 +328,7 @@ def run_scraping(
             league_code = comp_config["sources"].get("transfermarkt", {}).get("league_code")
 
         scrape_transfermarkt(
+            competition_name=competition,
             league_code=league_code, 
             season=season_start, 
             from_date=from_date,
@@ -339,6 +346,12 @@ def run_scraping(
             competition_id = comp_config["sources"].get("statsbomb", {}).get("competition_id")
 
         scrape_statsbomb(competition_id=competition_id, season_id=season_start, from_date=from_date)
+        scrape_statsbomb(
+            competition_name=competition,
+            competition_id=competition_id, 
+            season_id=season_start, 
+            from_date=from_date
+        )
 
     # WhoScored
     if source in ("all", "whoscored"):
@@ -355,35 +368,48 @@ def run_scraping(
 
 # ── FASE DE CARGA ──────────────────────────────────────────────────────
 
-def run_load():
-    """Carga todos los datos de data/raw/ en la base de datos."""
+def run_load(competition: str = None):
+    """Carga los datos de data/raw/ en la base de datos para la competición especificada o todas."""
     _ensure_loaders()
 
-    logger.info("── CARGANDO DIMENSIONES ────────────────────────────")
+    from scripts.competitions import get_competition, list_competitions
 
-    for name, fn in [
-        ("teams",   _load_teams),
-        ("players", _load_players),
-        ("matches", _load_matches),
-    ]:
-        try:
-            with _engine.begin() as conn:
-                fn(conn)
-        except Exception as e:
-            logger.error("Error loading %s: %s", name, e, exc_info=True)
+    competitions_to_load = [competition] if competition else list_competitions()
 
-    logger.info("── CARGANDO HECHOS (FACTS) ─────────────────────────")
+    for comp_data in competitions_to_load:
+        comp_name = comp_data['name'] if isinstance(comp_data, dict) else comp_data
+        comp_config = get_competition(comp_name)
+        if not comp_config:
+            logger.warning(f"No se encontró configuración para la competición '{comp_name}'. Saltando...")
+            continue
 
-    for name, fn in [
-        ("shots",    _load_shots),
-        ("events",   _load_events),
-        ("injuries", _load_injuries),
-    ]:
-        try:
-            with _engine.begin() as conn:
-                fn(conn)
-        except Exception as e:
-            logger.error("Error loading %s: %s", name, e, exc_info=True)
+        logger.info(f"\n==========================================")
+        logger.info(f"   CARGANDO DATOS: {comp_config['name'].upper()}")
+        logger.info(f"==========================================")
+
+        logger.info("── CARGANDO DIMENSIONES ────────────────────────────")
+        for name, fn in [
+            ("teams",   _load_teams),
+            ("players", _load_players),
+            ("matches", _load_matches),
+        ]:
+            try:
+                with _engine.begin() as conn:
+                    fn(conn, comp_name)
+            except Exception as e:
+                logger.error("Error loading %s for %s: %s", name, comp_name, e, exc_info=True)
+
+        logger.info("── CARGANDO HECHOS (FACTS) ─────────────────────────")
+        for name, fn in [
+            ("shots",    _load_shots),
+            ("events",   _load_events),
+            ("injuries", _load_injuries),
+        ]:
+            try:
+                with _engine.begin() as conn:
+                    fn(conn, comp_name)
+            except Exception as e:
+                logger.error("Error loading %s for %s: %s", name, comp_name, e, exc_info=True)
 
 
 # ── ORCHESTRATOR ───────────────────────────────────────────────────────
@@ -397,6 +423,8 @@ def run_pipeline(
     check_only: bool = False,
     from_date: str = None,
     update: bool = False,
+    full_refresh: bool = False,
+    scrape_only: bool = False,
 ):
     """Orquesta las fases de scraping y carga.
 
@@ -468,13 +496,17 @@ def run_pipeline(
                     season=season,
                     match_ids=match_ids,
                     from_date=from_date,
-                    full_refresh=args.scrape,
+                    full_refresh=full_refresh,
                 )
             except Exception as e:
                 logger.error("Error fatal en fase de scraping: %s", e, exc_info=True)
                 raise SystemExit(1)
 
         # ── Fases 2/3: carga ────────────────────────────────────
+        if scrape_only:
+            logger.info("── MODO SCRAPE-ONLY: saltando fase de carga ─────────")
+            return
+
         logger.info("── FASE 2/3: CARGA EN DB ────────────────────────────")
         try:
             run_load()
@@ -534,9 +566,8 @@ Ejemplos de uso:
         help="Nombre de la competición (ej: 'La Liga', 'Premier League'). Use --list para ver disponibles.",
     )
     parser.add_argument(
-        "--source", "-s", default="all",
-        choices=["all", "understat", "sofascore", "transfermarkt", "statsbomb", "whoscored"],
-        help="Fuente de datos a scrapear (default: all)",
+        "--source", "-s", nargs="+", default=["all"],
+        help="Fuentes de datos a scrapear (default: all). Opciones: understat, sofascore, transfermarkt, statsbomb, whoscored",
     )
     # Calcular temporada actual por defecto
     current_year = datetime.now().year
@@ -546,8 +577,8 @@ Ejemplos de uso:
     default_season = f"{default_season_year}/{default_season_year + 1}"
 
     parser.add_argument(
-        "--season", "-t", type=str, default=default_season,
-        help=f"Temporada (default: {default_season}). Formato: 2024/2025",
+        "--season", "-t", nargs="+", default=[default_season],
+        help=f"Temporadas (default: {default_season}). Formato: 2024/2025",
     )
     parser.add_argument(
         "--match-ids", nargs="+", type=int,
@@ -566,18 +597,35 @@ Ejemplos de uso:
         help="Fecha inicial manual para scraping incremental (YYYY-MM-DD). "
              "Descarga solo partidos desde esta fecha. Use --update para auto-detectar desde BD.",
     )
+    parser.add_argument(
+        "--full-refresh", action="store_true",
+        help="Ignorar caché y BD: fuerza descarga completa de todos los datos.",
+    )
+    parser.add_argument(
+        "--scrape-only", action="store_true",
+        help="Ejecutar solo la fase de scraping y salir (no cargar en DB)",
+    )
     args = parser.parse_args()
 
     if args.list:
         list_available_competitions()
     else:
-        run_pipeline(
-            scrape=args.scrape,
-            competition=args.competition,
-            source=args.source,
-            season=args.season,
-            match_ids=args.match_ids,
-            check_only=args.check,
-            from_date=args.from_date,
-            update=args.update,
-        )
+        # Soporte para múltiples fuentes y temporadas
+        sources = args.source
+        if "all" in sources:
+            sources = ["all"]
+        
+        for ssn in args.season:
+            for src in sources:
+                run_pipeline(
+                    scrape=args.scrape,
+                    competition=args.competition,
+                    source=src,
+                    season=ssn,
+                    match_ids=args.match_ids,
+                    check_only=args.check,
+                    from_date=args.from_date,
+                    update=args.update,
+                    full_refresh=args.full_refresh,
+                    scrape_only=args.scrape_only,
+                )

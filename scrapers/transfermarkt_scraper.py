@@ -54,8 +54,8 @@ log = logging.getLogger(__name__)
 
 LEAGUE_CODE = "ES1"       # La Liga en Transfermarkt
 SEASONS     = [2020, 2021, 2022, 2023, 2024, 2025]  # aÃ±os de inicio de temporadas (20/21 a 25/26)
-DELAY_MIN   = 1.0         # pausa mÃ­nima entre peticiones (segundos)
-DELAY_MAX   = 2.0         # pausa mÃ¡xima entre peticiones (segundos)
+DELAY_MIN   = 3.0         # pausa mínima entre peticiones (segundos)
+DELAY_MAX   = 6.0         # pausa máxima entre peticiones (segundos)
 MAX_RETRIES = 3
 
 # Absolute path robusto para que funcione sin importar desde dÃ³nde de la terminal lo lances
@@ -144,34 +144,55 @@ def request_with_retry(url: str, retries: int = MAX_RETRIES) -> Optional[request
 
 # â”€â”€ FETCH FUNCTIONS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def get_league_teams(league_code: str = LEAGUE_CODE, season: str = str(SEASONS[0])) -> dict[str, int]:
-    """Escanea la tabla de la liga y devuelve {slug_equipo: id_equipo}.
-
-    Recorre los enlaces de la tabla de clasificaciÃ³n de Transfermarkt
-    para obtener los slugs e IDs de todos los equipos.
+def get_league_teams(season: int, competition_slug: str, league_code: str) -> list[dict]:
+    """
+    Descarga los equipos participantes en una competición para una temporada.
     """
     url = (
-        f"https://www.transfermarkt.es/laliga/startseite"
-        f"/wettbewerb/{league_code}/saison_id/{season}"
+        f"https://www.transfermarkt.es/{competition_slug}"
+        f"/teilnehmer/pokalwettbewerb/{league_code}/saison_id/{season}"
     )
+
     r = request_with_retry(url)
     if not r:
-        return {}
+        return []
+    
+    soup = BeautifulSoup(r.content, "html.parser")
+    table = soup.find("table", class_="items")
 
-    soup  = BeautifulSoup(r.text, "html.parser")
-    teams: dict[str, int] = {}
+    if not table:
+        log.warning("No se encontró la tabla de equipos para la temporada %d", season)
+        return []
+    
+    rows = table.find_all("tr", class_=["odd", "even"])
+    teams = []
 
-    for td in soup.select("td.hauptlink.no-border-links"):
-        a = td.select_one("a")
-        if a:
-            parts = a.get("href", "").split("/")
-            if "startseite" in parts and len(parts) >= 5:
-                try:
-                    teams[parts[1]] = int(parts[4])
-                except (ValueError, IndexError):
-                    pass
+    for row in rows:
+        try:
+            anchor = row.find("a", title=True)
+            if not anchor:
+                continue
 
-    log.info("Equipos encontrados en %s %s: %d", league_code, season, len(teams))
+            href = anchor.get("href", "")
+            parts = href.split("/")
+
+            # /real-madrid/startseite/verein/418
+            if len(parts) < 5 or parts[2] != "startseite" or parts[3] != "verein":
+                continue
+
+            team_slug = parts[1]
+            team_id = int(parts[4])
+            team_name = anchor.get("title")
+
+            teams.append({
+                "team_id":   team_id,
+                "team_slug": team_slug,
+                "team_name": team_name,
+            })
+        except Exception as e:
+            log.warning("Error procesando fila de equipo: %s", e)
+            continue
+
     return teams
 
 
@@ -321,6 +342,7 @@ def get_player_injuries(player_slug: str, player_id: str) -> list[dict]:
 # â”€â”€ ORCHESTRATOR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def scrape_transfermarkt(
+    competition_name: str = None,
     league_code: str = LEAGUE_CODE,
     season: int      = None,
     teams: Optional[dict[str, int]] = None,
@@ -342,7 +364,6 @@ def scrape_transfermarkt(
     # Parse from_date if provided
     from_date_obj = None
     if from_date:
-        from datetime import datetime
         from_date_obj = datetime.strptime(from_date, "%Y-%m-%d").date()
         log.info("Filtrando lesiones desde: %s", from_date_obj)
     if season is None:
@@ -351,20 +372,26 @@ def scrape_transfermarkt(
     if season_label is None:
         season_label = f"{season}_{season+1}"
     
-    # Normalizar season_label para carpetas (evitar '/')
+    # Normalizar season_label para carpetas
     folder_season = season_label.replace("/", "_")
     
     from utils.batch import generate_batch_id
     batch_id = generate_batch_id()
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)  # crear directorio al scrapear, no al importar
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Obtener slug de la competición
+    from scripts.competitions import get_competition_slug_transfermarkt
+    comp_slug = competition_name.lower().replace(" ", "-") if competition_name else "la-liga"
+    tm_slug = get_competition_slug_transfermarkt(competition_name) or "laliga"
 
     if not teams:
-        teams = get_league_teams(league_code, str(season))
+        teams_list = get_league_teams(season, tm_slug, league_code)
+        teams = {t["team_slug"]: t["team_id"] for t in teams_list}
         log.info("Auto-descubiertos %d equipos para %s %d", len(teams), league_code, season)
 
     print("=" * 55)
-    print(f"  Transfermarkt scraper â€” {league_code} {season_label}")
+    print(f"  Transfermarkt scraper — {league_code} {season_label}")
     print("=" * 55)
 
     all_players:  list[dict] = []
@@ -375,8 +402,7 @@ def scrape_transfermarkt(
     today_str = str(date.today())
     skipped_players = 0
 
-    # Directorio de la temporada
-    season_dir = OUTPUT_DIR / f"season={folder_season}"
+    season_dir = OUTPUT_DIR / comp_slug / f"season={folder_season}"
     season_dir.mkdir(parents=True, exist_ok=True)
 
     for team_slug, team_id in teams.items():
@@ -426,7 +452,6 @@ def scrape_transfermarkt(
                 cache[player_id_str] = today_str                
                 # Filter injuries by from_date if provided
                 if from_date_obj:
-                    from datetime import datetime
                     filtered_injuries = []
                     for inj in injuries:
                         date_from = inj.get("date_from")
@@ -474,6 +499,9 @@ def scrape_transfermarkt(
         all_injuries.extend(team_injuries)
 
         print(f"  [OK] {len(players)} jugadores | {len(team_injuries)} lesiones")
+        
+        # Guardar estado de caché tras cada equipo
+        save_cache(cache)
 
     print(f"\n  Equipos procesados: {len(teams) - len(failed)}/{len(teams)}")
     if not full_refresh:
@@ -564,69 +592,33 @@ def _save_json(data, path: Path) -> None:
 # â”€â”€ MAIN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def main():
-    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s - %(message)s")
-
-    print("=" * 55)
-    print(f"  Transfermarkt scraper â€” {LEAGUE_CODE} {SEASONS[0]}/{SEASONS[0]+1} a {SEASONS[-1]}/{SEASONS[-1]+1}")
-    print("=" * 55)
-
-    all_players_combined = []
-    all_injuries_combined = []
-
-    for season in SEASONS:
-        print(f"\n[SEASON] Descargando temporada {season}/{season+1}...")
-        
-        all_players, all_injuries = scrape_transfermarkt(LEAGUE_CODE, season)
-
-        if not all_players:
-            print(f"  [WARNING] No se obtuvieron datos para temporada {season}")
-            continue
-
-        print(f"  [INFO] Temporada {season}/{season+1}:")
-        print(f"    Jugadores: {len(all_players)}")
-        print(f"    Lesiones:  {len(all_injuries)}")
-
-        all_players_combined.extend(all_players)
-        all_injuries_combined.extend(all_injuries)
-
-    if not all_players_combined:
-        print("\n[WARNING] No se obtuvieron datos en ninguna temporada.")
-        return
-
-    # Transformar (datos acumulados de todas las temporadas)
-    df_players  = transform_players(all_players_combined)
-    df_injuries = transform_injuries(all_injuries_combined)
-
-    # Guardar CSVs (agregado)
-    season_dir = OUTPUT_DIR / f"season={SEASONS[0]}-{SEASONS[-1]}"
-    season_dir.mkdir(parents=True, exist_ok=True)
-
-    players_path  = season_dir / "players_clean.csv"
-    injuries_path = season_dir / "injuries_clean.csv"
-
-    df_players.to_csv(players_path,   index=False, encoding="utf-8-sig")
-    df_injuries.to_csv(injuries_path, index=False, encoding="utf-8-sig")
-
-    print(f"\nâœ… Archivos guardados:")
-    print(f"  {players_path}   ({len(df_players)} filas)")
-    print(f"  {injuries_path}  ({len(df_injuries)} filas)")
-
-    print(f"\nðŸŽ‰ Descarga de Transfermarkt completada")
-
-
-if __name__ == "__main__":
+    """
+    Punto de entrada del scraper genérico de Transfermarkt.
+    """
     import argparse
-    
-    parser = argparse.ArgumentParser(description="Scraper de Transfermarkt")
-    parser.add_argument("--league-code", "-l", type=str, default=None,
-                        help="Código de la liga en Transfermarkt (ej: ES1, GB1, L1)")
-    parser.add_argument("--season", "-s", type=int, default=None,
-                        help="Año de inicio de temporada (ej: 2020 para 20/21)")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--competition", required=True, help='Ej: "La Liga", "Premier League"')
+    parser.add_argument("--seasons", nargs="+", type=int, default=[2024])
+    parser.add_argument("--update", action="store_true", help="Incremental update")
+    parser.add_argument("--from-date", type=str, help="Start date (YYYY-MM-DD)")
     
     args = parser.parse_args()
     
-    # Usar valores por defecto si no se especifican
-    league_code = args.league_code if args.league_code else LEAGUE_CODE
-    season = args.season if args.season else SEASONS[0]
+    from scripts.competitions import get_competition
+    comp_config = get_competition(args.competition)
+    if not comp_config:
+        print(f"Error: Competición '{args.competition}' no encontrada.")
+        return
+
+    league_code = comp_config["sources"]["transfermarkt"]["league_code"]
     
-    scrape_transfermarkt(league_code=league_code, season=season)
+    for season_year in args.seasons:
+        scrape_transfermarkt(
+            league_code=league_code,
+            season=season_year,
+            competition_name=args.competition,
+            from_date=args.from_date
+        )
+
+if __name__ == "__main__":
+    main()

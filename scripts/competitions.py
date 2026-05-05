@@ -34,6 +34,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             "transfermarkt": {
                 "league_code": "ES1",
                 "name": "LaLiga",
+                "slug": "laliga",
             },
             "sofascore": {
                 "tournament_id": 8,
@@ -63,9 +64,10 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             "transfermarkt": {
                 "league_code": "ES2",
                 "name": "LaLiga2",
+                "slug": "laliga2",
             },
             "sofascore": {
-                "tournament_id": 39,
+                "tournament_id": 54,
                 "name": "LaLiga2",
             },
             "understat": {
@@ -96,9 +98,10 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             "transfermarkt": {
                 "league_code": "GB1",
                 "name": "Premier League",
+                "slug": "premier-league",
             },
             "sofascore": {
-                "tournament_id": 2,
+                "tournament_id": 17,
                 "name": "Premier League",
             },
             "understat": {
@@ -125,9 +128,10 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             "transfermarkt": {
                 "league_code": "GB2",
                 "name": "Championship",
+                "slug": "championship",
             },
             "sofascore": {
-                "tournament_id": 35,
+                "tournament_id": 18,
                 "name": "Championship",
             },
             "understat": {
@@ -158,9 +162,10 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             "transfermarkt": {
                 "league_code": "L1",
                 "name": "Bundesliga",
+                "slug": "bundesliga",
             },
             "sofascore": {
-                "tournament_id": 3,
+                "tournament_id": 35,
                 "name": "Bundesliga",
             },
             "understat": {
@@ -191,9 +196,10 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             "transfermarkt": {
                 "league_code": "IT1",
                 "name": "Serie A",
+                "slug": "serie-a",
             },
             "sofascore": {
-                "tournament_id": 4,
+                "tournament_id": 23,
                 "name": "Serie A",
             },
             "understat": {
@@ -224,9 +230,10 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             "transfermarkt": {
                 "league_code": "FR1",
                 "name": "Ligue 1",
+                "slug": "ligue-1",
             },
             "sofascore": {
-                "tournament_id": 5,
+                "tournament_id": 34,
                 "name": "Ligue 1",
             },
             "understat": {
@@ -257,13 +264,14 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             "transfermarkt": {
                 "league_code": "PO1",
                 "name": "Primeira Liga",
+                "slug": "liga-nos",
             },
             "sofascore": {
-                "tournament_id": 314,
+                "tournament_id": 238,
                 "name": "Primeira Liga",
             },
             "understat": {
-                "league": "Primeira_Liga",
+                "league": None,
                 "name": "Primeira Liga",
             },
             "statsbomb": {
@@ -290,13 +298,14 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             "transfermarkt": {
                 "league_code": "NL1",
                 "name": "Eredivisie",
+                "slug": "eredivisie",
             },
             "sofascore": {
-                "tournament_id": 9,
+                "tournament_id": 37,
                 "name": "Eredivisie",
             },
             "understat": {
-                "league": "Eredivisie",
+                "league": None,
                 "name": "Eredivisie",
             },
             "statsbomb": {
@@ -323,6 +332,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             "transfermarkt": {
                 "league_code": "CL",
                 "name": "Champions League",
+                "slug": "uefa-champions-league",
             },
             "sofascore": {
                 "tournament_id": 7,
@@ -352,6 +362,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             "transfermarkt": {
                 "league_code": "EL",
                 "name": "Europa League",
+                "slug": "europa-league",
             },
             "sofascore": {
                 "tournament_id": 679,
@@ -381,9 +392,10 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             "transfermarkt": {
                 "league_code": "ECL",
                 "name": "Conference League",
+                "slug": "uefa-europa-conference-league",
             },
             "sofascore": {
-                "tournament_id": 2050,
+                "tournament_id": 17015,
                 "name": "Europa Conference League",
             },
             "understat": {
@@ -484,3 +496,27 @@ def list_competitions() -> list[Dict[str, Any]]:
 def get_all_sources() -> list[str]:
     """Lista todas las fuentes de datos disponibles."""
     return ["transfermarkt", "sofascore", "understat", "statsbomb", "whoscored"]
+
+
+def get_competition_slug_transfermarkt(competition_name: str) -> Optional[str]:
+    """Obtiene el slug de Transfermarkt para una competición."""
+    comp = get_competition(competition_name)
+    if comp:
+        return comp["sources"].get("transfermarkt", {}).get("slug")
+    return None
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# COMPATIBILIDAD CON CÓDIGO EXISTENTE
+# ═══════════════════════════════════════════════════════════════════════
+
+# Alias para La Liga (compatibilidad con código actual)
+LALIGA = COMPETITIONS["La Liga"]
+
+# IDs de La Liga para cada fuente (para uso directo)
+LALIGA_IDS = {
+    "transfermarkt": LALIGA["sources"]["transfermarkt"]["league_code"],  # "ES1"
+    "sofascore":     LALIGA["sources"]["sofascore"]["tournament_id"],    # 8
+    "understat":     LALIGA["sources"]["understat"]["league"],           # "La_Liga"
+    "statsbomb":     LALIGA["sources"]["statsbomb"]["competition_id"],   # 11
+}

@@ -58,6 +58,9 @@ WHOSCORED_URLS = {
         "2023/2024": "https://es.whoscored.com/regions/250/tournaments/12/seasons/9664/stages/22686/fixtures/europe-champions-league-2023-2024",
         "2024/2025": "https://es.whoscored.com/regions/250/tournaments/12/seasons/10456/stages/24083/fixtures/europe-champions-league-2024-2025",
         "2025/2026": "https://es.whoscored.com/regions/250/tournaments/12/seasons/10903/stages/24797/fixtures/europe-champions-league-2025-2026",
+    },
+    "Bundesliga": {
+        "2024/2025": "https://es.whoscored.com/regions/81/tournaments/3/seasons/10365/stages/23471/fixtures/alemania-bundesliga-2024-2025"
     }
 }
 
@@ -291,7 +294,7 @@ def extract_teams_from_match(match_data: dict) -> list[dict]:
 
 # ── ORQUESTADOR PRINCIPAL ──────────────────────────────────────────────────────
 
-def scrape_whoscored(competition: str, season: str = None, from_date: str = None, match_ids: list = None):
+def scrape_whoscored(competition: str, season: str = None, from_date: str = None, match_ids: list = None, full_refresh: bool = False):
     """
     Ejecuta el scraper de WhoScored.
     
@@ -325,6 +328,22 @@ def scrape_whoscored(competition: str, season: str = None, from_date: str = None
     os.makedirs(out_dir, exist_ok=True)
 
     all_matches, all_events, all_players, all_teams = [], [], [], []
+    
+    # Intentar cargar datos existentes para no sobreescribir
+    try:
+        if (out_dir / "whoscored_matches.csv").exists():
+            all_matches = pd.read_csv(out_dir / "whoscored_matches.csv").to_dict('records')
+        if (out_dir / "whoscored_events.csv").exists():
+            all_events = pd.read_csv(out_dir / "whoscored_events.csv").to_dict('records')
+        if (out_dir / "whoscored_players.csv").exists():
+            all_players = pd.read_csv(out_dir / "whoscored_players.csv").to_dict('records')
+        if (out_dir / "whoscored_teams.csv").exists():
+            all_teams = pd.read_csv(out_dir / "whoscored_teams.csv").to_dict('records')
+        if all_matches:
+            log.info("  [LOAD] Se han cargado %d partidos previos del CSV", len(all_matches))
+    except Exception as e:
+        log.warning("No se pudieron cargar los CSV previos: %s", e)
+
     driver = create_driver()
 
     try:
@@ -333,10 +352,16 @@ def scrape_whoscored(competition: str, season: str = None, from_date: str = None
         time.sleep(5)
         accept_cookies(driver)
 
-        # 3. Obtener partidos que ya tenemos en BD (incremental)
-        existing_ids = get_existing_whoscored_match_ids()
+        # 3. Obtener partidos que ya tenemos en BD o en CSV (incremental)
+        existing_ids = set() if full_refresh else get_existing_whoscored_match_ids()
+        
+        # Añadir también los que ya están en el CSV local
+        if all_matches:
+            csv_ids = {str(m['whoscored_match_id']) for m in all_matches}
+            existing_ids.update(csv_ids)
+
         if existing_ids:
-            log.info("[UPDATE] %d partidos de WhoScored ya están en BD. Se omitirán.", len(existing_ids))
+            log.info("[UPDATE] %d partidos ya detectados (BD + CSV). Se omitirán.", len(existing_ids))
 
         for season_name, url in seasons_to_scrape.items():
             log.info("\n📅 Temporada %s", season_name)
@@ -373,6 +398,15 @@ def scrape_whoscored(competition: str, season: str = None, from_date: str = None
                 all_teams.extend(extract_teams_from_match(match_data))
 
                 log.info("    -> %d eventos guardados", len(events))
+
+                # Guardado incremental por seguridad
+                pd.DataFrame(all_matches).to_csv(out_dir / "whoscored_matches.csv", index=False)
+                if all_events:
+                    pd.DataFrame(all_events).to_csv(out_dir / "whoscored_events.csv", index=False)
+                if all_players:
+                    pd.DataFrame(all_players).drop_duplicates(subset=['whoscored_player_id']).to_csv(out_dir / "whoscored_players.csv", index=False)
+                if all_teams:
+                    pd.DataFrame(all_teams).drop_duplicates(subset=['whoscored_team_id']).to_csv(out_dir / "whoscored_teams.csv", index=False)
 
             log.info("  ✓ Temporada %s completa", season_name)
 

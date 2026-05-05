@@ -41,6 +41,20 @@ RAW_US  = PROJECT_ROOT / "data" / "raw" / "understat"
 RAW_SB  = PROJECT_ROOT / "data" / "raw" / "statsbomb"
 RAW_WS  = PROJECT_ROOT / "data" / "raw" / "whoscored"
 
+def _get_src_slug(comp_name: str, source: str) -> str:
+    """Obtiene el slug/nombre de carpeta para una fuente y competición."""
+    from scripts.competitions import get_competition
+    cfg = get_competition(comp_name)
+    if not cfg:
+        return comp_name.lower().replace(" ", "-") # fallback
+    
+    src_cfg = cfg.get("sources", {}).get(source, {})
+    # Prioridad: slug > name > comp_name_slugificado
+    slug = src_cfg.get("slug") or src_cfg.get("name")
+    if slug:
+        return slug.lower().replace(" ", "-")
+    return comp_name.lower().replace(" ", "-")
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -106,9 +120,11 @@ def _upsert_team(conn, canonical_name: str, source_id_col: str, source_id) -> in
 
 # ── Carga por fuente ─────────────────────────────────────────────────────────
 
-def _load_from_sofascore(conn) -> int:
+def _load_from_sofascore(conn, comp_name: str) -> int:
     """Lee teams.csv de SofaScore → upsert en dim_team como fuente master."""
-    files = list(RAW_SS.glob("**/teams.csv"))
+    slug = _get_src_slug(comp_name, "sofascore") if comp_name else None
+    target_dir = RAW_SS / slug if slug else RAW_SS
+    files = list(target_dir.glob("**/teams.csv"))
     if not files:
         log.warning("team_loader: no se encontraron teams.csv en %s", RAW_SS)
         return 0
@@ -145,11 +161,13 @@ def _load_from_sofascore(conn) -> int:
     return count
 
 
-def _load_from_transfermarkt(conn) -> int:
+def _load_from_transfermarkt(conn, comp_name: str) -> int:
     """Lee players_clean.csv de TM → añade country e id_transfermarkt a dim_team."""
     
     # Buscar cualquier archivo de equipos de Transfermarkt (ej. transfermarkt_teams.csv o players_clean.csv si contenía info)
-    files = list(RAW_TM.glob("**/*teams*.csv")) + list(RAW_TM.glob("**/players_clean.csv"))
+    slug = _get_src_slug(comp_name, "transfermarkt") if comp_name else None
+    target_dir = RAW_TM / slug if slug else RAW_TM
+    files = list(target_dir.glob("**/*teams*.csv")) + list(target_dir.glob("**/players_clean.csv"))
 
     if not files:
         log.info("team_loader: no hay players_clean.csv de TM")
@@ -195,20 +213,24 @@ def _load_from_transfermarkt(conn) -> int:
     return count
 
 
-def _load_from_understat(conn) -> int:
-    """Lee understat_teams_laliga.csv → añade id_understat a dim_team."""
-    f = RAW_US / "understat_teams_laliga.csv"
+def _load_from_understat(conn, comp_name: str) -> int:
+    """Lee understat_teams.csv → añade id_understat a dim_team."""
+    slug = _get_src_slug(comp_name, "understat") if comp_name else None
+    target_dir = RAW_US / slug if slug else RAW_US
+    files = list(target_dir.glob("**/understat_teams*.csv"))
     
     
-    if not f.exists():
-        log.info("team_loader: no hay understat_teams_laliga.csv")
+    if not files:
+        log.info("team_loader: no hay understat_teams.csv")
         return 0
 
-    try:
-        df = pd.read_csv(f)
-    except Exception as e:
-        log.warning("Error leyendo %s: %s", f, e)
-        return 0
+    count = 0
+    for f in files:
+        try:
+            df = pd.read_csv(f)
+        except Exception as e:
+            log.warning("Error leyendo %s: %s", f, e)
+            continue
 
     count = 0
     for _, row in df.iterrows():
@@ -224,9 +246,11 @@ def _load_from_understat(conn) -> int:
     return count
 
 
-def _load_from_statsbomb(conn) -> int:
+def _load_from_statsbomb(conn, comp_name: str) -> int:
     """Lee teams.csv de StatsBomb → añade id_statsbomb a dim_team."""
-    files = list(RAW_SB.glob("**/teams.csv"))
+    slug = _get_src_slug(comp_name, "statsbomb") if comp_name else None
+    target_dir = RAW_SB / slug if slug else RAW_SB
+    files = list(target_dir.glob("**/teams.csv"))
     if not files:
         log.info("team_loader: no hay teams.csv de StatsBomb")
         return 0
@@ -252,10 +276,12 @@ def _load_from_statsbomb(conn) -> int:
     return count
 
 
-def _load_from_whoscored(conn) -> int:
-
+def _load_from_whoscored(conn, comp_name: str) -> int:
+    """Lee whoscored_teams.csv → añade id_whoscored a dim_team."""
     # Buscar cualquier archivo de equipos de WhoScored
-    files = list(RAW_WS.glob("**/*teams*.csv"))
+    slug = _get_src_slug(comp_name, "whoscored") if comp_name else None
+    target_dir = RAW_WS / slug if slug else RAW_WS
+    files = list(target_dir.glob("**/*teams*.csv"))
     if not files:
         log.info("team_loader: no hay whoscored_teams_laliga.csv")
         return 0
@@ -283,7 +309,7 @@ def _load_from_whoscored(conn) -> int:
 
 # ── Punto de entrada ──────────────────────────────────────────────────────────
 
-def load_teams(conn) -> int:
+def load_teams(conn, comp_name: str = None) -> int:
     """Carga y enriquece dim_team desde todas las fuentes.
 
     Orden:
@@ -295,13 +321,13 @@ def load_teams(conn) -> int:
     Returns:
         Número total de equipos procesados.
     """
-    log.info("[START] Cargando dim_team...")
+    log.info(f"[START] Cargando dim_team ({comp_name or 'todas'})...")
     total = 0
-    total += _load_from_sofascore(conn)
-    total += _load_from_transfermarkt(conn)
-    total += _load_from_understat(conn)
-    total += _load_from_statsbomb(conn)
-    total += _load_from_whoscored(conn)
+    total += _load_from_sofascore(conn, comp_name)
+    total += _load_from_transfermarkt(conn, comp_name)
+    total += _load_from_understat(conn, comp_name)
+    total += _load_from_statsbomb(conn, comp_name)
+    total += _load_from_whoscored(conn, comp_name)
     log.info("[OK] dim_team completado — %d registros procesados", total)
     return total
 
