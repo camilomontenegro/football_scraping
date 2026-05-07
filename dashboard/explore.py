@@ -240,3 +240,303 @@ def get_events_summary(season_label: str, team: str | None) -> pd.DataFrame:
         params["tid"] = tid
     sql += " GROUP BY fe.data_source, fe.event_type ORDER BY count DESC LIMIT 100"
     return query_df(sql, params)
+
+
+def get_team_standings(season_label: str, team: str | None) -> pd.DataFrame:
+    eng = get_engine()
+    with eng.connect() as conn:
+        tid = _team_id(conn, team)
+    params: dict = {"season": season_label}
+    outer_filter = ""
+    if tid is not None:
+        outer_filter = "AND c.team_id = :tid"
+        params["tid"] = tid
+    sql = f"""
+        WITH home_stats AS (
+            SELECT m.home_team_id AS team_id,
+                   COUNT(*) AS played,
+                   SUM(CASE WHEN m.home_score > m.away_score THEN 1 ELSE 0 END) AS won,
+                   SUM(CASE WHEN m.home_score = m.away_score THEN 1 ELSE 0 END) AS drawn,
+                   SUM(CASE WHEN m.home_score < m.away_score THEN 1 ELSE 0 END) AS lost,
+                   SUM(COALESCE(m.home_score, 0)) AS gf,
+                   SUM(COALESCE(m.away_score, 0)) AS ga
+            FROM dim_match m
+            WHERE m.season = :season
+              AND m.home_score IS NOT NULL AND m.away_score IS NOT NULL
+            GROUP BY m.home_team_id
+        ),
+        away_stats AS (
+            SELECT m.away_team_id AS team_id,
+                   COUNT(*) AS played,
+                   SUM(CASE WHEN m.away_score > m.home_score THEN 1 ELSE 0 END) AS won,
+                   SUM(CASE WHEN m.home_score = m.away_score THEN 1 ELSE 0 END) AS drawn,
+                   SUM(CASE WHEN m.away_score < m.home_score THEN 1 ELSE 0 END) AS lost,
+                   SUM(COALESCE(m.away_score, 0)) AS gf,
+                   SUM(COALESCE(m.home_score, 0)) AS ga
+            FROM dim_match m
+            WHERE m.season = :season
+              AND m.home_score IS NOT NULL AND m.away_score IS NOT NULL
+            GROUP BY m.away_team_id
+        ),
+        combined AS (
+            SELECT team_id,
+                   SUM(played) AS p, SUM(won) AS w, SUM(drawn) AS d, SUM(lost) AS l,
+                   SUM(gf) AS gf, SUM(ga) AS ga
+            FROM (SELECT * FROM home_stats UNION ALL SELECT * FROM away_stats) x
+            GROUP BY team_id
+        ),
+        xg_for AS (
+            SELECT fs.team_id,
+                   ROUND(SUM(fs.xg)::numeric, 2) AS xg_for,
+                   COUNT(fs.shot_id) AS shots_for
+            FROM fact_shots fs
+            JOIN dim_match m ON fs.match_id = m.match_id
+            WHERE m.season = :season
+            GROUP BY fs.team_id
+        ),
+        xg_against AS (
+            SELECT mt.team_id,
+                   ROUND(SUM(fs.xg)::numeric, 2) AS xg_against,
+                   COUNT(fs.shot_id) AS shots_against
+            FROM (
+                SELECT home_team_id AS team_id, match_id FROM dim_match WHERE season = :season
+                UNION ALL
+                SELECT away_team_id AS team_id, match_id FROM dim_match WHERE season = :season
+            ) mt
+            JOIN fact_shots fs ON fs.match_id = mt.match_id AND fs.team_id != mt.team_id
+            GROUP BY mt.team_id
+        )
+        SELECT t.canonical_name AS team,
+               c.p, c.w, c.d, c.l, c.gf, c.ga, (c.gf - c.ga) AS gd,
+               COALESCE(xf.xg_for, 0) AS xg_for,
+               COALESCE(xa.xg_against, 0) AS xg_against,
+               COALESCE(xf.shots_for, 0) AS shots_for,
+               COALESCE(xa.shots_against, 0) AS shots_against
+        FROM combined c
+        JOIN dim_team t ON t.canonical_id = c.team_id
+        LEFT JOIN xg_for xf ON xf.team_id = c.team_id
+        LEFT JOIN xg_against xa ON xa.team_id = c.team_id
+        WHERE 1=1 {outer_filter}
+        ORDER BY gd DESC, c.gf DESC
+    """
+    return query_df(sql, params)
+
+
+def get_goalkeeper_stats(season_label: str, team: str | None) -> pd.DataFrame:
+    eng = get_engine()
+    with eng.connect() as conn:
+        tid = _team_id(conn, team)
+    params: dict = {"season": season_label}
+    gk_team_filter = ""
+    outer_filter = ""
+    if tid is not None:
+        gk_team_filter = "AND fe.team_id = :tid"
+        outer_filter = "AND gtm.team_id = :tid"
+        params["tid"] = tid
+    sql = f"""
+        WITH gk_team_raw AS (
+            -- Find each GK and their most common team this season from events
+            SELECT p.canonical_id AS player_id, p.canonical_name AS goalkeeper,
+                   fe.team_id, COUNT(*) AS cnt
+            FROM dim_player p
+            JOIN fact_events fe ON fe.player_id = p.canonical_id
+            JOIN dim_match m ON fe.match_id = m.match_id
+            WHERE p.position IN ('Portero', 'Goalkeeper', 'GK')
+              AND m.season = :season
+              {gk_team_filter}
+            GROUP BY p.canonical_id, p.canonical_name, fe.team_id
+        ),
+        gk_team_map AS (
+            SELECT DISTINCT ON (player_id) player_id, goalkeeper, team_id
+            FROM gk_team_raw
+            ORDER BY player_id, cnt DESC
+        ),
+        gk_match_list AS (
+            -- Matches where this specific GK appeared in events (proxy for matches played)
+            SELECT DISTINCT gtm.player_id, m.match_id
+            FROM gk_team_map gtm
+            JOIN fact_events fe ON fe.player_id = gtm.player_id
+            JOIN dim_match m ON fe.match_id = m.match_id
+            WHERE m.season = :season
+        ),
+        matches_played AS (
+            SELECT player_id, COUNT(DISTINCT match_id) AS matches
+            FROM gk_match_list
+            GROUP BY player_id
+        ),
+        shots_faced AS (
+            -- Shots on target against this GK's team ONLY in the matches this GK appeared in
+            SELECT gml.player_id,
+                   COUNT(fs.shot_id) AS shots_faced,
+                   SUM(CASE WHEN fs.result = 'Goal' THEN 1 ELSE 0 END) AS goals_allowed,
+                   ROUND(SUM(fs.xg)::numeric, 2) AS xg_conceded
+            FROM gk_match_list gml
+            JOIN gk_team_map gtm ON gtm.player_id = gml.player_id
+            JOIN fact_shots fs ON fs.match_id = gml.match_id
+                               AND fs.team_id != gtm.team_id
+                               AND LOWER(fs.result) IN ('goal', 'saved', 'save', 'savedshot')
+            GROUP BY gml.player_id
+        ),
+        clean_sheets AS (
+            -- Clean sheets: GK's matches where their team conceded 0
+            SELECT gml.player_id, COUNT(*) AS clean_sheets
+            FROM gk_match_list gml
+            JOIN gk_team_map gtm ON gtm.player_id = gml.player_id
+            JOIN dim_match m ON m.match_id = gml.match_id
+            WHERE (m.home_team_id = gtm.team_id AND COALESCE(m.away_score, 1) = 0)
+               OR (m.away_team_id = gtm.team_id AND COALESCE(m.home_score, 1) = 0)
+            GROUP BY gml.player_id
+        )
+        SELECT gtm.goalkeeper,
+               t.canonical_name AS team,
+               COALESCE(mp.matches, 0) AS matches_played,
+               COALESCE(sf.goals_allowed, 0) AS goals_allowed,
+               COALESCE(sf.shots_faced, 0) AS shots_faced,
+               COALESCE(sf.shots_faced - sf.goals_allowed, 0) AS saves,
+               ROUND(
+                   COALESCE(sf.shots_faced - sf.goals_allowed, 0)::numeric
+                   / NULLIF(sf.shots_faced, 0) * 100,
+                   1
+               ) AS save_pct,
+               COALESCE(sf.xg_conceded, 0) AS xg_conceded,
+               ROUND(
+                   (COALESCE(sf.shots_faced - sf.goals_allowed, 0)
+                    - COALESCE(sf.xg_conceded, 0))::numeric,
+                   2
+               ) AS goals_saved_above_expected,
+               COALESCE(cs.clean_sheets, 0) AS clean_sheets
+        FROM gk_team_map gtm
+        JOIN dim_team t ON t.canonical_id = gtm.team_id
+        LEFT JOIN matches_played mp ON mp.player_id = gtm.player_id
+        LEFT JOIN shots_faced sf ON sf.player_id = gtm.player_id
+        LEFT JOIN clean_sheets cs ON cs.player_id = gtm.player_id
+        WHERE 1=1 {outer_filter}
+        ORDER BY goals_saved_above_expected DESC NULLS LAST
+    """
+    return query_df(sql, params)
+
+
+def get_player_discipline(season_label: str | None, team: str | None) -> pd.DataFrame:
+    eng = get_engine()
+    with eng.connect() as conn:
+        tid = _team_id(conn, team)
+    params: dict = {}
+    season_filter = ""
+    shot_team_filter = ""
+    event_team_filter = ""
+    if season_label is not None:
+        season_filter = "AND m.season = :season"
+        params["season"] = season_label
+    if tid is not None:
+        shot_team_filter = "AND fs.team_id = :tid"
+        event_team_filter = "AND fe.team_id = :tid"
+        params["tid"] = tid
+    sql = f"""
+        WITH shot_stats AS (
+            SELECT fs.player_id,
+                   fs.team_id,
+                   m.season,
+                   COUNT(fs.shot_id) AS shots,
+                   SUM(CASE WHEN fs.result = 'Goal' THEN 1 ELSE 0 END) AS goals,
+                   ROUND(SUM(fs.xg)::numeric, 2) AS xg
+            FROM fact_shots fs
+            JOIN dim_match m ON fs.match_id = m.match_id
+            WHERE 1=1 {season_filter} {shot_team_filter}
+            GROUP BY fs.player_id, fs.team_id, m.season
+        ),
+        card_stats AS (
+            SELECT fe.player_id,
+                   m.season,
+                   SUM(CASE WHEN
+                            (fe.event_type ILIKE '%yellow%' AND fe.event_type NOT ILIKE '%red%')
+                            OR (LOWER(fe.event_type) = 'card' AND LOWER(fe.outcome) = 'yellow')
+                            THEN 1 ELSE 0 END) AS yellow_cards,
+                   SUM(CASE WHEN
+                            (fe.event_type ILIKE '%red%')
+                            OR (LOWER(fe.event_type) = 'card' AND LOWER(fe.outcome) IN ('red', 'yellowred'))
+                            THEN 1 ELSE 0 END) AS red_cards
+            FROM fact_events fe
+            JOIN dim_match m ON fe.match_id = m.match_id
+            WHERE fe.event_type IS NOT NULL
+              {season_filter} {event_team_filter}
+            GROUP BY fe.player_id, m.season
+        )
+        SELECT p.canonical_name AS player,
+               t.canonical_name AS team,
+               ss.season,
+               p.position,
+               COALESCE(ss.goals, 0) AS goals,
+               COALESCE(ss.xg, 0) AS xg,
+               COALESCE(ss.shots, 0) AS shots,
+               ROUND(
+                   COALESCE(ss.xg, 0)::numeric / NULLIF(ss.shots, 0),
+                   3
+               ) AS xg_per_shot,
+               ROUND((COALESCE(ss.goals, 0) - COALESCE(ss.xg, 0))::numeric, 2) AS goals_minus_xg,
+               COALESCE(cs.yellow_cards, 0) AS yellow_cards,
+               COALESCE(cs.red_cards, 0) AS red_cards,
+               CAST(NULL AS INTEGER) AS minutes_played
+        FROM shot_stats ss
+        JOIN dim_player p ON p.canonical_id = ss.player_id
+        JOIN dim_team t ON t.canonical_id = ss.team_id
+        LEFT JOIN card_stats cs ON cs.player_id = ss.player_id AND cs.season = ss.season
+        ORDER BY goals DESC NULLS LAST
+    """
+    return query_df(sql, params)
+
+
+def get_injuries_standalone(season_label: str | None, team: str | None) -> pd.DataFrame:
+    eng = get_engine()
+    with eng.connect() as conn:
+        tid = _team_id(conn, team)
+    params: dict = {}
+    season_filter = ""
+    if season_label is not None:
+        season_filter = "AND fi.season = :season"
+        params["season"] = season_label
+    sql = f"""
+        SELECT p.canonical_name AS player,
+               fi.season,
+               fi.injury_type,
+               fi.date_from,
+               fi.date_until,
+               fi.days_absent,
+               fi.matches_missed
+        FROM fact_injuries fi
+        JOIN dim_player p ON fi.player_id = p.canonical_id
+        WHERE 1=1 {season_filter}
+        ORDER BY fi.days_absent DESC NULLS FIRST, fi.date_from DESC
+    """
+    return query_df(sql, params)
+
+
+def get_injury_type_breakdown(season_label: str | None, team: str | None) -> pd.DataFrame:
+    params: dict = {}
+    season_filter = ""
+    if season_label is not None:
+        season_filter = "AND fi.season = :season"
+        params["season"] = season_label
+    sql = f"""
+        SELECT fi.injury_type,
+               COUNT(*) AS count
+        FROM fact_injuries fi
+        WHERE fi.injury_type IS NOT NULL
+          {season_filter}
+        GROUP BY fi.injury_type
+        ORDER BY count DESC
+    """
+    return query_df(sql, params)
+
+
+def get_injury_season_trend(team: str | None) -> pd.DataFrame:
+    sql = """
+        SELECT fi.season,
+               COUNT(*) AS injuries,
+               COALESCE(SUM(fi.days_absent), 0) AS days_absent,
+               COALESCE(SUM(fi.matches_missed), 0) AS matches_missed
+        FROM fact_injuries fi
+        WHERE fi.season IS NOT NULL
+        GROUP BY fi.season
+        ORDER BY fi.season DESC
+    """
+    return query_df(sql, {})

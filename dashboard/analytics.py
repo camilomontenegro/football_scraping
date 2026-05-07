@@ -30,7 +30,11 @@ def _resolve_team_id(team: str | None) -> int | None:
     return int(row[0]) if row else None
 
 
-def get_heatmap_data(season_label: str, team_id: int | None) -> pd.DataFrame:
+def get_heatmap_data(
+    season_label: str,
+    team_id: int | None,
+    competition: str | None = None,
+) -> pd.DataFrame:
     """Zone-level shot data for the pitch heatmap.
 
     Returns columns: x_band, y_band, shots, goals, avg_xg, conversion_rate.
@@ -59,6 +63,9 @@ def get_heatmap_data(season_label: str, team_id: int | None) -> pd.DataFrame:
     if team_id is not None:
         sql += " AND fs.team_id = :tid"
         params["tid"] = team_id
+    if competition is not None:
+        sql += " AND m.competition = :competition"
+        params["competition"] = competition
     sql += """
         GROUP BY x_band, y_band
         HAVING COUNT(*) >= 10
@@ -67,7 +74,11 @@ def get_heatmap_data(season_label: str, team_id: int | None) -> pd.DataFrame:
     return query_df(sql, params)
 
 
-def get_player_finishing(season_label: str, team_id: int | None) -> pd.DataFrame:
+def get_player_finishing(
+    season_label: str,
+    team_id: int | None,
+    competition: str | None = None,
+) -> pd.DataFrame:
     """Top 20 players by goals minus xG (finishing over/underperformance).
 
     Minimum 20 shots to qualify.
@@ -93,6 +104,9 @@ def get_player_finishing(season_label: str, team_id: int | None) -> pd.DataFrame
     if team_id is not None:
         sql += " AND fs.team_id = :tid"
         params["tid"] = team_id
+    if competition is not None:
+        sql += " AND m.competition = :competition"
+        params["competition"] = competition
     sql += """
         GROUP BY p.canonical_name
         HAVING COUNT(*) >= 20
