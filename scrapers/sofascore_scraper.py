@@ -201,31 +201,24 @@ def get_scraped_sofascore_match_ids() -> set[int]:
 # ── ORCHESTRATOR ──────────────────────────────────────────────────────────────
 
 def scrape_sofascore(
-    competition_name: str = None,
-    season_name: str  = None,
+    season_name: str = None,
     tournament_id: int = TOURNAMENT_ID,
+    competition_name: str = "Bundesliga",
     from_date: str = None,
     full_refresh: bool = False,
 ) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
-    """Orquestador principal: obtiene partidos, tiros, eventos y alineaciones.
-
-    Args:
-        season_name: Nombre de la temporada (ej: "2020/2021"). Si es None, usa la primera.
-        tournament_id: ID del torneo en SofaScore.
-        from_date: Fecha inicial (YYYY-MM-DD). Descarga solo partidos desde esta fecha.
-        full_refresh: Si es True, ignora la caché de la DB y descarga todo.
-
-    Returns:
-        (matches, all_shots, all_events, all_lineups)
-        Cada elemento es una lista de dicts con los datos crudos de SofaScore.
-    """
+    """Orquestador principal."""
+    print(f"  [INFO] Iniciando scrape_sofascore para {competition_name} ({season_name or 'actual'})...")
+    
     if season_name is None:
         season_name = SEASON_NAMES[0]
     
     from_date_obj = None
     if from_date:
         from_date_obj = datetime.strptime(from_date, "%Y-%m-%d").date()
-        print(f"\n[FILTER] Descargando solo partidos desde: {from_date}")
+        print(f"  [FILTER] Descargando solo partidos desde: {from_date}")
+    
+    print("  [INFO] Abriendo navegador Chrome...")
     
     from utils.batch import generate_batch_id
     batch_id = generate_batch_id()
@@ -528,9 +521,14 @@ def main():
 
     for season_name in SEASON_NAMES:
         print(f"\n[SEASON] Descargando temporada {season_name}...")
+        print("  [DEBUG] Iniciando orquestador scrape_sofascore...")
         
         try:
-            matches, all_shots, all_events, _ = scrape_sofascore(season_name, TOURNAMENT_ID)
+            matches, all_shots, all_events, _ = scrape_sofascore(
+                competition_name="Bundesliga",
+                season_name=season_name, 
+                tournament_id=TOURNAMENT_ID
+            )
         except ValueError as e:
             log.warning(f"Temporada {season_name} no disponible en SofaScore: {e}")
             print(f"  [!] Temporada {season_name} no encontrada. Continuando...")
@@ -583,6 +581,8 @@ if __name__ == "__main__":
                         help="ID del torneo en SofaScore (ej: 8 para La Liga)")
     parser.add_argument("--season", "-s", type=str, default=None,
                         help="Temporada a scrapear (ej: 2024/2025)")
+    parser.add_argument("--competition", "-c", type=str, default="Bundesliga",
+                        help="Nombre de la competición")
     
     args = parser.parse_args()
     
@@ -590,4 +590,8 @@ if __name__ == "__main__":
     tournament_id = args.tournament_id if args.tournament_id else TOURNAMENT_ID
     season_name = args.season if args.season else SEASON_NAMES[0]
     
-    scrape_sofascore(season_name=season_name, tournament_id=tournament_id)
+    # Sobrescribir constantes globales para esta ejecución
+    if args.tournament_id: TOURNAMENT_ID = args.tournament_id
+    if args.season: SEASON_NAMES = [args.season]
+    
+    main()

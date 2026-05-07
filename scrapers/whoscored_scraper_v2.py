@@ -60,9 +60,9 @@ WHOSCORED_URLS = {
         "2025/2026": "https://es.whoscored.com/regions/250/tournaments/12/seasons/10903/stages/24797/fixtures/europe-champions-league-2025-2026",
     },
     "Bundesliga": {
-        "2020/2021": "https://www.whoscored.com/Regions/81/Tournaments/3/Seasons/8228/Stages/18762/Fixtures/Germany-Bundesliga-2020-2021",
-        "2021/2022": "https://www.whoscored.com/Regions/81/Tournaments/3/Seasons/8651/Stages/19842/Fixtures/Germany-Bundesliga-2021-2022",
-        "2022/2023": "https://www.whoscored.com/Regions/81/Tournaments/3/Seasons/9121/Stages/21016/Fixtures/Germany-Bundesliga-2022-2023",
+        "2020/2021": "https://www.whoscored.com/Regions/81/Tournaments/3/Seasons/8279/Stages/18762/Fixtures/Germany-Bundesliga-2020-2021",
+        "2021/2022": "https://www.whoscored.com/Regions/81/Tournaments/3/Seasons/8667/Stages/19842/Fixtures/Germany-Bundesliga-2021-2022",
+        "2022/2023": "https://www.whoscored.com/Regions/81/Tournaments/3/Seasons/9120/Stages/21016/Fixtures/Germany-Bundesliga-2022-2023",
         "2023/2024": "https://www.whoscored.com/Regions/81/Tournaments/3/Seasons/9649/Stages/22128/Fixtures/Germany-Bundesliga-2023-2024",
         "2024/2025": "https://es.whoscored.com/regions/81/tournaments/3/seasons/10365/stages/23471/fixtures/alemania-bundesliga-2024-2025"
     }
@@ -201,33 +201,36 @@ def get_match_data(driver: webdriver.Chrome, match_id: str, season_name: str) ->
     """Obtiene los datos de un partido desde matchCentreData."""
     url = f"https://es.whoscored.com/matches/{match_id}/live"
 
-    try:
-        driver.get(url)
-        random_sleep()
-        accept_cookies(driver)
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            driver.get(url)
+            random_sleep()
+            accept_cookies(driver)
 
-        WebDriverWait(driver, 15).until(
-            EC.presence_of_element_located((By.TAG_NAME, "body"))
-        )
+            WebDriverWait(driver, 15).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
 
-        soup = BeautifulSoup(driver.page_source, 'html.parser')
-        script = soup.find('script', string=re.compile('matchCentreData'))
-        if not script:
-            return {}
-
-        pattern = r'matchCentreData\s*:\s*(\{.*?\})\s*,\s*\n'
-        m = re.search(pattern, script.string, re.DOTALL)
-        if not m:
-            return {}
-
-        data = json.loads(m.group(1))
-        data['whoscored_match_id'] = match_id
-        data['season'] = season_name
-        return data
-
-    except Exception as e:
-        log.error("  Error extrayendo matchCentreData para partido %s: %s", match_id, e)
-        return {}
+            soup = BeautifulSoup(driver.page_source, 'html.parser')
+            script = soup.find('script', string=re.compile('matchCentreData'))
+            if script:
+                pattern = r'matchCentreData\s*:\s*(\{.*?\})\s*,\s*\n'
+                m = re.search(pattern, script.string, re.DOTALL)
+                if m:
+                    data = json.loads(m.group(1))
+                    data['whoscored_match_id'] = match_id
+                    data['season'] = season_name
+                    return data
+            
+            log.warning("  Intento %d/%d fallido para partido %s (sin matchCentreData)", attempt + 1, max_retries, match_id)
+            time.sleep(5) # Espera extra antes de reintentar
+            
+        except Exception as e:
+            log.error("  Error en intento %d/%d para partido %s: %s", attempt + 1, max_retries, match_id, e)
+            time.sleep(5)
+    
+    return {}
 
 
 # ── TRANSFORMACIÓN ─────────────────────────────────────────────────────────────
