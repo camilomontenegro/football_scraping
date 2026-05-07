@@ -327,10 +327,8 @@ def get_goalkeeper_stats(season_label: str, team: str | None) -> pd.DataFrame:
     with eng.connect() as conn:
         tid = _team_id(conn, team)
     params: dict = {"season": season_label}
-    gk_team_filter = ""
     outer_filter = ""
     if tid is not None:
-        gk_team_filter = "AND fe.team_id = :tid"
         outer_filter = "AND gtm.team_id = :tid"
         params["tid"] = tid
     sql = f"""
@@ -343,7 +341,6 @@ def get_goalkeeper_stats(season_label: str, team: str | None) -> pd.DataFrame:
             JOIN dim_match m ON fe.match_id = m.match_id
             WHERE p.position IN ('Portero', 'Goalkeeper', 'GK')
               AND m.season = :season
-              {gk_team_filter}
             GROUP BY p.canonical_id, p.canonical_name, fe.team_id
         ),
         gk_team_map AS (
@@ -356,6 +353,7 @@ def get_goalkeeper_stats(season_label: str, team: str | None) -> pd.DataFrame:
             SELECT DISTINCT gtm.player_id, m.match_id
             FROM gk_team_map gtm
             JOIN fact_events fe ON fe.player_id = gtm.player_id
+                                AND fe.team_id = gtm.team_id
             JOIN dim_match m ON fe.match_id = m.match_id
             WHERE m.season = :season
         ),
@@ -400,8 +398,8 @@ def get_goalkeeper_stats(season_label: str, team: str | None) -> pd.DataFrame:
                ) AS save_pct,
                COALESCE(sf.xg_conceded, 0) AS xg_conceded,
                ROUND(
-                   (COALESCE(sf.shots_faced - sf.goals_allowed, 0)
-                    - COALESCE(sf.xg_conceded, 0))::numeric,
+                   (COALESCE(sf.xg_conceded, 0)
+                    - COALESCE(sf.goals_allowed, 0))::numeric,
                    2
                ) AS goals_saved_above_expected,
                COALESCE(cs.clean_sheets, 0) AS clean_sheets
