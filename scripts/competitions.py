@@ -17,6 +17,7 @@ Uso:
     
     # Obtener todos los IDs de una fuente
     tm_id = laliga["sources"]["transfermarkt"]["league_code"]  # "ES1"
+    
 """
 from typing import Dict, Any
 
@@ -68,7 +69,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "LaLiga2",
             },
             "sofascore": {
-                "tournament_id": 39,
+                "tournament_id": 54, # Cambiado de 39 a 54
                 "name": "LaLiga2",
             },
             "understat": {
@@ -102,7 +103,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Premier League",
             },
             "sofascore": {
-                "tournament_id": 2,
+                "tournament_id": 17, #cambiado de 2 a 17
                 "name": "Premier League",
             },
             "understat": {
@@ -131,7 +132,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Championship",
             },
             "sofascore": {
-                "tournament_id": 35,
+                "tournament_id": 18, #cambiado de 35 a 18
                 "name": "Championship",
             },
             "understat": {
@@ -164,7 +165,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Bundesliga",
             },
             "sofascore": {
-                "tournament_id": 3,
+                "tournament_id": 35,  # cambiado de 3 a 35
                 "name": "Bundesliga",
             },
             "understat": {
@@ -197,7 +198,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Serie A",
             },
             "sofascore": {
-                "tournament_id": 4,
+                "tournament_id": 23, #Estaba 4 ,cambiado a 23
                 "name": "Serie A",
             },
             "understat": {
@@ -230,7 +231,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Ligue 1",
             },
             "sofascore": {
-                "tournament_id": 5,
+                "tournament_id": 34, #cambiado de 5 a 34
                 "name": "Ligue 1",
             },
             "understat": {
@@ -263,11 +264,11 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Primeira Liga",
             },
             "sofascore": {
-                "tournament_id": 314,
-                "name": "Primeira Liga",
+                "tournament_id": 238, #cambiado 314 por 238
+                "name": "Liga Portugal Betclic",  #cambiado tmbn el nombre
             },
             "understat": {
-                "league": "Primeira_Liga",
+                "league": None, # Understat no tiene Primeira Liga
                 "name": "Primeira Liga",
             },
             "statsbomb": {
@@ -296,7 +297,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Eredivisie",
             },
             "sofascore": {
-                "tournament_id": 9,
+                "tournament_id": 9,  # 37 
                 "name": "Eredivisie",
             },
             "understat": {
@@ -387,7 +388,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Conference League",
             },
             "sofascore": {
-                "tournament_id": 2050,
+                "tournament_id": 17015,  # Nuevo ID para Europa Conference League 17015
                 "name": "Europa Conference League",
             },
             "understat": {
