@@ -1,377 +1,228 @@
-﻿import re 
+"""
+scrapers/understat_scraper.py
+==============================
+Descarga partidos y tiros de Understat para cualquier competición
+definida en competitions.py y los guarda como CSV.
+ 
+Soporta tanto ligas domésticas (API JSON) como europeas (scraping HTML).
+Soporta scraping incremental a través de 'from_date'.
+"""
+import re 
 import pandas as pd
-
 import os 
 import json 
 import sys
-from pathlib import Path
-from typing import Optional
+import argparse
 import asyncio
 import aiohttp
+from datetime import datetime, date
+from pathlib import Path
+from typing import Optional, List, Tuple
 from urllib.parse import quote
 
-# Allow running directly as a script
+# Importar configuración de competiciones
 sys.path.append(str(Path(__file__).resolve().parent.parent))
+from wizard.competitions import get_competition
 
-""" 
-Metodos de aiohttp
-resp.raise_for_status()   # NO necesita await. Raise for status si se manda un codigo de error lanza una excepcion
-resp.status               # NO necesita await, es un atributo, devuelve 200, 404...
+# --- Configuración Base ---
+BASE_URL = "https://understat.com"
 
-await resp.text()         # SÃ necesita await, leer el cuerpo es asÃ­ncrono
-await resp.json()         # SÃ necesita await, leer el cuerpo es asÃ­ncrono
-"""
-
-
-
-LEAGUE      = "La liga"
-SEASONS     = [2020, 2021, 2022, 2023, 2024]   # aÃ±o de inicio de temporada (20/21 a 24/25)
-# pausa entre requests para no saturar el servidor
-# Es uan protecccion para  evitar  que unserStar bloquea las peticiones por hacer muchas en poco tiempo 
-DELAY_SEC   = 1.5   
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-OUTPUT_DIR  = PROJECT_ROOT / "data" / "raw" / "understat"
-os.makedirs(OUTPUT_DIR, exist_ok=True)  # directorio de salida
-
-
-
-
-#Si no indicasemos expresamente el user-agent , cuando se hace la peticicoon http de aiohttp  
-#  la libreria  aiohttp manda un User-Agent generico -> User-Agent: Python/aiohttp 3.x , que Understat puede detectar com oun bot o scraper y bloquear la peticion
-# Al establecer uno   expresamente,  simulamos que las peticiones vienen de un navegador real y evitar que Understat  bloquee las peticiones 
-# 
-#La pagina  bloqueaba mis peticiones porque no basta con usar el user-Agent sino  mas  elementos en los headers. 
-# Para encontrarlo  me voy aqui https://understat.com/league/La_liga/2021 -> f12 , network -> la peticion y request headers 
-# El x-requested-with: XMLHttpRequest le dice a Understat que es una peticiÃ³n AJAX legÃ­tima desde su propia pÃ¡gina, no un scraper externo.
-#  HEADERS  queda solo solo con los headers que son comunes a todas las peticiones:
-#Y el Referer se gestiona dinÃ¡micamente en fetch porque cambia segÃºn la peticiÃ³n:
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/136.0.0.0 Safari/537.36"  # tu versiÃ³n real
-    ),
+HEADERS_JSON = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
     "X-Requested-With": "XMLHttpRequest",
     "Accept": "application/json, text/javascript, */*; q=0.01",
 }
+ 
+HEADERS_HTML = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+}
 
-# â”€â”€ Helpers de parsing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+OUTPUT_DIR = PROJECT_ROOT / "data" / "raw" / "understat"
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-#  html: str, var_name: str -> indicamos el tipo de los paramentros 
-# > Optional[list | dict]: el tipo de retorno de la funciÃ³n. Puede ser una lista, un diccionario o None. Es solo una anotaciÃ³n para documentar el cÃ³digo, no afecta al comportamiento.
-def parse_embedded_json(html: str, var_name: str) -> Optional[list | dict]:
-    r"""
-    html: str, 
-    var_name: str -> indicamos el tipo de los paramentros 
 
-    # > Optional[list | dict]: el tipo de retorno de la funciÃ³n. Puede ser una lista, un diccionario o None. Es solo una anotaciÃ³n para documentar el cÃ³digo, no afecta al comportamiento.
-
-    Recibe el HTML completo de la pÃ¡gina y el nombre de la variable que quiere encontrar dentro de ese HTML.
-    Understat no tiene una API. Los datos estÃ¡n escondidos dentro del HTML de la pÃ¡gina como un script de JavaScript:
-    
-    Understat embeds data como:
-        var datesData = JSON.parse('...')
-    El contenido estÃ¡ escapado con unicode escapes.
-
-        REGULAR EXPRESION - BREAKDOWN 
-        el patron de bÃºsqueda y  grupo de captura.  l oqeu se captura es todo lo que vaya entre las comillas simples dentro del JSON.parse() 
-
-            El rf al principio significa que es un string que combina dos cosas: r de raw (las \ no se escapan) y f de f-string (permite meter variables).
-            {var_name}     ->  la variable que buscamos, ej: "datesData"
-            \s*            ->  cero o mÃ¡s espacios
-            =              ->  el signo igual
-            \s*            ->  cero o mÃ¡s espacios
-            JSON\.parse    ->  literal "JSON.parse" (el \. escapa el punto) porque no quiero que .se interprete como un metacharacter de la expresion regular 
-            \(            ->  parÃ©ntesis escapado -> busca literalmente "(" en el HTML. Si no lo pones el parentesis se interopreta como un un metacaracter de la expression regular con su significado esperical 
-        
-            '(.+?)'        ->  captura todo lo que hay entre comillas simples
-            Grupo de captura	Los parÃ©ntesis dicen: "Guarda todo lo que encuentres aquÃ­".
-            \)             ->   parÃ©ntesis escapado -> busca literalmente ")" en el HTML
-        
-    """
-    # Captura lo que estÃ© dentro de las comillas simples que van dentro del JSON.parse().
-    pattern = rf"{var_name}\s*=\s*JSON\.parse\('(.+?)'\)"
-
-    # Busca el patrÃ³n dentro de todo el HTML. Si lo encuentra devuelve un objeto match, si no devuelve None.
-    # re.search() es mejor que el metodo findall()  porque esa variable solo aparece una vez por pÃ¡gina.
-    match = re.search(pattern, html)
-    if not match:
+def _parse_understat_date(date_str: str) -> "date | None":
+    """Parsea fecha de Understat (formato: '2025-05-25 00:00:00')."""
+    if not date_str:
         return None
-        
-        # usas group(1) porque quieres solo el contenido del grupo y  y no el aptron completo
-        #match.group(1) extrae lo que capturÃ³ el patrÃ³n, el contenido dentro de las comillas simples. 
-        # encode("utf-8").decode("unicode_escape")
-        # Ese contenido viene escapado asÃ­:
-        # \x7b\x22id\x22\x3a\x2214093\x22...
-        # encode("utf-8").decode("unicode_escape") convirite a texto legible 
-    raw = match.group(1).encode("utf-8").decode("unicode_escape")
-    # Convierte ese string JSON en una estructura Python, lista o diccionario segÃºn el caso:
-    return json.loads(raw)
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(date_str[:19], fmt).date()
+        except ValueError:
+            continue
+    return None
 
-# â”€â”€ Funciones de scraping â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# --- Helpers de Red ---
 
-async def fetch(session: aiohttp.ClientSession, url: str, referer: str = None) ->Optional[str]:
-    r""" 
-        session: aiohttp.ClientSession. la sesiÃ³n HTTP, se crea una vez y se reutiliza
-        url: str     la URL a la que hacer la peticiÃ³n
-        referer: str  opcional, la URL de referencia para el header "Referer". Understat puede bloquear peticiones sin un Referer vÃ¡lido.
-        el Referer se gestiona dinÃ¡micamente en fetch porque cambia segÃºn la peticiÃ³n:
+async def fetch(
+        session: aiohttp.ClientSession,
+        url: str,
+        referer: str = None,
+        html_mode: bool = False,
+        quiet_statuses: tuple[int, ...] = (),
+ ) -> Optional[str]:
+    """Petición GET genérica. Usa headers JSON o HTML según html_mode.
 
-        El session es como una conexiÃ³n abierta al servidor. En lugar de abrir y cerrar una conexiÃ³n por cada peticiÃ³n, se crea una sola vez y se reutiliza para todas
-
-        with es un gestor de contexto. Se encarga de abrir y cerrar un recurso automÃ¡ticamente, aunque haya errores:
-        
-        Hace la peticiÃ³n GET al servidor con la URL y el header
-        Guarda la respuesta en resp
-        Comprueba que no hay error HTTP con raise_for_status(). Si hay error laznza exception 
-        Extrae el HTML como string con resp.text()
-        Cierra la conexiÃ³n automÃ¡ticamente al salir del bloque
-
-        Y
-        
+    `quiet_statuses` permite tratar estados esperables, como 404 en
+    `/getMatchData/<id>` de partidos aún sin shotmap, como ausencia de datos
+    en lugar de error crítico del scraper.
     """
-    headers = HEADERS.copy()
+    headers = (HEADERS_HTML if html_mode else HEADERS_JSON).copy()
     if referer:
         headers["Referer"] = referer
-        
     try:
-        async with session.get(url, headers= headers) as resp:
-            # NO necesita await. Raise for status si se manda un codigo de error lanza una excepcion
-            resp.raise_for_status()
+        async with session.get(url, headers=headers) as resp:
+            try:
+                resp.raise_for_status()
+            except aiohttp.ClientResponseError as e:
+                if e.status in quiet_statuses:
+                    return None
+                raise
+            # Understat puede devolver JSON como text/javascript
+            if not html_mode and "json" not in resp.headers.get("Content-Type", ""):
+                # Still return text to parse with json.loads
+                return await resp.text()
             return await resp.text()
-        
-    # Captura errores del servidor (como el 404 o 403).
     except aiohttp.ClientResponseError as e:
-        print(f"  [WARNING] Error HTTP {e.status} en {url}")
+        print(f"  [!] Error HTTP {e.status} en {url}: {e.message}")
         return None
-    except aiohttp.ClientError as e:
-        print(f"  [WARNING] Error de conexiÃ³n en {url}: {e}")
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        print(f"  [!] Error de red en {url}: {e}")
+        return None
+    except Exception as e:
+        print(f"  [!] Error en {url}: {e}")
         return None
 
+# EXTRACCIÓN DE PARTIDOS
 
-
-async def get_league_matches(session: aiohttp.ClientSession, season: int) -> list[dict]:
-    r"""
-    Endpoint JSON de liga -> lista de partidos con IDs de Understat.
-    URL ejemplo: https://understat.com/getLeagueData/La_liga/2021
-
-    Devuelve una lista de diccionarios con los partidos de la liga.
-    El endpoint devuelve JSON con tres claves: dates, teams, players.
-    Los partidos estÃ¡n en data["dates"].
-
-    1. fetch()        ->  JSON crudo del endpoint getLeagueData
-    2. json.loads()   ->  diccionario Python con claves dates/teams/players
-    3. data["dates"]  ->  lista de partidos
-    4. bucle for      ->  recorre la lista y construye diccionarios limpios
-    5. return matches ->  devuelve la lista de diccionarios
-
-    Se llama en scrape_laliga()
+def _parse_matches(raw_matches: list, season: int) -> List[dict]:
     """
-
-    url = f"https://understat.com/getLeagueData/{quote(LEAGUE)}/{season}"
-
-    raw = await fetch(session, url, referer=f"https://understat.com/league/{LEAGUE}/{season}")
-    
-    if not raw:
-        print(f"  [WARNING] No se pudo obtener datos para temporada {season}")
-        return []
-
-    try:
-        # convierte el string que devuevle fetch en un diccionario ptyhon con tres claves: dates, teams, players
-        data = json.loads(raw)
-    except json.JSONDecodeError as e:
-        print(f"  [WARNING] Error parseando JSON para temporada {season}: {e}")
-        return []
-
-    dates = data.get("dates", [])
-
-    if not dates:
-        print(f"  [WARNING] No se encontraron partidos para {season}")
-        return []
-
-    matches = []
-    for m in dates:
-        matches.append({
-            "understat_match_id": m["id"],
+    Convierte la lista cruda de partidos de Understat al formato
+    normalizado.
+    """
+    result = []
+    for m in raw_matches:
+        goals = m.get("goals") or {}
+        xg    = m.get("xG")    or {}
+        result.append({
+            "understat_match_id": m.get("id"),
             "season":             season,
             "datetime":           m.get("datetime"),
-            "home_team":          m["h"]["title"],
-            "away_team":          m["a"]["title"],
-            "home_team_id":       m["h"]["id"],
-            "away_team_id":       m["a"]["id"],
-            "home_goals":         m["goals"]["h"],
-            "away_goals":         m["goals"]["a"],
-            "home_xg":            m.get("xG", {}).get("h"),
-            "away_xg":            m.get("xG", {}).get("a"),
+            "home_team":          m.get("h", {}).get("title"),
+            "away_team":          m.get("a", {}).get("title"),
+            "home_team_id":       m.get("h", {}).get("id"),
+            "away_team_id":       m.get("a", {}).get("id"),
+            "home_goals":         goals.get("h"),
+            "away_goals":         goals.get("a"),
+            "home_xg":            xg.get("h") if isinstance(xg, dict) else None,
+            "away_xg":            xg.get("a") if isinstance(xg, dict) else None,
         })
-    return matches
-   
-    
+    return result
 
-
-async def get_match_shots(session: aiohttp.ClientSession, understat_match_id: str) -> list[dict]:
-    r"""
-    PÃ¡gina de partido -> datos de cada tiro.
-    URL ejemplo: https://understat.com/match/14093
-    
-    Campos raw de Understat:
-    id, minute, result, X, Y, xG, player, h_a (home/away),
-    player_id, situation, season, shotType, match_id,
-    h_team, a_team, h_goals, a_goals, date, player_assisted, lastAction
-
-    Se llama en scrape_laliga()
-    """
-    url = f"https://understat.com/getMatchData/{understat_match_id}"
-    raw = await fetch(session, url, referer=f"https://understat.com/match/{understat_match_id}")
-    
+async def get_matches_via_endpoint(
+    session: aiohttp.ClientSession,
+    league: str,
+    season: int,
+) -> List[dict]:
+    """Ligas domésticas: endpoint JSON."""
+    url     = f"{BASE_URL}/getLeagueData/{quote(league)}/{season}"
+    referer = f"{BASE_URL}/league/{league}/{season}"
+    raw = await fetch(session, url, referer=referer, html_mode=False)
     if not raw:
         return []
-    
-
-
     try:
-        # json.loads convierte el string con formato JSON  en un diccionario 
-        # data es un diccioanrio con dos claves ( 'a', 'h' ) y el valor de cada  clave es una lsita de diccioanrios
         data = json.loads(raw)
-    except json.JSONDecodeError as e:
-        print(f"Error parseando JSON para partido {understat_match_id}: {e}")
+        matches_raw = data.get("datesData") or data.get("dates") or []
+        return _parse_matches(matches_raw, season)
+    except Exception as e:
+        print(f"  [!] Error parseando JSON para {league}/{season}: {e}")
         return []
-
-    shots_data = data.get("shots", {})
-
-    if not shots_data:
+ 
+async def get_matches_via_html(
+    session: aiohttp.ClientSession,
+    league: str,
+    season: int,
+) -> List[dict]:
+    """Competiciones europeas: scraping HTML."""
+    url = f"{BASE_URL}/league/{league}/{season}"
+    raw = await fetch(session, url, referer=f"{BASE_URL}/", html_mode=True)
+    if not raw:
         return []
-    
-    shots = []
-    # shotsData tiene dos claves: 'h' (home) y 'a' (away)
-    # receurda el metodo get para acceder a los valores de las calves, dmite somo segunda parametro un valor por defecto  en caso de que la calve no exista 
-    #si la clave "h" o "a" no existiera en el diccionario devolverÃ­a una lista vacÃ­a en lugar de None o un error.
-    for side in ("h", "a"):
-
-        ## aqui se recorre la la lsita de diccionarios. El valor de cada clave h o a es uan lsita de diccionarios y cada diccioanrios es un tiro
-        # es cada tiro , es cada diccioanrio de la lista 
-        for shot in shots_data.get(side, []):
-            shots.append({
-                "understat_shot_id":   shot.get("id"),
-                "understat_match_id":  understat_match_id,
-                "understat_player_id": shot.get("player_id"),
-                "understat_team":      shot.get("h_team") if side == "h" else shot.get("a_team"),
-                "side":                side,           # h=local, a=visitante
-                "player_name":         shot.get("player"),
-                "minute":              shot.get("minute"),
-                "x":                   shot.get("X"),  # Understat usa X,Y en mayÃºscula
-                "y":                   shot.get("Y"),
-                "xg":                  shot.get("xG"),
-                "result":              shot.get("result"),
-                "shot_type":           shot.get("shotType"),   # RightFoot, LeftFoot, Head
-                "situation":           shot.get("situation"),  # OpenPlay, SetPiece, FromCorner, DirectFreekick, Penalty
-                "last_action":         shot.get("lastAction"),
-                "player_assisted":     shot.get("player_assisted"),
-                "season":              shot.get("season"),
-                "source":              "understat",
-            })
-    # lista de diccionarios con los tiros del  partido 
-    return shots
-
-
-
-
-# â”€â”€ Orquestador principal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-async def scrape_laliga(seasons: list[int]) -> tuple[pd.DataFrame, pd.DataFrame]:
-    r"""
-    Orquestador principal del scraping. Recibe la lista de temporadas y devuelve
-    dos DataFrames: uno con los partidos y otro con los tiros.
-
-    Crea una sesiÃ³n HTTP compartida con:
-    - TCPConnector(limit=3): mÃ¡ximo 3 conexiones paralelas para no saturar el servidor
-    - ClientTimeout(total=30): cancela peticiones que tarden mÃ¡s de 30 segundos
-
-    Por cada temporada:
-    1. Obtiene la lista de partidos con get_league_matches()
-    2. Recorre cada partido y obtiene sus tiros con get_match_shots()
-    3. AÃ±ade el campo 'season' como entero a cada tiro
-    4. Acumula partidos y tiros en all_matches y all_shots
-
-    Devuelve una tupla con dos DataFrames (df_matches, df_shots) que se desempaqueta en main:
-        df_matches, df_shots = await scrape_laliga(SEASONS)
-    """
-
-    all_matches = []
-    all_shots   = []
-
-    connector = aiohttp.TCPConnector(limit=3)  # mÃ¡x 3 conexiones paralelas
-
-    #ClientTimeout(total=30) significa que si una peticiÃ³n tarda mÃ¡s de 30 segundos, se cancela y lanza error. Sin esto una peticiÃ³n podrÃ­a quedarse colgada indefinidamente.
-    timeout   = aiohttp.ClientTimeout(total=30)
-
-    ##  async with abre y cierra la sesion http
-    ##  Los metodos que necesitan la sesion  se llaman dentro del bloque asycn with 
-    async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+    try:
+        pattern = r"var\s+datesData\s*=\s*JSON\.parse\('(.+?)'\)"
+        match = re.search(pattern, raw, re.DOTALL)
+        if not match:
+            print(f"  [!] No se encontró 'datesData' en HTML.")
+            return []
         
-        # Recorre la lista  con las temporadas que recibe como parametro
-        for season in seasons:
-            print(f"\n[SEASON] Temporada {season}/{season+1}")
-    
-            try:
-                # lsita de diccioanrios 
-                matches = await get_league_matches(session, season)
-            except Exception as e:
-                print(f"  [!] Error obteniendo partidos de temporada {season}: {e}")
-                continue
+        # Primero quitamos los quotes escapados
+        json_str = match.group(1).encode("utf-8").decode("unicode_escape")
+        # Por si aún quedan \', aunque unicode_escape debería manejar mucho
+        json_str = json_str.replace("\\'", "'")
+        matches_raw = json.loads(json_str)
+        return _parse_matches(matches_raw, season)
+    except Exception as e:
+        print(f"  [!] Error parseando HTML para {league}/{season}: {e}")
+        return []
+ 
+# EXTRACCIÓN DE TIROS
+ 
+async def get_match_shots(
+    session: aiohttp.ClientSession,
+    match_id: str,
+) -> List[dict]:
+    """Tiros de un partido específico."""
+    url     = f"{BASE_URL}/getMatchData/{match_id}"
+    referer = f"{BASE_URL}/match/{match_id}"
+    raw = await fetch(session, url, referer=referer, html_mode=False, quiet_statuses=(404,))
+    if not raw:
+        print(f"  [i] Understat no tiene shotmap publicado para el partido {match_id}. Se omite.")
+        return []
+    try:
+        data       = json.loads(raw)
+        shots_data = data.get("shots", {})
+        shots      = []
+        for side in ("h", "a"):
+            for shot in shots_data.get(side, []):
+                shots.append({
+                    "understat_shot_id":    shot.get("id"),
+                    "understat_match_id":   match_id,
+                    "understat_player_id":  shot.get("player_id"),
+                    "understat_team":       shot.get("h_team") if side == "h" else shot.get("a_team"),
+                    "side":                 side,
+                    "player_name":          shot.get("player"),
+                    "minute":               shot.get("minute"),
+                    "x":                    shot.get("X"),
+                    "y":                    shot.get("Y"),
+                    "xg":                   shot.get("xG"),
+                    "result":               shot.get("result"),
+                    "shot_type":            shot.get("shotType"),
+                    "situation":            shot.get("situation"),
+                    "last_action":          shot.get("lastAction"),
+                    "player_assisted":      shot.get("player_assisted"),
+                    "season":               shot.get("season"),
+                    "source":               "understat",
+                })
+        return shots
+    except Exception as e:
+        print(f"  [!] Error parseando tiros del partido {match_id}: {e}")
+        return []
 
-            print(f"  [+] {len(matches)} partidos encontrados")
-            all_matches.extend(matches)
-
-            for i, match in enumerate(matches, 1):
-                # extrae el id de cada partido 
-                mid = match["understat_match_id"]
-                try:
-                    # obtiene los tiros de lso partidos y aÃ±ade la temporada a cada tiro 
-                    shots = await get_match_shots(session, mid)
-                    for s in shots:
-                        s["season"] = season
-                    all_shots.extend(shots)
-                    
-                    #Esto se usa mucho para logs de progreso en loops grandes para no imprimir en cada iteraciÃ³n.
-                    if i % 20 == 0:
-                        print(f"  -> {i}/{len(matches)} partidos procesados | tiros acumulados: {len(all_shots)}")
-
-                    await asyncio.sleep(DELAY_SEC)
-
-                except aiohttp.ClientError as e:
-                    print(f"  [WARNING] Error HTTP en partido {mid}: {e}")
-                    await asyncio.sleep(5)
-                except Exception as e:
-                    print(f"  [!] Error inesperado en partido {mid}: {e}")
-                    await asyncio.sleep(5)
-
-            print(f"[+] Temporada {season} completa: {len(matches)} partidos, {len(all_shots)} tiros totales acumulados")
-    ##Devuelve una tupla con dos DataFrames: el primero con los partidos y el segundo con los tiros.
-    return pd.DataFrame(all_matches), pd.DataFrame(all_shots)
-
-# â”€â”€ TransformaciÃ³n -> esquema fact_shots â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# TRANSFORMACIÓN A FORMATO DB
 
 def transform_shots(df_shots: pd.DataFrame, df_matches: pd.DataFrame) -> pd.DataFrame:
-    """
-    Prepara el DataFrame de tiros para carga en fact_shots.
-    
-    IMPORTANTE: match_id, player_id, team_id son las PKs de tus tablas dim_*.
-    Este script genera las FK de Understat; el ETL final deberÃ¡ hacer el join
-    con tus dimensiones para resolver los IDs definitivos.
-    """
-    # Normalizar tipos
+    """Prepara el DataFrame de tiros para carga en fact_shots."""
+    if df_shots.empty:
+        return df_shots
+
     df = df_shots.copy()
     df["minute"]   = pd.to_numeric(df["minute"],  errors="coerce").astype("Int16")
-    df["x"]        = (pd.to_numeric(df["x"], errors="coerce") * 105).round(2)  # 0-1 -> 0-105 metros
-    df["y"]        = (pd.to_numeric(df["y"], errors="coerce") * 68).round(2)   # 0-1 -> 0-68 metros
+    df["x"]        = (pd.to_numeric(df["x"], errors="coerce") * 105).round(2)
+    df["y"]        = (pd.to_numeric(df["y"], errors="coerce") * 68).round(2)
     df["xg"]       = pd.to_numeric(df["xg"],       errors="coerce").round(4)
-
-    # Mapear resultado a valores estÃ¡ndar
-
-        #El Metodo map en pandas no es el metodo map  genericio de python. funciona de distitna manera 
-        # El metodo map en pandas Recorre cada celda de la columna, mira si ese valor existe como clave en el diccionario, y si existe lo reemplaza por el valor correspondiente. y si no o sustitueye por Nan
-        #AquÃ­ entra fillna. Como map devuelve NaN para los valores que no estÃ¡n en el diccionario, fillna los rellena con el valor original de la columna:
 
     result_map = {
         "Goal":            "Goal",
@@ -381,10 +232,8 @@ def transform_shots(df_shots: pd.DataFrame, df_matches: pd.DataFrame) -> pd.Data
         "ShotOnPost":      "Post",
         "OwnGoal":         "OwnGoal",
     }
-    # recuerda que la  columna antes de operador de asignacion es la que se va a modificar y la de la derecha es la que se usa para hacer la comparacion de los valores con las claves del diccioanrios
     df["result"] = df["result"].map(result_map).fillna(df["result"])
 
-    # Mapear tipo de disparo
     shottype_map = {
         "RightFoot": "Right Foot",
         "LeftFoot":  "Left Foot",
@@ -392,7 +241,6 @@ def transform_shots(df_shots: pd.DataFrame, df_matches: pd.DataFrame) -> pd.Data
     }
     df["shot_type"] = df["shot_type"].map(shottype_map).fillna(df["shot_type"])
 
-    # Mapear situaciÃ³n
     situation_map = {
         "OpenPlay":        "Open Play",
         "SetPiece":        "Set Piece",
@@ -402,28 +250,18 @@ def transform_shots(df_shots: pd.DataFrame, df_matches: pd.DataFrame) -> pd.Data
     }
     df["situation"] = df["situation"].map(situation_map).fillna(df["situation"])
 
-    # Columnas finales alineadas con fact_shots
-    # (sin shot_id que es SERIAL, sin match_id/player_id/team_id definitivos
-    #  -> se resuelven en el ETL cruzando con tus dim_*)
     cols = [
-        "understat_match_id",   # -> cruzar con dim_match
-        "understat_player_id",  # -> cruzar con dim_player
-        "understat_team",       # -> cruzar con dim_team
-        "player_name",
-        "minute",
-        "x", "y", "xg",
+        "understat_match_id", "understat_player_id", "understat_team",
+        "player_name", "minute", "x", "y", "xg",
         "result", "shot_type", "situation",
         "side", "last_action", "player_assisted",
-        "season", "source",
+        "season", "source"
     ]
-    # Devuelve el DataFrame pero solo con las columnas que estÃ¡n en cols, en el orden definido en cols, y descartando cualquier columna extra que pudiera haber llegado del scraping pero que no necesitamos en fact_shots.
-    return df[[ c     for c in cols     if c in df.columns]]
-
-# Por qui me quedo 
-
-# â”€â”€ ETL de dimensiones auxiliares â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    return df[[c for c in cols if c in df.columns]]
 
 def extract_players(df_shots: pd.DataFrame) -> pd.DataFrame:
+    if df_shots.empty:
+        return pd.DataFrame()
     return (
         df_shots[["understat_player_id", "player_name"]]
         .drop_duplicates()
@@ -433,6 +271,8 @@ def extract_players(df_shots: pd.DataFrame) -> pd.DataFrame:
     )
 
 def extract_teams(df_matches: pd.DataFrame) -> pd.DataFrame:
+    if df_matches.empty:
+        return pd.DataFrame()
     home = df_matches[["home_team_id", "home_team"]].rename(
         columns={"home_team_id": "understat_team_id", "home_team": "team_name"})
     away = df_matches[["away_team_id", "away_team"]].rename(
@@ -444,151 +284,139 @@ def extract_teams(df_matches: pd.DataFrame) -> pd.DataFrame:
         .reset_index(drop=True)
     )
 
+# ORQUESTADOR
 
-# ──────────────────────────────────────────────────────────────────────
-# Wizard-facing adapter
-# ──────────────────────────────────────────────────────────────────────
 async def scrape_understat(
-    competition_name: Optional[str] = None,
-    seasons: Optional[list[int]] = None,
-    update: bool = False,
-    from_date: Optional[str] = None,
+    competition_name: str, 
+    seasons: List[int], 
+    update: bool = False, 
+    from_date: str = None,
     delay: float = 1.5,
-) -> None:
-    """Adapter used by `wizard.pipeline_runner.run_scraping`.
-
-    Wraps the existing `scrape_laliga` orchestrator so it can scrape any
-    Understat league declared in `wizard.competitions`. Writes the same
-    four CSV files the loaders expect under `data/raw/understat/` —
-    filenames keep the literal `_laliga` suffix because the loaders are
-    hardcoded to read those exact names regardless of league.
-    """
-    global LEAGUE, DELAY_SEC
-
-    seasons = seasons or SEASONS
-    league_key = "La_liga"  # default
-    if competition_name:
-        try:
-            from wizard.competitions import get_competition
-            comp = get_competition(competition_name) or {}
-            cfg_key = comp.get("sources", {}).get("understat", {}).get("league")
-            if cfg_key:
-                league_key = cfg_key
-            else:
-                print(
-                    f"[understat] '{competition_name}' no tiene 'league' configurado en "
-                    f"wizard.competitions.COMPETITIONS — se omite Understat."
-                )
-                return
-        except Exception as exc:
-            print(f"[understat] No se pudo resolver league key: {exc}. Usando '{league_key}'.")
-
-    prev_league = LEAGUE
-    prev_delay = DELAY_SEC
-    LEAGUE = league_key
-    DELAY_SEC = float(delay) if delay else DELAY_SEC
-
-    try:
-        print(
-            f"[understat] competition={competition_name!r} league={LEAGUE} "
-            f"seasons={seasons} update={update} from_date={from_date}"
-        )
-        df_matches, df_shots = await scrape_laliga(seasons)
-
-        if df_matches.empty or df_shots.empty:
-            print("[understat] Sin datos para esta selección.")
-            return
-
-        if from_date:
-            try:
-                cutoff = pd.to_datetime(from_date)
-                df_matches["datetime"] = pd.to_datetime(df_matches["datetime"], errors="coerce")
-                keep_ids = set(
-                    df_matches.loc[df_matches["datetime"] >= cutoff, "understat_match_id"]
-                )
-                before = len(df_matches)
-                df_matches = df_matches[df_matches["understat_match_id"].isin(keep_ids)]
-                df_shots = df_shots[df_shots["understat_match_id"].isin(keep_ids)]
-                print(
-                    f"[understat] from_date={from_date}: {before} → {len(df_matches)} "
-                    f"partidos tras filtrar."
-                )
-            except Exception as exc:
-                print(f"[understat] No se pudo aplicar from_date={from_date}: {exc}")
-
-        if df_matches.empty or df_shots.empty:
-            print("[understat] Tras filtrar from_date no quedan partidos.")
-            return
-
-        df_shots_clean = transform_shots(df_shots, df_matches)
-        df_players = extract_players(df_shots)
-        df_teams = extract_teams(df_matches)
-
-        shots_path = os.path.join(OUTPUT_DIR, "understat_shots_laliga.csv")
-        matches_path = os.path.join(OUTPUT_DIR, "understat_matches_laliga.csv")
-        players_path = os.path.join(OUTPUT_DIR, "understat_players_laliga.csv")
-        teams_path = os.path.join(OUTPUT_DIR, "understat_teams_laliga.csv")
-
-        df_shots_clean.to_csv(shots_path, index=False, encoding="utf-8-sig")
-        df_matches.to_csv(matches_path, index=False, encoding="utf-8-sig")
-        df_players.to_csv(players_path, index=False, encoding="utf-8-sig")
-        df_teams.to_csv(teams_path, index=False, encoding="utf-8-sig")
-
-        print(
-            f"[understat] OK — {len(df_matches)} partidos, "
-            f"{len(df_shots_clean)} tiros, "
-            f"{len(df_players)} jugadores, "
-            f"{len(df_teams)} equipos guardados en {OUTPUT_DIR}"
-        )
-    finally:
-        LEAGUE = prev_league
-        DELAY_SEC = prev_delay
-
-# â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-async def main():
-    print("=" * 55)
-    print(f"  Understat scraper - {LEAGUE} {SEASONS[0]}-{SEASONS[-1]}")
-    print("=" * 55)
-
-    # scrape_lalida devuelve una tupla con dos DataFrames.
-    # Aqui se hace unpacking de la tupla
-    df_matches, df_shots = await scrape_laliga(SEASONS)
-
-    if df_shots.empty:
-        print("\n[!] No se obtuvieron datos. Revisa la conexiÃ³n o las URLs.")
+):
+    comp_config = get_competition(competition_name)
+    if not comp_config:
+        print(f"[!] Competición '{competition_name}' no encontrada en competitions.py.")
         return
 
-    print(f"\n[SUMMARY] Resumen:")
-    print(f"  Partidos: {len(df_matches)}")
-    print(f"  Tiros:    {len(df_shots)}")
+    understat_cfg = comp_config["sources"].get("understat")
+    if not understat_cfg or not understat_cfg.get("league"):
+        print(f"[!] '{competition_name}' no tiene configuración o datos en Understat.")
+        return
 
-    # Transformar
+    league = understat_cfg["league"]
+    has_endpoint = understat_cfg.get("has_league_endpoint", True)
+    comp_slug = competition_name.lower().replace(" ", "-") if competition_name else "la-liga"
+
+    if has_endpoint:
+        print(f"[INFO] '{competition_name}' usa endpoint JSON (/getLeagueData/)")
+        get_matches = get_matches_via_endpoint
+    else:
+        print(f"[INFO] '{competition_name}' usa scraping HTML (/league/)")
+        get_matches = get_matches_via_html
+
+    from_date_obj = None
+    if from_date:
+        from_date_obj = datetime.strptime(from_date, "%Y-%m-%d").date()
+        print(f"\n[FILTER] Descargando solo partidos desde: {from_date}")
+
+    all_matches: List[dict] = []
+    all_shots:   List[dict] = []
+
+    connector = aiohttp.TCPConnector(limit=3)
+    timeout   = aiohttp.ClientTimeout(total=30)
+    
+    async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+        for season in seasons:
+            print(f"\n[SEASON] {competition_name} — {season}/{season + 1}")
+            matches = await get_matches(session, league, season)
+
+            if not matches:
+                print(f"  [!] Sin partidos para {competition_name} {season}. Saltando.")
+                continue
+
+            # Filtrar por fecha
+            if from_date_obj:
+                original_count = len(matches)
+                matches = [m for m in matches if m.get("datetime") and _parse_understat_date(m["datetime"]) >= from_date_obj]
+                print(f"  [+] {len(matches)} partidos después de {from_date} (filtrados {original_count - len(matches)})")
+
+            all_matches.extend(matches)
+            
+            processed_count = 0
+            for i, match in enumerate(matches, 1):
+                mid = match["understat_match_id"]
+                match_date = _parse_understat_date(match.get("datetime"))
+                if match_date and match_date > date.today():
+                    continue
+
+                try:
+                    shots = await get_match_shots(session, mid)
+                    for s in shots:
+                        s["season"] = season
+                    all_shots.extend(shots)
+                    processed_count += 1
+
+                    if processed_count % 20 == 0:
+                        print(f"  -> {processed_count}/{len(matches)} partidos | Tiros acumulados: {len(all_shots)}")
+
+                    await asyncio.sleep(delay)
+                except Exception as e:
+                    print(f"  [!] Error inesperado en partido {mid}: {e}")
+                    await asyncio.sleep(5)
+
+    # --- Guardar CSVs ---
+    if not all_matches:
+        print(f"\n[!] No se obtuvieron datos para '{competition_name}'. No se guardan ficheros.")
+        return
+
+    df_matches = pd.DataFrame(all_matches)
+    df_shots   = pd.DataFrame(all_shots)
+    
+    # Aplicar transformaciones
     df_shots_clean = transform_shots(df_shots, df_matches)
     df_players     = extract_players(df_shots)
     df_teams       = extract_teams(df_matches)
 
-    # Guardar archivos
-    shots_path   = os.path.join(OUTPUT_DIR, "understat_shots_laliga.csv")
-    matches_path = os.path.join(OUTPUT_DIR, "understat_matches_laliga.csv")
-    players_path = os.path.join(OUTPUT_DIR, "understat_players_laliga.csv")
-    teams_path   = os.path.join(OUTPUT_DIR, "understat_teams_laliga.csv")
+    # Crear directorios si es necesario
+    season_year = seasons[0]
+    folder_season = f"{season_year}_{season_year + 1}"
+    season_dir = OUTPUT_DIR / comp_slug / f"season={folder_season}"
+    season_dir.mkdir(parents=True, exist_ok=True)
 
-    df_shots_clean.to_csv(shots_path,   index=False, encoding="utf-8-sig")
-    df_matches.to_csv(    matches_path, index=False, encoding="utf-8-sig")
-    df_players.to_csv(    players_path, index=False, encoding="utf-8-sig")
-    df_teams.to_csv(      teams_path,   index=False, encoding="utf-8-sig")
+    matches_path = season_dir / "understat_matches.csv"
+    shots_path   = season_dir / "understat_shots.csv"
+    players_path = season_dir / "understat_players.csv"
+    teams_path   = season_dir / "understat_teams.csv"
 
-    print(f"\n[OK] Archivos guardados:")
-    print(f"  {shots_path}   ({len(df_shots_clean)} filas)")
-    print(f"  {matches_path} ({len(df_matches)} filas)")
-    print(f"  {players_path} ({len(df_players)} filas)")
-    print(f"  {teams_path}   ({len(df_teams)} filas)")
+    df_matches.to_csv(matches_path, index=False, encoding="utf-8-sig")
+    if not df_shots_clean.empty:
+        df_shots_clean.to_csv(shots_path, index=False, encoding="utf-8-sig")
+    if not df_players.empty:
+        df_players.to_csv(players_path, index=False, encoding="utf-8-sig")
+    if not df_teams.empty:
+        df_teams.to_csv(teams_path, index=False, encoding="utf-8-sig")
 
-    # Preview
-    print(f"\n[SAMPLE] Muestra de tiros:")
-    print(df_shots_clean.head(3).to_string(index=False))
+    print(f"\n[OK] '{competition_name}' guardado en {season_dir}:")
+    print(f"     Partidos : {len(df_matches):>5}  ->  {matches_path.name}")
+    print(f"     Tiros    : {len(df_shots_clean):>5}  ->  {shots_path.name}")
+
 
 if __name__ == "__main__":
-    asyncio.run(main())
-
+    parser = argparse.ArgumentParser(description="Understat Unified Scraper")
+    parser.add_argument("--competition", type=str, default="La Liga",
+                        help="Nombre exacto de la competición (ej: 'Bundesliga')")
+    parser.add_argument("--seasons", nargs="+", type=int, default=[2024],
+                        help="Lista de temporadas (año de inicio). Ej: 2024")
+    parser.add_argument("--from-date", type=str, default=None,
+                        help="Fecha desde (YYYY-MM-DD) para update incremental")
+    parser.add_argument("--delay", type=float, default=1.5,
+                        help="Segundos de espera entre peticiones")
+    args = parser.parse_args()
+    
+    asyncio.run(scrape_understat(
+        competition_name=args.competition, 
+        seasons=args.seasons,
+        update=bool(args.from_date),
+        from_date=args.from_date,
+        delay=args.delay
+    ))
