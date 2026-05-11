@@ -1,6 +1,8 @@
 # Dashboard
 
-Read-only two-tab Streamlit dashboard for exploring and monitoring football data.
+Streamlit dashboard for exploring and monitoring football data. All tabs are
+read-only **except for the Wizard tab**, which launches the scraping pipeline
+and therefore writes to the database.
 
 ## Run
 
@@ -25,6 +27,14 @@ Select competition + season + team (or "All teams") to browse:
 - Coverage per source for any season, with progress bars
 - Player review queue stats and table
 - Recent matches
+
+### Wizard
+Stepwise selectors (operation → competition → season → source → match filter →
+confirm) that launch the scraping pipeline by calling
+`wizard.pipeline_runner.run_pipeline`. The pipeline's log streams into the tab
+and persists to `data/logs/wizard_latest_log.txt`. Selecting a team filter
+produces a CSV download after the run completes. This is the only tab that
+writes to the database; the others stay read-only.
 
 ## Notes
 

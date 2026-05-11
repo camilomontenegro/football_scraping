@@ -229,3 +229,81 @@ def get_period_breakdown(season_label: str, team_id: int | None) -> pd.DataFrame
 
     df["match_period"] = pd.Categorical(df["match_period"], categories=_PERIODS, ordered=True)
     return df.sort_values("match_period").reset_index(drop=True)
+
+
+def get_setpiece_goals(
+    season_label: str,
+    team_id: int | None,
+    player_id: int | None = None,
+) -> pd.DataFrame:
+    """Set-piece goal stats for the Set-piece Specialists section.
+
+    player_id=None  → ranked table: player, team, penalty_goals, freekick_goals,
+                       openplay_goals, total_goals (only players with pen/fk goals).
+    player_id=<id>  → bucket breakdown: situation_bucket, goals (for one player).
+
+    Data source: fact_shots filtered to data_source='understat' and result='Goal'.
+    Situation normalisation via LOWER() handles mixed casing across scrapers.
+    """
+    params: dict = {"season": season_label}
+
+    if player_id is None:
+        team_filter = ""
+        if team_id is not None:
+            team_filter = "AND fs.team_id = :tid"
+            params["tid"] = team_id
+        sql = f"""
+            SELECT
+                p.canonical_name AS player,
+                t.canonical_name AS team,
+                SUM(CASE WHEN LOWER(fs.situation) = 'penalty'
+                         THEN 1 ELSE 0 END)                                 AS penalty_goals,
+                SUM(CASE WHEN LOWER(fs.situation) IN ('direct freekick','free-kick')
+                         THEN 1 ELSE 0 END)                                 AS freekick_goals,
+                SUM(CASE WHEN LOWER(fs.situation) IN ('open play','assisted','fast-break','regular')
+                         THEN 1 ELSE 0 END)                                 AS openplay_goals,
+                SUM(CASE WHEN LOWER(fs.situation) NOT IN (
+                              'penalty','direct freekick','free-kick',
+                              'open play','assisted','fast-break','regular')
+                         THEN 1 ELSE 0 END)                                 AS setpiece_other_goals,
+                COUNT(*)                                                     AS total_goals
+            FROM fact_shots fs
+            JOIN dim_player p ON fs.player_id  = p.canonical_id
+            JOIN dim_team   t ON fs.team_id    = t.canonical_id
+            JOIN dim_match  m ON fs.match_id   = m.match_id
+            WHERE fs.result      = 'Goal'
+              AND fs.data_source = 'understat'
+              AND m.season       = :season
+              {team_filter}
+            GROUP BY p.canonical_id, p.canonical_name, t.canonical_id, t.canonical_name
+            HAVING
+                SUM(CASE WHEN LOWER(fs.situation) = 'penalty' THEN 1 ELSE 0 END) > 0
+                OR SUM(CASE WHEN LOWER(fs.situation) IN ('direct freekick','free-kick')
+                            THEN 1 ELSE 0 END) > 0
+            ORDER BY penalty_goals DESC, freekick_goals DESC
+        """
+    else:
+        params["pid"] = player_id
+        sql = """
+            SELECT
+                CASE
+                    WHEN LOWER(fs.situation) = 'penalty'
+                         THEN 'Penalty'
+                    WHEN LOWER(fs.situation) IN ('direct freekick','free-kick')
+                         THEN 'Free Kick'
+                    WHEN LOWER(fs.situation) IN ('open play','assisted','fast-break','regular')
+                         THEN 'Open Play'
+                    ELSE 'Set Piece / Other'
+                END AS situation_bucket,
+                COUNT(*) AS goals
+            FROM fact_shots fs
+            JOIN dim_match m ON fs.match_id = m.match_id
+            WHERE fs.result      = 'Goal'
+              AND fs.data_source = 'understat'
+              AND m.season       = :season
+              AND fs.player_id   = :pid
+            GROUP BY situation_bucket
+            ORDER BY goals DESC
+        """
+
+    return query_df(sql, params)

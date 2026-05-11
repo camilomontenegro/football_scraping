@@ -28,7 +28,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from dashboard import analytics, db, explore, scanner
+from dashboard import analytics, db, explore, scanner, wizard_view
 
 st.set_page_config(
     page_title="Football Scraping Dashboard",
@@ -45,9 +45,14 @@ except Exception:
     st.error("Cannot connect to the database. Check your .env file.")
     st.stop()
 
-tab_explore, tab_teams, tab_gk, tab_players, tab_injuries, tab_shot, tab_monitor = st.tabs(
+def _fmt(n) -> str:
+    return f"{int(n):,}".replace(",", ".")
+
+
+(tab_explore, tab_teams, tab_gk, tab_players, tab_injuries,
+ tab_shot, tab_monitor, tab_wizard) = st.tabs(
     ["Exploration", "Teams", "Goalkeepers", "Players",
-     "Injuries", "Shot Intelligence", "Pipeline monitoring"]
+     "Injuries", "Shot Intelligence", "Pipeline monitoring", "Wizard"]
 )
 
 
@@ -87,10 +92,10 @@ with tab_explore:
         # Metric cards
         summary = explore.get_season_summary(season, team)
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Matches",  f"{summary['matches']:,}")
-        m2.metric("Goals",    f"{summary['goals']:,}")
+        m1.metric("Matches",  _fmt(summary['matches']))
+        m2.metric("Goals",    _fmt(summary['goals']))
         m3.metric("xG",       f"{summary['xg']:.1f}")
-        m4.metric("Injuries", f"{summary['injuries']:,}")
+        m4.metric("Injuries", _fmt(summary['injuries']))
 
         t_results, t_players, t_shots, t_events = st.tabs(
             ["Results", "Player stats", "Shots by source", "Events"]
@@ -202,7 +207,7 @@ with tab_teams:
 
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Teams", len(df))
-            m2.metric("Total goals", f"{total_goals:,}")
+            m2.metric("Total goals", _fmt(total_goals))
             m3.metric("Avg goals/match", f"{avg_goals:.2f}")
             m4.metric("Avg xG/match", f"{avg_xg:.2f}")
 
@@ -240,9 +245,9 @@ with tab_gk:
 
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Goalkeepers tracked", gk_count)
-            m2.metric("Total saves", f"{total_saves:,}")
+            m2.metric("Total saves", _fmt(total_saves))
             m3.metric("Avg save %", f"{avg_save_pct:.1f}%")
-            m4.metric("Clean sheets", f"{total_cs:,}")
+            m4.metric("Clean sheets", _fmt(total_cs))
 
             display_df = df.rename(columns={
                 "goalkeeper": "Goalkeeper",
@@ -280,9 +285,9 @@ with tab_players:
     else:
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Players tracked", df["player"].nunique())
-        m2.metric("Total goals", f"{int(df['goals'].sum()):,}")
-        m3.metric("Yellow cards", f"{int(df['yellow_cards'].sum()):,}")
-        m4.metric("Red cards", f"{int(df['red_cards'].sum()):,}")
+        m2.metric("Total goals", _fmt(df['goals'].sum()))
+        m3.metric("Yellow cards", _fmt(df['yellow_cards'].sum()))
+        m4.metric("Red cards", _fmt(df['red_cards'].sum()))
 
         display_df = df.copy()
         if _pl_season is not None:
@@ -318,10 +323,10 @@ with tab_injuries:
         ongoing = int(df["date_until"].isna().sum())
 
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Total injuries", f"{total_inj:,}")
-        m2.metric("Total days absent", f"{total_days:,}")
-        m3.metric("Total matches missed", f"{total_missed:,}")
-        m4.metric("Ongoing injuries", f"{ongoing:,}")
+        m1.metric("Total injuries", _fmt(total_inj))
+        m2.metric("Total days absent", _fmt(total_days))
+        m3.metric("Total matches missed", _fmt(total_missed))
+        m4.metric("Ongoing injuries", _fmt(ongoing))
 
         df_render = df.copy()
         df_render["date_until"] = df_render["date_until"].where(
@@ -489,6 +494,49 @@ with tab_shot:
 
         st.divider()
 
+        # ── Section 3 — Set-piece Specialists ────────────────────
+        st.subheader("Set-piece Specialists")
+
+        sp_df = analytics.get_setpiece_goals(si_season, _si_team_id)
+
+        if sp_df.empty:
+            st.info("No set-piece goal data for this selection.")
+        else:
+            display_sp = sp_df.rename(columns={
+                "player":        "Player",
+                "team":          "Team",
+                "penalty_goals": "Penalty Goals",
+                "freekick_goals":"Free Kick Goals",
+                "openplay_goals":       "Open Play Goals",
+                "setpiece_other_goals": "Set Piece / Other",
+                "total_goals":          "Total Goals",
+            }).sort_values("Penalty Goals", ascending=False)
+            st.dataframe(display_sp, use_container_width=True)
+
+            _sp_players = explore.get_players_for_season(si_season, _si_team_id)
+            _sp_labels = ["All players"] + [name for name, _ in _sp_players]
+            _sp_id_map = {name: pid for name, pid in _sp_players}
+
+            si_player_name = st.selectbox(
+                "Player drill-down", _sp_labels, key="si_player"
+            )
+            si_player_id = _sp_id_map.get(si_player_name)
+
+            if si_player_id is not None:
+                bucket_df = analytics.get_setpiece_goals(
+                    si_season, _si_team_id, player_id=si_player_id
+                )
+                if not bucket_df.empty:
+                    st.bar_chart(bucket_df.set_index("situation_bucket")["goals"])
+
+            st.caption(
+                "Source: fact_shots (Understat) · "
+                "Penalty = situation 'penalty' · "
+                "Free Kick = 'direct freekick' / 'free-kick'"
+            )
+
+        st.divider()
+
 
 # ════════════════════════════════════════════════════════════════════
 # TAB 7 — PIPELINE MONITORING
@@ -498,10 +546,10 @@ with tab_monitor:
 
     # ── Section 1 — DB metric cards ───────────────────────
     p1, p2, p3, p4 = st.columns(4)
-    p1.metric("Players",         f"{_DB_SUMMARY['players']:,}")
-    p2.metric("Matches",         f"{_DB_SUMMARY['matches']:,}")
-    p3.metric("Shots (with xG)", f"{_DB_SUMMARY['shots']:,}")
-    p4.metric("Injuries",        f"{_DB_SUMMARY['injuries']:,}")
+    p1.metric("Players",         _fmt(_DB_SUMMARY['players']))
+    p2.metric("Matches",         _fmt(_DB_SUMMARY['matches']))
+    p3.metric("Shots (with xG)", _fmt(_DB_SUMMARY['shots']))
+    p4.metric("Injuries",        _fmt(_DB_SUMMARY['injuries']))
 
     st.divider()
 
@@ -560,9 +608,9 @@ with tab_monitor:
             loaded = row["loaded"] or 0
             total  = row["total"]
             if total is None:
-                st.write(f"**{src}** — {loaded:,}")
+                st.write(f"**{src}** — {_fmt(loaded)}")
             else:
-                st.write(f"**{src}** — {loaded:,} / {total:,}")
+                st.write(f"**{src}** — {_fmt(loaded)} / {_fmt(total)}")
                 if total > 0:
                     st.progress(min(loaded / total, 1.0))
                 total_loaded += loaded
@@ -582,9 +630,9 @@ with tab_monitor:
     st.subheader("Player review queue")
     pr_stats = db.get_player_review_stats()
     r1, r2, r3, r4 = st.columns(4)
-    r1.metric("Total",           f"{pr_stats['total']:,}")
-    r2.metric("Unresolved",      f"{pr_stats['unresolved']:,}")
-    r3.metric("Resolved",        f"{pr_stats['resolved']:,}")
+    r1.metric("Total",           _fmt(pr_stats['total']))
+    r2.metric("Unresolved",      _fmt(pr_stats['unresolved']))
+    r3.metric("Resolved",        _fmt(pr_stats['resolved']))
     r4.metric("Avg similarity",  f"{pr_stats['avg_score']:.1f}")
     pr_df = db.get_player_review_queue(50)
     if pr_df.empty:
@@ -605,8 +653,11 @@ with tab_monitor:
         st.info("No matches in `dim_match` yet.")
     else:
         st.dataframe(rm_df, use_container_width=True)
-        
 
 
-
+# ════════════════════════════════════════════════════════════════════
+# TAB 8 — WIZARD (writes to the database — read-only exception)
+# ════════════════════════════════════════════════════════════════════
+with tab_wizard:
+    wizard_view.render()
 

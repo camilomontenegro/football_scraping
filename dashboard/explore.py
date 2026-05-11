@@ -526,6 +526,35 @@ def get_injury_type_breakdown(season_label: str | None, team: str | None) -> pd.
     return query_df(sql, params)
 
 
+def get_players_for_season(
+    season_label: str,
+    team_id: int | None,
+) -> list[tuple[str, int]]:
+    """Return (canonical_name, canonical_id) for players with >= 1 goal in the season.
+
+    Used to populate the player selectbox in the Set-piece Specialists section.
+    """
+    eng = get_engine()
+    params: dict = {"season": season_label}
+    team_filter = ""
+    if team_id is not None:
+        team_filter = "AND fs.team_id = :tid"
+        params["tid"] = team_id
+    sql = f"""
+        SELECT DISTINCT p.canonical_name, p.canonical_id
+        FROM fact_shots fs
+        JOIN dim_player p ON fs.player_id = p.canonical_id
+        JOIN dim_match  m ON fs.match_id  = m.match_id
+        WHERE fs.result = 'Goal'
+          AND m.season  = :season
+          {team_filter}
+        ORDER BY p.canonical_name
+    """
+    with eng.connect() as conn:
+        rows = conn.execute(text(sql), params).fetchall()
+    return [(r[0], r[1]) for r in rows]
+
+
 def get_injury_season_trend(team: str | None) -> pd.DataFrame:
     sql = """
         SELECT fi.season,

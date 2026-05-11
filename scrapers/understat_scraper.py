@@ -444,6 +444,106 @@ def extract_teams(df_matches: pd.DataFrame) -> pd.DataFrame:
         .reset_index(drop=True)
     )
 
+
+# ──────────────────────────────────────────────────────────────────────
+# Wizard-facing adapter
+# ──────────────────────────────────────────────────────────────────────
+async def scrape_understat(
+    competition_name: Optional[str] = None,
+    seasons: Optional[list[int]] = None,
+    update: bool = False,
+    from_date: Optional[str] = None,
+    delay: float = 1.5,
+) -> None:
+    """Adapter used by `wizard.pipeline_runner.run_scraping`.
+
+    Wraps the existing `scrape_laliga` orchestrator so it can scrape any
+    Understat league declared in `wizard.competitions`. Writes the same
+    four CSV files the loaders expect under `data/raw/understat/` —
+    filenames keep the literal `_laliga` suffix because the loaders are
+    hardcoded to read those exact names regardless of league.
+    """
+    global LEAGUE, DELAY_SEC
+
+    seasons = seasons or SEASONS
+    league_key = "La_liga"  # default
+    if competition_name:
+        try:
+            from wizard.competitions import get_competition
+            comp = get_competition(competition_name) or {}
+            cfg_key = comp.get("sources", {}).get("understat", {}).get("league")
+            if cfg_key:
+                league_key = cfg_key
+            else:
+                print(
+                    f"[understat] '{competition_name}' no tiene 'league' configurado en "
+                    f"wizard.competitions.COMPETITIONS — se omite Understat."
+                )
+                return
+        except Exception as exc:
+            print(f"[understat] No se pudo resolver league key: {exc}. Usando '{league_key}'.")
+
+    prev_league = LEAGUE
+    prev_delay = DELAY_SEC
+    LEAGUE = league_key
+    DELAY_SEC = float(delay) if delay else DELAY_SEC
+
+    try:
+        print(
+            f"[understat] competition={competition_name!r} league={LEAGUE} "
+            f"seasons={seasons} update={update} from_date={from_date}"
+        )
+        df_matches, df_shots = await scrape_laliga(seasons)
+
+        if df_matches.empty or df_shots.empty:
+            print("[understat] Sin datos para esta selección.")
+            return
+
+        if from_date:
+            try:
+                cutoff = pd.to_datetime(from_date)
+                df_matches["datetime"] = pd.to_datetime(df_matches["datetime"], errors="coerce")
+                keep_ids = set(
+                    df_matches.loc[df_matches["datetime"] >= cutoff, "understat_match_id"]
+                )
+                before = len(df_matches)
+                df_matches = df_matches[df_matches["understat_match_id"].isin(keep_ids)]
+                df_shots = df_shots[df_shots["understat_match_id"].isin(keep_ids)]
+                print(
+                    f"[understat] from_date={from_date}: {before} → {len(df_matches)} "
+                    f"partidos tras filtrar."
+                )
+            except Exception as exc:
+                print(f"[understat] No se pudo aplicar from_date={from_date}: {exc}")
+
+        if df_matches.empty or df_shots.empty:
+            print("[understat] Tras filtrar from_date no quedan partidos.")
+            return
+
+        df_shots_clean = transform_shots(df_shots, df_matches)
+        df_players = extract_players(df_shots)
+        df_teams = extract_teams(df_matches)
+
+        shots_path = os.path.join(OUTPUT_DIR, "understat_shots_laliga.csv")
+        matches_path = os.path.join(OUTPUT_DIR, "understat_matches_laliga.csv")
+        players_path = os.path.join(OUTPUT_DIR, "understat_players_laliga.csv")
+        teams_path = os.path.join(OUTPUT_DIR, "understat_teams_laliga.csv")
+
+        df_shots_clean.to_csv(shots_path, index=False, encoding="utf-8-sig")
+        df_matches.to_csv(matches_path, index=False, encoding="utf-8-sig")
+        df_players.to_csv(players_path, index=False, encoding="utf-8-sig")
+        df_teams.to_csv(teams_path, index=False, encoding="utf-8-sig")
+
+        print(
+            f"[understat] OK — {len(df_matches)} partidos, "
+            f"{len(df_shots_clean)} tiros, "
+            f"{len(df_players)} jugadores, "
+            f"{len(df_teams)} equipos guardados en {OUTPUT_DIR}"
+        )
+    finally:
+        LEAGUE = prev_league
+        DELAY_SEC = prev_delay
+
 # â”€â”€ Main â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async def main():
