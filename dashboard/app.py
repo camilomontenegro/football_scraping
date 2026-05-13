@@ -90,7 +90,7 @@ with tab_explore:
                 "to populate the database.")
     else:
         # Metric cards
-        summary = explore.get_season_summary(season, team)
+        summary = explore.get_season_summary(season, team, competition)
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Matches",  _fmt(summary['matches']))
         m2.metric("Goals",    _fmt(summary['goals']))
@@ -103,7 +103,7 @@ with tab_explore:
 
         # ── Results ───────────────────────────────────────
         with t_results:
-            df = explore.get_results(season, team)
+            df = explore.get_results(season, team, competition)
             if df.empty:
                 _empty_info()
             else:
@@ -119,7 +119,7 @@ with tab_explore:
 
         # ── Player stats ──────────────────────────────────
         with t_players:
-            df = explore.get_player_stats(season, team)
+            df = explore.get_player_stats(season, team, competition)
             if df.empty:
                 st.info("No shot data found for this selection. "
                         "Check pipeline coverage in the monitoring tab.")
@@ -132,7 +132,7 @@ with tab_explore:
 
         # ── Shots by source ───────────────────────────────
         with t_shots:
-            df = explore.get_shots_by_source(season, team)
+            df = explore.get_shots_by_source(season, team, competition)
             if df.empty:
                 _empty_info()
             else:
@@ -145,7 +145,7 @@ with tab_explore:
 
         # ── Events ────────────────────────────────────────
         with t_events:
-            df = explore.get_events_summary(season, team)
+            df = explore.get_events_summary(season, team, competition)
             if df.empty:
                 st.info("No event data found for this selection.")
             else:
@@ -174,7 +174,7 @@ def _tab_selectors(key_prefix: str, all_seasons: bool = False):
             key=f"{key_prefix}_season",
             disabled=not _seasons,
         )
-    _season = None if _season_sel == "All seasons" else _season_sel
+    _season = None if (_season_sel in ("All seasons", "(no seasons)") or not _seasons) else _season_sel
     _teams = explore.get_teams_for_season(_season or (_seasons[0] if _seasons else ""), _comp) if _seasons else []
     with sc3:
         _team_sel = st.selectbox(
@@ -196,7 +196,7 @@ with tab_teams:
     if _t_season is None:
         st.info("Select a season to view team standings.")
     else:
-        df = explore.get_team_standings(_t_season, _t_team)
+        df = explore.get_team_standings(_t_season, _t_team, _t_comp)
         if df.empty:
             st.info("No match data found. Run pipeline_runner.py to populate dim_match.")
         else:
@@ -234,7 +234,7 @@ with tab_gk:
     if _gk_season is None:
         st.info("Select a season to view goalkeeper statistics.")
     else:
-        df = explore.get_goalkeeper_stats(_gk_season, _gk_team)
+        df = explore.get_goalkeeper_stats(_gk_season, _gk_team, _gk_comp)
         if df.empty:
             st.info("No goalkeeper data found for this selection.")
         else:
@@ -279,7 +279,7 @@ with tab_players:
     st.header("Players")
     _pl_comp, _pl_season, _pl_team = _tab_selectors("players", all_seasons=True)
 
-    df = explore.get_player_discipline(_pl_season, _pl_team)
+    df = explore.get_player_discipline(_pl_season, _pl_team, _pl_comp)
     if df.empty:
         st.info("No player data found for this selection.")
     else:
@@ -298,7 +298,23 @@ with tab_players:
         if _pl_team is None and not df.empty:
             top10 = df.groupby("player")["goals"].sum().nlargest(10).reset_index()
             if not top10.empty:
-                st.bar_chart(top10.set_index("player")["goals"])
+                _pl_sort_asc = st.radio(
+                    "Sort order", ["Descending", "Ascending"],
+                    horizontal=True, key="pl_top_sort",
+                ) == "Ascending"
+                top10 = top10.sort_values("goals", ascending=_pl_sort_asc)
+                fig_pl, ax_pl = plt.subplots(figsize=(10, max(3, len(top10) * 0.45)))
+                fig_pl.patch.set_facecolor("#0e1117")
+                ax_pl.set_facecolor("#0e1117")
+                ax_pl.barh(top10["player"], top10["goals"], color="#3498db")
+                ax_pl.set_xlabel("Goals", color="white")
+                ax_pl.tick_params(colors="white")
+                for spine in ax_pl.spines.values():
+                    spine.set_color("#444")
+                ax_pl.invert_yaxis()
+                plt.tight_layout()
+                st.pyplot(fig_pl)
+                plt.close(fig_pl)
 
         st.caption(
             "Goals and xG: fact_shots (all sources) · Cards: fact_events (SofaScore incidents + StatsBomb)\n"
@@ -335,9 +351,23 @@ with tab_injuries:
         breakdown = explore.get_injury_type_breakdown(_inj_season, _inj_team)
         if not breakdown.empty:
             st.subheader("Top injury types")
-            st.bar_chart(
-                breakdown.head(10).set_index("injury_type")["count"]
-            )
+            _inj_sort_asc = st.radio(
+                "Sort order", ["Descending", "Ascending"],
+                horizontal=True, key="inj_type_sort",
+            ) == "Ascending"
+            breakdown = breakdown.sort_values("count", ascending=_inj_sort_asc).head(10)
+            fig_inj, ax_inj = plt.subplots(figsize=(10, max(3, len(breakdown) * 0.45)))
+            fig_inj.patch.set_facecolor("#0e1117")
+            ax_inj.set_facecolor("#0e1117")
+            ax_inj.barh(breakdown["injury_type"], breakdown["count"], color="#e67e22")
+            ax_inj.set_xlabel("Count", color="white")
+            ax_inj.tick_params(colors="white")
+            for spine in ax_inj.spines.values():
+                spine.set_color("#444")
+            ax_inj.invert_yaxis()
+            plt.tight_layout()
+            st.pyplot(fig_inj)
+            plt.close(fig_inj)
 
         if _inj_season is None:
             trend = explore.get_injury_season_trend(_inj_team)
@@ -466,6 +496,12 @@ with tab_shot:
         if pf_df.empty:
             st.info("No players with 20+ Understat shots for this selection.")
         else:
+            _pf_sort_asc = st.radio(
+                "Sort order", ["Descending", "Ascending"],
+                horizontal=True, key="si_finishing_sort",
+            ) == "Ascending"
+            pf_df = pf_df.sort_values("goals_minus_xg", ascending=_pf_sort_asc)
+
             bar_colors = [
                 "#2ecc71" if v >= 0 else "#e74c3c"
                 for v in pf_df["goals_minus_xg"]
@@ -511,7 +547,7 @@ with tab_shot:
             }).sort_values("Penalty Goals", ascending=False)
             st.dataframe(display_sp, width='stretch')
 
-            _sp_players = explore.get_players_for_season(si_season, _si_team_id)
+            _sp_players = explore.get_players_for_season(si_season, _si_team_id, _si_competition_val)
             _sp_labels = ["All players"] + [name for name, _ in _sp_players]
             _sp_id_map = {name: pid for name, pid in _sp_players}
 
