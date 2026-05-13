@@ -77,7 +77,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "slug": "laliga2",
             },
             "sofascore": {
-                "tournament_id": 39,
+                "tournament_id": 54, # Cambiado de 39 a 54
                 "name": "LaLiga2",
             },
             "understat": {
@@ -112,7 +112,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "slug": "premier-league",
             },
             "sofascore": {
-                "tournament_id": 2,
+                "tournament_id": 17, #cambiado de 2 a 17
                 "name": "Premier League",
             },
             "understat": {
@@ -142,7 +142,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "slug":"championship",
             },
             "sofascore": {
-                "tournament_id": 35,
+                "tournament_id":18, #cambiado de 35 a 18
                 "name": "Championship",
             },
             "understat": {
@@ -176,7 +176,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "slug": "bundesliga",
             },
             "sofascore": {
-                "tournament_id": 3,
+                "tournament_id": 35,  # cambiado de 3 a 35
                 "name": "Bundesliga",
             },
             "understat": {
@@ -189,7 +189,8 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             },
             "whoscored": {
                 "region_id": 81,
-                "tournament_id": 7,
+                # el tournament id se cambia de 7 a 3 
+                "tournament_id": 3,
                 "name": "Bundesliga",
             },
         },
@@ -210,7 +211,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "slug":"serie-a",
             },
             "sofascore": {
-                "tournament_id": 4,
+                "tournament_id":  23, #Estaba 4 ,cambiado a 23
                 "name": "Serie A",
             },
             "understat": {
@@ -222,8 +223,9 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Serie A",
             },
             "whoscored": {
-                "region_id": 106,
-                "tournament_id": 13,
+                
+                "region_id":  108, # de  106 a 108 ,
+                "tournament_id": 5,  #  de 13 a 5
                 "name": "Serie A",
             },
         },
@@ -244,8 +246,8 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "slug":"ligue-1",
             },
             "sofascore": {
-                "tournament_id": 5,
-                "name": "Ligue 1",
+                "tournament_id": 34, #cambiado de 5 a 34
+                "name": "Ligue 1", 
             },
             "understat": {
                 "league": "Ligue_1",
@@ -257,7 +259,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             },
             "whoscored": {
                 "region_id": 74,
-                "tournament_id": 11,
+                "tournament_id": 22, # cambiado de 1 a 22 
                 "name": "Ligue 1",
             },
         },
@@ -279,11 +281,11 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "slug": "liga-nos",
             },
             "sofascore": {
-                "tournament_id": 314,
-                "name": "Primeira Liga",
+                "tournament_id": 238, #cambiado 314 por 238
+                "name": "Liga Portugal Betclic",  #cambiado tmbn el nombre
             },
             "understat": {
-                "league": "Primeira_Liga",
+                "league": None, # Understat no tiene Primeira Liga
                 "name": "Primeira Liga",
             },
             "statsbomb": {
@@ -291,8 +293,8 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Primeira Liga",
             },
             "whoscored": {
-                "region_id": 178,
-                "tournament_id": 187,
+                "region_id": 177, # antes 178 
+                "tournament_id": 21, # antes 187
                 "name": "Primeira Liga",
             },
         },
@@ -313,7 +315,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "slug":"eredivisie",
             },
             "sofascore": {
-                "tournament_id": 9,
+                "tournament_id": 37, # cambiado de 9 a 37
                 "name": "Eredivisie",
             },
             "understat": {
@@ -326,7 +328,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             },
             "whoscored": {
                 "region_id": 155,
-                "tournament_id": 10,
+                "tournament_id": 13, # antes 10
                 "name": "Eredivisie",
             },
         },
@@ -359,8 +361,8 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Champions League",
             },
             "whoscored": {
-                "region_id": 250, #cambiado. antes era 2
-                "tournament_id": 12, # cambiado. antes era 3
+                "region_id": 250, 
+                "tournament_id": 12, 
                 "name": "Champions League",
             },
         },
@@ -389,8 +391,8 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Europa League",
             },
             "whoscored": {
-                "region_id": 2,
-                "tournament_id": 404,
+                "region_id": 250, # antes era 2
+                "tournament_id": 30, # antes era 404
                 "name": "Europa League",
             },
         },
@@ -407,7 +409,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "slug":"uefa-europa-conference-league"
             },
             "sofascore": {
-                "tournament_id": 2050,
+                "tournament_id": 17015,  # Nuevo ID para Europa Conference League 17015
                 "name": "Europa Conference League",
             },
             "understat": {
