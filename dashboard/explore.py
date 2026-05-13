@@ -17,28 +17,45 @@ from dashboard.db import get_engine, query_df
 
 
 def get_competitions() -> list[str]:
-    return ["La Liga"]
+    eng = get_engine()
+    with eng.connect() as conn:
+        rows = conn.execute(text(
+            "SELECT canonical_name FROM dim_competition ORDER BY canonical_name"
+        )).fetchall()
+    return [r[0] for r in rows] or ["La Liga"]
 
 
 def get_seasons_for_competition(competition: str) -> list[str]:
     eng = get_engine()
     with eng.connect() as conn:
-        rows = conn.execute(text(
-            "SELECT DISTINCT season FROM dim_match WHERE season IS NOT NULL ORDER BY season DESC"
-        )).fetchall()
+        rows = conn.execute(text("""
+            SELECT DISTINCT m.season
+            FROM dim_match m
+            JOIN dim_competition c ON c.canonical_id = m.competition_id
+            WHERE m.season IS NOT NULL AND c.canonical_name = :competition
+            ORDER BY m.season DESC
+        """), {"competition": competition}).fetchall()
     return [r[0] for r in rows]
 
 
-def get_teams_for_season(season_label: str) -> list[str]:
+def get_teams_for_season(season_label: str, competition: str | None = None) -> list[str]:
     eng = get_engine()
+    params: dict = {"season": season_label}
+    comp_join = ""
+    comp_filter = ""
+    if competition is not None:
+        comp_join = "JOIN dim_competition c ON c.canonical_id = m.competition_id"
+        comp_filter = "AND c.canonical_name = :competition"
+        params["competition"] = competition
     with eng.connect() as conn:
-        rows = conn.execute(text("""
+        rows = conn.execute(text(f"""
             SELECT DISTINCT t.canonical_name
             FROM dim_match m
+            {comp_join}
             JOIN dim_team t ON t.canonical_id IN (m.home_team_id, m.away_team_id)
-            WHERE m.season = :season
+            WHERE m.season = :season {comp_filter}
             ORDER BY t.canonical_name
-        """), {"season": season_label}).fetchall()
+        """), params).fetchall()
     return [r[0] for r in rows]
 
 

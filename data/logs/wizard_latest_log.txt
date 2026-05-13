@@ -1,14 +1,151 @@
-2026-05-11 12:41:15,581 - INFO - =================================================================
-2026-05-11 12:41:15,583 - INFO -    FOOTBALL DATA PIPELINE
-2026-05-11 12:41:15,584 - INFO - =================================================================
-2026-05-11 12:41:15,588 - INFO -    Competición: La Liga
-2026-05-11 12:41:15,590 - INFO -    Temporada: 2020/2021
-2026-05-11 12:41:15,590 - INFO -    Fuente:    all
-2026-05-11 12:41:15,592 - INFO - ── MODO INCREMENTAL: buscando última fecha en BD ────
-2026-05-11 12:41:15,610 - INFO -    Último partido en BD: 2021-05-23 → scraping desde esa fecha
-2026-05-11 12:41:15,611 - INFO -    Temporada actual detectada: 2025/2026 (era 2020/2021) → scraping de la nueva temporada
-2026-05-11 12:41:15,611 - INFO -    Desde fecha: 2021-05-23
-2026-05-11 12:41:15,611 - INFO - ── FASE 1: SCRAPING ─────────────────────────────────
-2026-05-11 12:41:15,612 - INFO - [INFO] from_date=2021-05-23 — informativo (los scrapers genéricos descargan toda la temporada).
-2026-05-11 12:41:15,613 - INFO - [INFO] full_refresh=True — se ignorará la caché local.
-2026-05-11 12:41:15,613 - INFO - [START] Scraping Understat...
+2026-05-11 13:22:13,724 - INFO - =================================================================
+2026-05-11 13:22:13,725 - INFO -    FOOTBALL DATA PIPELINE
+2026-05-11 13:22:13,725 - INFO - =================================================================
+2026-05-11 13:22:13,725 - INFO -    Competición: La Liga
+2026-05-11 13:22:13,738 - INFO -    Temporada: 2025/2026
+2026-05-11 13:22:13,738 - INFO -    Fuente:    sofascore
+2026-05-11 13:22:13,739 - INFO - ── FASE 1: SCRAPING ─────────────────────────────────
+2026-05-11 13:22:13,739 - INFO - [INFO] full_refresh=True — se ignorará la caché local.
+2026-05-11 13:22:13,739 - INFO - [START] Scraping SofaScore...
+2026-05-11 13:22:15,412 - WARNING - SofaScore falló para La Liga 2025/2026: SofaScore bloquea https://api.sofascore.com/api/v1/unique-tournament/8/seasons: HTTP 403
+2026-05-11 13:22:15,415 - INFO - ── FASE 2/3: CARGA EN DB ────────────────────────────
+2026-05-11 13:22:15,575 - INFO - ── CARGANDO DIMENSIONES ────────────────────────────
+2026-05-11 13:22:15,576 - INFO - [START] Cargando dim_team...
+2026-05-11 13:22:15,578 - INFO - team_loader: no hay players_clean.csv de TM
+2026-05-11 13:22:15,579 - INFO - team_loader: no hay whoscored_teams_laliga.csv
+2026-05-11 13:22:15,580 - INFO - [OK] dim_team completado — 0 registros procesados
+2026-05-11 13:22:15,581 - INFO - [START] Cargando dim_player...
+2026-05-11 13:22:15,581 - WARNING - player_loader fase 1: no se encontró players_clean.csv en C:\Users\camil\Escritorio\Desktop\Mercanza\project\football_scraping\data\raw\transfermarkt
+2026-05-11 13:22:15,582 - INFO - player_loader fase 5: no hay whoscored_players_laliga.csv
+2026-05-11 13:22:15,584 - INFO - [OK] dim_player completado — 5025 jugadores canónicos | 3400 pendientes en player_review
+2026-05-11 13:22:15,585 - INFO - [START] Cargando dim_match...
+2026-05-11 13:22:15,586 - WARNING - match_loader: no se encontraron matches_clean.csv en C:\Users\camil\Escritorio\Desktop\Mercanza\project\football_scraping\data\raw\sofascore
+2026-05-11 13:22:15,668 - ERROR - Error loading matches: (psycopg2.errors.InvalidColumnReference) no hay restricción única o de exclusión que coincida con la especificación ON CONFLICT
+
+[SQL: 
+                INSERT INTO dim_match
+                    (match_date, competition, season,
+                     home_team_id, away_team_id,
+                     home_score, away_score,
+                     data_source, id_understat)
+                VALUES
+                    (%(date)s, 'La Liga', %(season)s,
+                     %(hid)s, %(aid)s,
+                     %(hsc)s, %(asc)s,
+                     'understat', %(uid)s)
+                ON CONFLICT (id_understat) WHERE id_understat IS NOT NULL DO NOTHING
+            ]
+[parameters: {'date': '2025-08-15', 'season': '2025', 'hid': 25, 'aid': 22, 'hsc': 1, 'asc': 3, 'uid': 29158}]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+Traceback (most recent call last):
+  File "C:\Users\camil\AppData\Local\Programs\Python\Python312\Lib\site-packages\sqlalchemy\engine\base.py", line 1969, in _exec_single_context
+    self.dialect.do_execute(
+  File "C:\Users\camil\AppData\Local\Programs\Python\Python312\Lib\site-packages\sqlalchemy\engine\default.py", line 922, in do_execute
+    cursor.execute(statement, parameters)
+psycopg2.errors.InvalidColumnReference: no hay restricción única o de exclusión que coincida con la especificación ON CONFLICT
+
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\camil\Escritorio\Desktop\Mercanza\project\football_scraping\wizard\pipeline_runner.py", line 507, in run_load
+    fn(conn)
+  File "C:\Users\camil\Escritorio\Desktop\Mercanza\project\football_scraping\loaders\match_loader.py", line 446, in load_matches
+    _load_from_understat(conn)
+  File "C:\Users\camil\Escritorio\Desktop\Mercanza\project\football_scraping\loaders\match_loader.py", line 252, in _load_from_understat
+    conn.execute(text("""
+  File "C:\Users\camil\AppData\Local\Programs\Python\Python312\Lib\site-packages\sqlalchemy\engine\base.py", line 1416, in execute
+    return meth(
+           ^^^^^
+  File "C:\Users\camil\AppData\Local\Programs\Python\Python312\Lib\site-packages\sqlalchemy\sql\elements.py", line 516, in _execute_on_connection
+    return connection._execute_clauseelement(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\camil\AppData\Local\Programs\Python\Python312\Lib\site-packages\sqlalchemy\engine\base.py", line 1639, in _execute_clauseelement
+    ret = self._execute_context(
+          ^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\camil\AppData\Local\Programs\Python\Python312\Lib\site-packages\sqlalchemy\engine\base.py", line 1848, in _execute_context
+    return self._exec_single_context(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\camil\AppData\Local\Programs\Python\Python312\Lib\site-packages\sqlalchemy\engine\base.py", line 1988, in _exec_single_context
+    self._handle_dbapi_exception(
+  File "C:\Users\camil\AppData\Local\Programs\Python\Python312\Lib\site-packages\sqlalchemy\engine\base.py", line 2343, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "C:\Users\camil\AppData\Local\Programs\Python\Python312\Lib\site-packages\sqlalchemy\engine\base.py", line 1969, in _exec_single_context
+    self.dialect.do_execute(
+  File "C:\Users\camil\AppData\Local\Programs\Python\Python312\Lib\site-packages\sqlalchemy\engine\default.py", line 922, in do_execute
+    cursor.execute(statement, parameters)
+sqlalchemy.exc.ProgrammingError: (psycopg2.errors.InvalidColumnReference) no hay restricción única o de exclusión que coincida con la especificación ON CONFLICT
+
+[SQL: 
+                INSERT INTO dim_match
+                    (match_date, competition, season,
+                     home_team_id, away_team_id,
+                     home_score, away_score,
+                     data_source, id_understat)
+                VALUES
+                    (%(date)s, 'La Liga', %(season)s,
+                     %(hid)s, %(aid)s,
+                     %(hsc)s, %(asc)s,
+                     'understat', %(uid)s)
+                ON CONFLICT (id_understat) WHERE id_understat IS NOT NULL DO NOTHING
+            ]
+[parameters: {'date': '2025-08-15', 'season': '2025', 'hid': 25, 'aid': 22, 'hsc': 1, 'asc': 3, 'uid': 29158}]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+2026-05-11 13:22:15,806 - INFO - ── CARGANDO HECHOS (FACTS) ─────────────────────────
+2026-05-11 13:22:15,806 - INFO - [START] Cargando fact_shots...
+2026-05-11 13:22:15,807 - INFO - fact_shots: no hay shots_clean.csv de SofaScore
+2026-05-11 13:22:31,057 - INFO - fact_shots ← Understat: 0 insertados | 8767 sin FKs resueltas
+2026-05-11 13:22:31,058 - INFO - [OK] fact_shots completado — 0 tiros insertados
+2026-05-11 13:22:31,059 - INFO - [START] Cargando fact_events...
+2026-05-11 13:22:31,060 - INFO - fact_events: no hay **/events_clean.csv en data\raw\sofascore
+2026-05-11 13:22:31,082 - INFO - fact_events: no hay **/events_clean.csv en data\raw\statsbomb
+2026-05-11 13:22:31,083 - INFO - fact_events: no hay events_clean.csv en data\raw\whoscored
+2026-05-11 13:22:31,084 - INFO - [OK] fact_events completado — 0 eventos insertados
+2026-05-11 13:22:31,084 - INFO - [START] Cargando fact_injuries...
+2026-05-11 13:22:31,085 - WARNING - fact_injuries: no hay injuries_clean.csv en data\raw\transfermarkt
+2026-05-11 13:22:31,086 - INFO - =================================================================
+2026-05-11 13:22:31,086 - INFO -    PIPELINE COMPLETADO EXITOSAMENTE
+2026-05-11 13:22:31,086 - INFO - =================================================================
+ne\base.py", line 1848, in _execute_context
+    return self._exec_single_context(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\camil\AppData\Local\Programs\Python\Python312\Lib\site-packages\sqlalchemy\engine\base.py", line 1988, in _exec_single_context
+    self._handle_dbapi_exception(
+  File "C:\Users\camil\AppData\Local\Programs\Python\Python312\Lib\site-packages\sqlalchemy\engine\base.py", line 2343, in _handle_dbapi_exception
+    raise sqlalchemy_exception.with_traceback(exc_info[2]) from e
+  File "C:\Users\camil\AppData\Local\Programs\Python\Python312\Lib\site-packages\sqlalchemy\engine\base.py", line 1969, in _exec_single_context
+    self.dialect.do_execute(
+  File "C:\Users\camil\AppData\Local\Programs\Python\Python312\Lib\site-packages\sqlalchemy\engine\default.py", line 922, in do_execute
+    cursor.execute(statement, parameters)
+sqlalchemy.exc.ProgrammingError: (psycopg2.errors.InvalidColumnReference) no hay restricción única o de exclusión que coincida con la especificación ON CONFLICT
+
+[SQL: 
+                INSERT INTO dim_match
+                    (match_date, competition, season,
+                     home_team_id, away_team_id,
+                     home_score, away_score,
+                     data_source, id_understat)
+                VALUES
+                    (%(date)s, 'La Liga', %(season)s,
+                     %(hid)s, %(aid)s,
+                     %(hsc)s, %(asc)s,
+                     'understat', %(uid)s)
+                ON CONFLICT (id_understat) WHERE id_understat IS NOT NULL DO NOTHING
+            ]
+[parameters: {'date': '2025-08-15', 'season': '2025', 'hid': 25, 'aid': 22, 'hsc': 1, 'asc': 3, 'uid': 29158}]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+2026-05-11 13:22:15,806 - INFO - ── CARGANDO HECHOS (FACTS) ─────────────────────────
+2026-05-11 13:22:15,806 - INFO - [START] Cargando fact_shots...
+2026-05-11 13:22:15,807 - INFO - fact_shots: no hay shots_clean.csv de SofaScore
+2026-05-11 13:22:31,057 - INFO - fact_shots ← Understat: 0 insertados | 8767 sin FKs resueltas
+2026-05-11 13:22:31,058 - INFO - [OK] fact_shots completado — 0 tiros insertados
+2026-05-11 13:22:31,059 - INFO - [START] Cargando fact_events...
+2026-05-11 13:22:31,060 - INFO - fact_events: no hay **/events_clean.csv en data\raw\sofascore
+2026-05-11 13:22:31,082 - INFO - fact_events: no hay **/events_clean.csv en data\raw\statsbomb
+2026-05-11 13:22:31,083 - INFO - fact_events: no hay events_clean.csv en data\raw\whoscored
+2026-05-11 13:22:31,084 - INFO - [OK] fact_events completado — 0 eventos insertados
+2026-05-11 13:22:31,084 - INFO - [START] Cargando fact_injuries...
+2026-05-11 13:22:31,085 - WARNING - fact_injuries: no hay injuries_clean.csv en data\raw\transfermarkt
+2026-05-11 13:22:31,086 - INFO - =================================================================
+2026-05-11 13:22:31,086 - INFO -    PIPELINE COMPLETADO EXITOSAMENTE
+2026-05-11 13:22:31,086 - INFO - =================================================================

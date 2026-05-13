@@ -77,7 +77,7 @@ with tab_explore:
             "Season", seasons or ["(no seasons in DB)"], key="ex_season",
             disabled=not seasons,
         )
-    teams = explore.get_teams_for_season(season) if seasons else []
+    teams = explore.get_teams_for_season(season, competition) if seasons else []
     with c3:
         team_choice = st.selectbox(
             "Team", ["All teams"] + teams, key="ex_team",
@@ -107,7 +107,7 @@ with tab_explore:
             if df.empty:
                 _empty_info()
             else:
-                st.dataframe(df, use_container_width=True)
+                st.dataframe(df, width='stretch')
                 if team is not None and "result" in df.columns:
                     wins   = int((df["result"] == "W").sum())
                     draws  = int((df["result"] == "D").sum())
@@ -124,7 +124,7 @@ with tab_explore:
                 st.info("No shot data found for this selection. "
                         "Check pipeline coverage in the monitoring tab.")
             else:
-                st.dataframe(df, use_container_width=True)
+                st.dataframe(df, width='stretch')
                 st.caption(
                     "Source: fact_shots (all sources combined — "
                     "StatsBomb, Understat, SofaScore)."
@@ -136,7 +136,7 @@ with tab_explore:
             if df.empty:
                 _empty_info()
             else:
-                st.dataframe(df, use_container_width=True)
+                st.dataframe(df, width='stretch')
                 st.bar_chart(df.set_index("data_source")["shots"])
                 st.caption(
                     "Each source covers different event types. Understat and StatsBomb "
@@ -149,7 +149,7 @@ with tab_explore:
             if df.empty:
                 st.info("No event data found for this selection.")
             else:
-                st.dataframe(df, use_container_width=True)
+                st.dataframe(df, width='stretch')
                 st.caption(
                     "SofaScore events are incident-only (cards, substitutions, VAR) — "
                     "coordinates are NULL by design. WhoScored and StatsBomb events "
@@ -175,7 +175,7 @@ def _tab_selectors(key_prefix: str, all_seasons: bool = False):
             disabled=not _seasons,
         )
     _season = None if _season_sel == "All seasons" else _season_sel
-    _teams = explore.get_teams_for_season(_season or (_seasons[0] if _seasons else "")) if _seasons else []
+    _teams = explore.get_teams_for_season(_season or (_seasons[0] if _seasons else ""), _comp) if _seasons else []
     with sc3:
         _team_sel = st.selectbox(
             "Team", ["All teams"] + _teams,
@@ -217,7 +217,7 @@ with tab_teams:
                 "xg_for": "xG For (season total)", "xg_against": "xG Against (season total)",
                 "shots_for": "Shots For", "shots_against": "Shots Against",
             })
-            st.dataframe(display_df, use_container_width=True)
+            st.dataframe(display_df, width='stretch')
             st.caption(
                 "Source: dim_match (all sources combined) · xG and shots: fact_shots · "
                 "xG For/Against = season-total expected goals (sum across all matches, not per-shot)"
@@ -261,7 +261,7 @@ with tab_gk:
                 "goals_saved_above_expected": "Goals Saved Above Expected",
                 "clean_sheets": "Clean Sheets",
             })
-            st.dataframe(display_df, use_container_width=True)
+            st.dataframe(display_df, width='stretch')
             st.caption(
                 "Stats are scoped to matches where each GK appeared in event data (substitutions, cards, etc.) — "
                 "used as a proxy for matches played. "
@@ -293,7 +293,7 @@ with tab_players:
         if _pl_season is not None:
             display_df = display_df.drop(columns=["season"], errors="ignore")
 
-        st.dataframe(display_df, use_container_width=True)
+        st.dataframe(display_df, width='stretch')
 
         if _pl_team is None and not df.empty:
             top10 = df.groupby("player")["goals"].sum().nlargest(10).reset_index()
@@ -329,10 +329,8 @@ with tab_injuries:
         m4.metric("Ongoing injuries", _fmt(ongoing))
 
         df_render = df.copy()
-        df_render["date_until"] = df_render["date_until"].where(
-            df_render["date_until"].notna(), "Ongoing"
-        )
-        st.dataframe(df_render, use_container_width=True)
+        df_render["date_until"] = df_render["date_until"].fillna("Ongoing").astype(str)
+        st.dataframe(df_render, width='stretch')
 
         breakdown = explore.get_injury_type_breakdown(_inj_season, _inj_team)
         if not breakdown.empty:
@@ -345,7 +343,7 @@ with tab_injuries:
             trend = explore.get_injury_season_trend(_inj_team)
             if not trend.empty:
                 st.subheader("Season trend")
-                st.dataframe(trend, use_container_width=True)
+                st.dataframe(trend, width='stretch')
 
         st.caption(
             "Source: fact_injuries (Transfermarkt)\n"
@@ -389,7 +387,7 @@ with tab_shot:
             key="si_season",
             disabled=not _si_seasons,
         )
-    _si_teams = explore.get_teams_for_season(si_season) if _si_seasons else []
+    _si_teams = explore.get_teams_for_season(si_season, si_competition) if _si_seasons else []
     with sf3:
         si_team_choice = st.selectbox(
             "Team", ["All teams"] + _si_teams,
@@ -415,7 +413,7 @@ with tab_shot:
         # ── Section 1 — Pitch Danger Heatmap ─────────────────────
         st.subheader("Pitch Danger Heatmap")
 
-        hm_df = analytics.get_heatmap_data(si_season, _si_team_id)
+        hm_df = analytics.get_heatmap_data(si_season, _si_team_id, _si_competition_val)
 
         if hm_df.empty:
             st.info("No shot data with coordinates for this selection.")
@@ -454,7 +452,7 @@ with tab_shot:
             with st.expander("Zone data table"):
                 st.dataframe(
                     hm_df[["x_band", "y_band", "shots", "goals", "avg_xg", "conversion_rate"]],
-                    use_container_width=True,
+                    width='stretch',
                 )
 
         st.divider()
@@ -463,7 +461,7 @@ with tab_shot:
         st.subheader("Player Finishing Quality")
         st.caption("Min. 20 shots to qualify · Goals − xG: positive = overperforming")
 
-        pf_df = analytics.get_player_finishing(si_season, _si_team_id)
+        pf_df = analytics.get_player_finishing(si_season, _si_team_id, _si_competition_val)
 
         if pf_df.empty:
             st.info("No players with 20+ Understat shots for this selection.")
@@ -489,7 +487,7 @@ with tab_shot:
 
             st.dataframe(
                 pf_df[["player", "shots", "goals", "total_xg", "goals_minus_xg"]],
-                use_container_width=True,
+                width='stretch',
             )
 
         st.divider()
@@ -511,7 +509,7 @@ with tab_shot:
                 "setpiece_other_goals": "Set Piece / Other",
                 "total_goals":          "Total Goals",
             }).sort_values("Penalty Goals", ascending=False)
-            st.dataframe(display_sp, use_container_width=True)
+            st.dataframe(display_sp, width='stretch')
 
             _sp_players = explore.get_players_for_season(si_season, _si_team_id)
             _sp_labels = ["All players"] + [name for name, _ in _sp_players]
@@ -574,7 +572,7 @@ with tab_monitor:
                     "season":      r.get("season"),
                 })
         if rows:
-            st.dataframe(pd.DataFrame(rows), use_container_width=True)
+            st.dataframe(pd.DataFrame(rows), width='stretch')
             st.info(
                 "To load missing seasons, run:\n\n"
                 "    python pipeline_runner.py --sources <source>\n\n"
@@ -638,7 +636,7 @@ with tab_monitor:
     if pr_df.empty:
         st.info("No unresolved entries in `player_review`.")
     else:
-        st.dataframe(pr_df, use_container_width=True)
+        st.dataframe(pr_df, width='stretch')
     st.info(
         "To resolve a case, run:\n\n"
         "    python -m scripts.review_players --unresolved"
@@ -652,7 +650,7 @@ with tab_monitor:
     if rm_df.empty:
         st.info("No matches in `dim_match` yet.")
     else:
-        st.dataframe(rm_df, use_container_width=True)
+        st.dataframe(rm_df, width='stretch')
 
 
 # ════════════════════════════════════════════════════════════════════
