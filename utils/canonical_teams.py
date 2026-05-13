@@ -205,7 +205,7 @@ _TEAM_ALIASES: dict[str, str] = {
     "sc braga":                     "Sporting Braga",       # TM: SC Braga
     "slovan bratislava":            "ŠK Slovan Bratislava", # TM: Slovan Bratislava
     "sporting de lisboa":           "Sporting CP",          # TM: Sporting de Lisboa
-    "stade brestois 29":            "Dynamo Brest",         # TM: Stade Brestois 29
+             # TM: Stade Brestois 29
     "stade rennais fc":             "Stade Rennais",        # TM: Stade Rennais FC
     "vfl wolfsburgo":               "VfL Wolfsburg",        # TM: VfL Wolfsburgo
     "zenit de san petersburgo":     "Zenit St. Petersburg", # TM: Zenit de San Petersburgo
@@ -243,7 +243,11 @@ _TEAM_ALIASES: dict[str, str] = {
     "benfica":                      "Benfica",              # WS: Benfica
     "bodoe glimt":                  "Bodø/Glimt",           # WS: Bodoe/Glimt
     "borussia m gladbach":          "Borussia M'gladbach",  # WS: Borussia M.Gladbach
-    "brest":                        "Dynamo Brest",         # WS: Brest
+    # con este equipo brest  hay un problema. whoscored tiene el mismo nombre para dos equipos difrentes.
+    # Dynamo brest-> equipo bielorruso
+    # En ligue 1 hay otro  que whoscored llama brest pero es un equipo frances llamado Stade Brestois
+    # comento la linea de momento ya que ya esta cargado en la bd
+    #"brest":                        "Dynamo Brest",         # WS: Brest
     "celtic":                       "Celtic",               # WS: Celtic
     "chelsea":                      "Chelsea",              # WS: Chelsea
     "club brugge":                  "Club Brugge KV",       # WS: Club Brugge
@@ -254,7 +258,7 @@ _TEAM_ALIASES: dict[str, str] = {
     "lazio":                        "Lazio",                # WS: Lazio
     "leverkusen":                   "Bayer 04 Leverkusen",  # WS: Leverkusen
     "lille":                        "Lille",                # WS: Lille
-    "liverpool":                    "Liverpool",            # WS: Liverpool
+    "liverpool":                    "Liverpool FC",            # WS: Liverpool
     "man city":                     "Manchester City",      # WS: Man City
     "man utd":                      "Manchester United",    # WS: Man Utd
     "monaco":                       "AS Monaco",            # WS: Monaco
@@ -270,6 +274,93 @@ _TEAM_ALIASES: dict[str, str] = {
     "tottenham":                    "Tottenham Hotspur",    # WS: Tottenham
     "qarabag fk":                   "Qarabağ FK",           # WS: Qarabag FK
     "qarabag":                      "Qarabağ FK",           # WS: Qarabag
+
+     
+    # ── Premier League ────────────────────────────────────────────────────────────
+
+    # Transfermarkt
+    "afc bournemouth":              "Bournemouth",
+    "arsenal fc":                   "Arsenal",
+    "brentford fc":                 "Brentford",
+    "burnley fc":                   "Burnley",
+    "chelsea fc":                   "Chelsea",
+    "everton fc":                   "Everton",
+    "fulham fc":                    "Fulham",
+    "southampton fc":               "Southampton",
+    "watford fc":                   "Watford",
+    "wolverhampton wanderers":      "Wolverhampton",
+    "sunderland afc":               "Sunderland",
+
+    # WhoScored y Understat (comparten muchos nombres cortos)
+    "brighton":                     "Brighton & Hove Albion",
+    "ipswich":                      "Ipswich Town",
+    "leeds":                        "Leeds United",
+    "leicester":                    "Leicester City",
+    "liverpool":                    "Liverpool FC",
+    "luton":                        "Luton Town",
+    "man city":                     "Manchester City",
+    "man utd":                      "Manchester United",
+    "newcastle":                    "Newcastle United",
+    "norwich":                      "Norwich City",
+    "sheff utd":                    "Sheffield United",
+    "wba":                          "West Bromwich Albion",
+    "west ham":                     "West Ham United",
+    "wolves":                       "Wolverhampton",
+    "sheffield united":             "Sheffield United",
+    "west bromwich albion":         "West Bromwich Albion",
+    "newcastle united":             "Newcastle United",
+    "manchester city":              "Manchester City",
+    "manchester united":            "Manchester United",
+
+    # ── Ligue 1 ───────────────────────────────────────────────────────────────────
+
+    # Transfermarkt → SofaScore
+    "ac ajaccio":                   "Ajaccio",
+    "aj auxerre":                   "Auxerre",
+    "as monaco":                    "AS Monaco",
+    "as saint etienne":             "Saint-Étienne",
+    "angers sco":                   "Angers",
+    "clermont foot 63":             "Clermont Foot",
+    "dijon fco":                    "Dijon",
+    "estac troyes":                 "Troyes",
+    "fc lorient":                   "Lorient",
+    "fc metz":                      "Metz",
+    "fc nantes":                    "Nantes",
+    "girondins de burdeos":         "Bordeaux",
+    "losc lille":                   "Lille",
+    "le havre ac":                  "Le Havre",
+    "montpellier hsc":              "Montpellier",
+    "nimes olympique":              "Nîmes Olympique",
+    "ogc niza":                     "Nice",
+    "olympique de lyon":            "Olympique Lyonnais",
+    "olympique de marsella":        "Olympique de Marseille",
+    "paris saint germain fc":       "Paris Saint-Germain",
+    "paris saint germain":          "Paris Saint-Germain",
+    "racing club de estrasburgo":   "RC Strasbourg",
+    "stade brestois 29":            "Stade Brestois",
+    "stade rennais fc":             "Stade Rennais",
+    "toulouse fc":                  "Toulouse",
+
+    # WhoScored → SofaScore
+    "brest":                        "Stade Brestois",
+    "lens":                         "RC Lens",
+    "lyon":                         "Olympique Lyonnais",
+    "marseille":                    "Olympique de Marseille",
+    "monaco":                       "AS Monaco",
+    "nimes":                        "Nîmes Olympique",
+    "psg":                          "Paris Saint-Germain",
+    "reims":                        "Stade de Reims",
+    "rennes":                       "Stade Rennais",
+    "saint etienne":                "Saint-Étienne",
+    "strasbourg":                   "RC Strasbourg",
+
+    # Understat → SofaScore
+    "ajaccio":                      "Ajaccio",
+    "lille":                        "Lille",
+    
+
+
+    
  
 }
  
@@ -321,3 +412,11 @@ def normalize_team_name(raw_name: str) -> str:
 def get_canonical_name(normalized_name: str) -> str:
     """Compatibilidad con el API anterior. Usar normalize_team_name() en cÃ³digo nuevo."""
     return _TEAM_ALIASES.get(normalized_name, normalized_name)
+
+
+
+# aqui convendria añadir una funcion  que enriqueza el diccionario _TEAM_ALIASES  automaticamente 
+# Ahora mismo, sin esta funcion, antes de hacer la carga hay que añadir manualmente sl diccionario el nombre del equipo en la fuente y el nombre de Sofascore. 
+# se llamaria en el team_loader
+# Yo lo he intentado, pero no se puede resolver automaticamente todos los nombres de equipos y siempre  hay unos pocos que hay que hacer manualmente 
+# def enrich_team_aliases(ss_path: Path): 
