@@ -33,6 +33,7 @@ from sqlalchemy import text
 
 from loaders.common import engine
 from utils.canonical_teams import normalize_team_name
+from utils.coordinate_normalization import _normalize_coordinates
 
 log = logging.getLogger(__name__)
 
@@ -118,6 +119,22 @@ def _team_id_by_source(conn, source: str, ext_id) -> Optional[int]:
 
 
 def _safe_int(val) -> Optional[int]:
+    """
+    Convierte un valor a entero de forma segura.
+    
+    Pandas representa los valores vacíos de un CSV como float('nan').
+    Sin este método, int(float('nan')) lanzaría un ValueError.
+    
+    Devuelve None si el valor es None, cadena vacía o 'nan' — 
+    que es lo que la BD espera para campos opcionales.
+    
+    Ejemplos:
+        _safe_int(45)    → 45
+        _safe_int("45")  → 45
+        _safe_int(None)  → None
+        _safe_int("nan") → None
+        _safe_int("")    → None
+    """
     try:
         return int(val) if val is not None and str(val).strip() not in ("", "nan") else None
     except (ValueError, TypeError):
@@ -125,6 +142,21 @@ def _safe_int(val) -> Optional[int]:
 
 
 def _safe_float(val) -> Optional[float]:
+    """
+    Convierte un valor a float de forma segura.
+    
+    Mismo propósito que _safe_int pero para valores decimales
+    como coordenadas x/y o xG.
+    
+    Devuelve None si el valor es None, cadena vacía o 'nan'.
+    
+    Ejemplos:
+        _safe_float(6.4)    → 6.4
+        _safe_float("6.4")  → 6.4
+        _safe_float(None)   → None
+        _safe_float("nan")  → None
+        _safe_float("")     → None
+    """
     try:
         return float(val) if val is not None and str(val).strip() not in ("", "nan") else None
     except (ValueError, TypeError):
@@ -157,7 +189,7 @@ def _load_shots_sofascore(conn, ss_path: Path, competition_id:int ) -> int:
 
     count = skipped = 0
 
-    # Carga los  datos de los partidos necesarios para poder  determianr el equipo del jugador que realizo el tiro
+    # Carga los  datos de los partidos necesarios para poder  determinar el equipo del jugador que realizo el tiro
     #diccionario  que tendra como clave el match_id  y como valor una tupla con home_team_id y  away_team_id
     matches_cache = {}
     # fetchall devuelve lista de tuplas  en la que cada tupla  contiene match_id,  home_team_id y  away_team_id
@@ -176,20 +208,30 @@ def _load_shots_sofascore(conn, ss_path: Path, competition_id:int ) -> int:
         try:
             mid = _match_id_by_source(conn, "sofascore", _safe_int(row.get("match_id_ss")))
             pid = _player_id_by_source(conn, "sofascore", _safe_int(row.get("player_id_ss")))
-            #tid = _team_id_by_source(conn, "sofascore",   _safe_int(row.get("team_id_ss")))
+            # intenta obtener el id del equipo 
+            tid = _team_id_by_source(conn, "sofascore",   _safe_int(row.get("team_id_ss")))
 
-            #boolean indica si el partido se jugo en casa o fuera. 
-            #Se usa para extraer el id del equipo del jugador que realizó el tiro
-            is_home = row.get("is_home")
             
-            if is_home  is not None  and mid:
-                match_teams= matches_cache.get(mid)
-                if(match_teams):
-                    tid= match_teams[0] if is_home else match_teams[1]
+            if not tid: 
+                #boolean indica si el partido se jugo en casa o fuera. 
+                #Se usa para extraer el id del equipo del jugador que realizó el tiro
+                is_home = row.get("is_home")
+                
+                if is_home  is not None  and mid:
+                    match_teams= matches_cache.get(mid)
+                    if(match_teams):
+                        tid= match_teams[0] if is_home else match_teams[1]
 
             if not mid or not pid or not tid:
                 skipped += 1
                 continue
+
+                        
+            # normaliza coordenadas antes de insertar
+            x_norm, y_norm = _normalize_coordinates(
+                _safe_float(row.get("x")),
+                _safe_float(row.get("y"))
+            )
 
             conn.execute(text("""
                 INSERT INTO fact_shots
@@ -204,8 +246,8 @@ def _load_shots_sofascore(conn, ss_path: Path, competition_id:int ) -> int:
                 "pid":    pid,
                 "tid":    tid,
                 "min":    _safe_int(row.get("minute")),
-                "x":      _safe_float(row.get("x")),
-                "y":      _safe_float(row.get("y")),
+                "x":      x_norm,
+                "y":      y_norm,
                 "xg":     _safe_float(row.get("xg")),
                 "result": row.get("result") or None,
                 "stype":  row.get("shot_type") or None,
@@ -224,16 +266,30 @@ def _load_shots_sofascore(conn, ss_path: Path, competition_id:int ) -> int:
 
 def _load_shots_understat(conn, us_path: Path) -> int:
     """Carga tiros de Understat desde understat_shots_laliga.csv."""
-    f = us_path  / "understat_shots_laliga.csv"
-    if not f.exists():
-        log.info("fact_shots: no hay understat_shots_laliga.csv")
+    
+    files = list(us_path.glob("**/*shots*.csv"))
+    if not files:
+        log.info("fact_shots: no hay archivos de shots de Understat en %s", us_path)
         return 0
 
     try:
-        df = pd.read_csv(f)
+        dfs = [pd.read_csv(f) for f in files]
+        df = pd.concat(dfs, ignore_index=True)
     except Exception as e:
         log.error("Error reading understat shots: %s", e)
         return 0
+    
+    # carga los partidos con id_understat no nulo
+    matches_cache = {}
+    match_rows = conn.execute(text("""
+        SELECT match_id, home_team_id, away_team_id
+        FROM dim_match
+        WHERE id_understat IS NOT NULL
+    """)).fetchall()
+    # guarda en el diccionario el match id como clave y una tupla con home_team_id y away_team_id como valor
+    for match_row in match_rows:
+        matches_cache[match_row[0]] = (match_row[1], match_row[2])
+        
 
     count = skipped = 0
     for _, row in df.iterrows():
@@ -241,7 +297,8 @@ def _load_shots_understat(conn, us_path: Path) -> int:
             mid = _match_id_by_source(conn, "understat", _safe_int(row.get("understat_match_id")))
             pid = _player_id_by_source(conn, "understat", _safe_int(row.get("understat_player_id")))
 
-            # team_id via nombre del equipo normalizado → busca por canonical_name
+            # no todos los csv de understat vienen  con el id del equipo. El de la Liga sí. El resto, no
+            #  Intentar por nombre de equipo  ( la liga) 
             team_name = row.get("understat_team")
             tid = None
             if team_name:
@@ -252,10 +309,28 @@ def _load_shots_understat(conn, us_path: Path) -> int:
                 ).fetchone()
                 if t_row:
                     tid = t_row[0]
+            
+            # Si no hay team_name, intentar por side (Premier, Bundesliga, etc.)
+            if not tid:
+                side = row.get("side")
+                if side and mid:
+                    # obtiene la tupla (home_team_id, away_team_id) para ese partido
+                    match_teams = matches_cache.get(mid)
+                    if match_teams:
+                        # si side es "h" (home) → home_team_id (posición 0)
+                        # si side es "a" (away) → away_team_id (posición 1)
+                        tid = match_teams[0] if side == "h" else match_teams[1]
 
             if not mid or not pid or not tid:
                 skipped += 1
                 continue
+
+            # Asegura normalización  de coordenadas antes de insertar
+            # De la api ya vienen  en formato 0-1 se supone, pero se incluye por si acaso
+            x_norm, y_norm = _normalize_coordinates(
+                _safe_float(row.get("x")),
+                _safe_float(row.get("y"))
+)
 
             conn.execute(text("""
                 INSERT INTO fact_shots
@@ -270,8 +345,8 @@ def _load_shots_understat(conn, us_path: Path) -> int:
                 "pid":    pid,
                 "tid":    tid,
                 "min":    _safe_int(row.get("minute")),
-                "x":      _safe_float(row.get("x")),
-                "y":      _safe_float(row.get("y")),
+                "x":      x_norm,
+                "y":      y_norm,
                 "xg":     _safe_float(row.get("xg")),
                 "result": row.get("result") or None,
                 "stype":  row.get("shot_type") or None,
@@ -364,6 +439,16 @@ def _load_events_source(conn, source: str, file_pattern: str, files_dir: Path) -
             skipped += 1
             continue
 
+        # Asegura normalización de coordenadas en  formato 1-0 antes de insertar
+        x_norm, y_norm = _normalize_coordinates(
+            _safe_float(row.get("x")),
+            _safe_float(row.get("y"))
+        )
+        ex_norm, ey_norm = _normalize_coordinates(
+            _safe_float(row.get("end_x")),
+            _safe_float(row.get("end_y"))
+        )
+
         conn.execute(text("""
             INSERT INTO fact_events
                 (match_id, player_id, team_id, event_type,
@@ -373,7 +458,12 @@ def _load_events_source(conn, source: str, file_pattern: str, files_dir: Path) -
                 (:mid, :pid, :tid, :etype,
                  :min, :sec, :x, :y, :ex, :ey,
                  :out, :src)
-            ON CONFLICT (match_id, player_id, event_type, minute, second, x, y, data_source)
+            ON CONFLICT (
+                match_id, player_id, event_type, minute,
+                COALESCE(second, -1),
+                COALESCE(x, -1.0),
+                COALESCE(y, -1.0),
+                data_source)
             DO NOTHING
         """), {
             "mid":   mid,
@@ -382,10 +472,10 @@ def _load_events_source(conn, source: str, file_pattern: str, files_dir: Path) -
             "etype": row.get("event_type") or None,
             "min":   _safe_int(row.get("minute")),
             "sec":   _safe_int(row.get("second")),
-            "x":     _safe_float(row.get("x")),
-            "y":     _safe_float(row.get("y")),
-            "ex":    _safe_float(row.get("end_x")),
-            "ey":    _safe_float(row.get("end_y")),
+            "x":     x_norm,
+            "y":     y_norm,
+            "ex":    ex_norm,
+            "ey":    ey_norm,
             "out":   row.get("outcome") or None,
             "src":   source,
         })
@@ -418,7 +508,7 @@ def load_events(
     if sb_path:
         total += _load_events_source(conn, "statsbomb", "**/events_clean.csv", sb_path)
     if ws_path:
-        total += _load_events_source(conn, "whoscored", "**/events_clean.csv", ws_path)
+        total += _load_events_source(conn, "whoscored", "**/*events*.csv", ws_path)
     log.info("[OK] fact_events completado — %d eventos insertados", total)
     return total
 

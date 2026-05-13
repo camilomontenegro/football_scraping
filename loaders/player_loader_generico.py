@@ -76,11 +76,12 @@ def _load_phase1_transfermarkt(conn, tm_path: Path) -> int:
     Returns:
         Número de jugadores insertados/actualizados.
     """
-    files = list(tm_path.glob("**/players_clean.csv"))
-    
+    # busca recursivamente archicos que contengan players en su nombre en la ruta dada y sus subcarpetas 
+    # obtiene una lista de objetos Path 
+    files = list(tm_path.glob("**/*players*.csv"))
 
     if not files:
-        log.warning("player_loader fase 1: no se encontró players_clean.csv en %s", tm_path)
+        log.warning("player_loader fase 1: no se encontró  archiuvo csv con jugadores en %s", tm_path)
         return 0
 
     all_rows: list[dict] = []
@@ -160,7 +161,7 @@ def _load_phase2_sofascore(conn, ss_path: Path) -> tuple[int, int]:
         (linked, queued) — enlaces directos y encolados en player_review.
     """
     
-    files = list(ss_path.glob("**/players.csv"))
+    files = list(ss_path.glob("**/*players*.csv"))
 
     if not files:
         log.info("player_loader fase 2: no hay players.csv de SofaScore")
@@ -211,17 +212,20 @@ def _load_phase3_understat(conn, us_path: Path) -> tuple[int, int]:
     Returns:
         (linked, queued)
     """
-    f = us_path / "understat_players_laliga.csv"
-    if not f.exists():
-        log.info("player_loader fase 3: no hay understat_players_laliga.csv")
+    files = list(us_path.glob("**/*players*.csv"))
+
+    if not files:
+        log.info("player_loader fase 3: no hay archivos de players de Understat en %s", us_path)
         return 0, 0
 
     try:
-        df = pd.read_csv(f)
+        #Recorre la lista de archivos  y los lee en un dataframe. Luego los concatena en uno solo 
+        dfs = [pd.read_csv(f) for f in files]
+        df = pd.concat(dfs, ignore_index=True)
     except Exception as e:
-        log.warning("Error leyendo %s: %s", f, e)
+        log.warning("Error leyendo archivos de Understat: %s", e)
         return 0, 0
-
+        
     linked = queued = 0
     seen: set[int] = set()
     for _, row in df.iterrows():
@@ -252,7 +256,7 @@ def _load_phase3_understat(conn, us_path: Path) -> tuple[int, int]:
 def _load_phase4_statsbomb(conn, sb_path) -> tuple[int, int]:
     """Enlaza id_statsbomb a jugadores existentes de TM via resolución de nombre."""
     
-    files = list(sb_path.glob("**/players.csv"))
+    files = list(sb_path.glob("**/*players*.csv"))
 
     if not files:
         log.info("player_loader fase 4: no hay players.csv de StatsBomb")
@@ -295,16 +299,20 @@ def _load_phase4_statsbomb(conn, sb_path) -> tuple[int, int]:
 
 def _load_phase5_whoscored(conn,ws_path:Path) -> tuple[int, int]:
     """Enlaza id_whoscored a jugadores existentes de TM via resolución de nombre."""
-        
-    f = ws_path / "players_clean.csv"
-    if not f.exists():
-                log.info("player_loader fase 5: no hay players_clean.csv en %s", ws_path)
-                return 0, 0
+    
+    
+    files = list(ws_path.glob("**/*players*.csv"))
+
+    if not files:
+        log.info("player_loader fase 5: no hay archivos de players de WhoScored en %s", ws_path)
+        return 0, 0
 
     try:
-        df = pd.read_csv(f)
+       
+        dfs = [pd.read_csv(f) for f in files]
+        df = pd.concat(dfs, ignore_index=True)
     except Exception as e:
-        log.warning("Error leyendo %s: %s", f, e)
+        log.warning("Error leyendo archivos de WhoScored: %s", e)
         return 0, 0
 
     linked = queued = 0

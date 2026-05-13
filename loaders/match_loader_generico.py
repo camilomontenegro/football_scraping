@@ -133,6 +133,7 @@ def _load_from_sofascore(conn, ss_path: Path, competition_id: int) -> int:
 
             match_date = _ensure_date(row.get("match_date"))
             competition = row.get("competition") or None
+            #normaliza el formato de temporrada a YYYY/YYYY
             season      = normalize_season(row.get("season"))
             home_score  = row.get("home_score")  if pd.notna(row.get("home_score")) else None
             away_score  = row.get("away_score")  if pd.notna(row.get("away_score")) else None
@@ -190,17 +191,19 @@ def _load_from_understat(conn, us_path: Path, competition_id: int) -> int:
         us_path:        ruta a la carpeta de Understat de la competición
         competition_id: canonical_id de dim_competition para filtrar la búsqueda
     """
-    f = us_path / "understat_matches_laliga.csv"
-    if not f.exists():
-        log.info("match_loader: no hay understat_matches_laliga.csv en %s", us_path)
+    files = list(us_path.glob("**/*matches*.csv"))
+
+    if not files:
+        log.info("match_loader: no hay archivos de matches de Understat en %s", us_path)
         return 0
 
     try:
-        df = pd.read_csv(f)
+        dfs = [pd.read_csv(f) for f in files]
+        df = pd.concat(dfs, ignore_index=True)
     except Exception as e:
-        log.warning("Error leyendo %s: %s", f, e)
+        log.warning("Error leyendo archivos de Understat: %s", e)
         return 0
-
+    
     linked = 0
     for _, row in df.iterrows():
         us_mid     = row.get("understat_match_id")
@@ -250,7 +253,7 @@ def _load_from_understat(conn, us_path: Path, competition_id: int) -> int:
                 ON CONFLICT (id_understat) WHERE id_understat IS NOT NULL DO NOTHING
             """), {
                 "date":     match_date,
-                "season":   str(row.get("season", "")),
+                "season":   normalize_season(str(row.get("season", ""))),
                 "hid":      h_canonical,
                 "aid":      a_canonical,
                 "hsc":      int(hsc) if hsc is not None else None,
@@ -338,25 +341,27 @@ def _load_from_whoscored(conn, ws_path: Path, competition_id: int) -> int:
     """
     Lee el CSV de eventos de WhoScored → añade id_whoscored a partidos existentes.
     Deriva los equipos de cada partido a partir de los eventos.
+    Busca en events porque el CSV de matches de whoscored solo tiene el match_id y season. No aparecen los equipos  que jugaron cada partido. 
 
     Parámetros:
         conn:           conexión a la base de datos
         ws_path:        ruta a la carpeta de WhoScored de la competición
         competition_id: canonical_id de dim_competition para filtrar la búsqueda
     """
-    # busca el CSV de eventos — puede llamarse de distinta forma según la competición
-    event_files = list(ws_path.glob("*events*.csv"))
+
+    event_files = list(ws_path.glob("**/*events*.csv"))
+
     if not event_files:
         log.info("match_loader: no hay CSV de eventos de WhoScored en %s", ws_path)
         return 0
 
-    f = event_files[0]
-    log.info("Analizando eventos de WhoScored: %s", f.name)
+    log.info("Analizando %d archivos de eventos de WhoScored...", len(event_files))
 
     try:
-        df = pd.read_csv(f)
+        dfs = [pd.read_csv(f) for f in event_files]
+        df = pd.concat(dfs, ignore_index=True)
     except Exception as e:
-        log.error("Error leyendo %s: %s", f, e)
+        log.error("Error leyendo eventos de WhoScored: %s", e)
         return 0
 
     # mapear match_id → (home_ws_id, away_ws_id, season)
@@ -384,10 +389,14 @@ def _load_from_whoscored(conn, ws_path: Path, competition_id: int) -> int:
 
         existing = conn.execute(text("""
             SELECT match_id FROM dim_match
-            WHERE home_team_id   = :hid
-              AND away_team_id   = :aid
-              AND season         = :season
-              AND competition_id = :comp_id
+            WHERE season         = :season
+            AND competition_id = :comp_id
+            AND id_whoscored IS NULL
+            AND (
+                (home_team_id = :hid AND away_team_id = :aid)
+                OR
+                (home_team_id = :aid AND away_team_id = :hid)
+            )
             LIMIT 1
         """), {
             "hid":     h_row[0],
@@ -395,12 +404,16 @@ def _load_from_whoscored(conn, ws_path: Path, competition_id: int) -> int:
             "season":  info["season"],
             "comp_id": competition_id,
         }).fetchone()
-
+        
         if existing:
             conn.execute(text("""
                 UPDATE dim_match
                 SET id_whoscored = :sid
-                WHERE match_id = :mid AND id_whoscored IS NULL
+                WHERE match_id = :mid 
+                AND id_whoscored IS NULL
+                AND NOT EXISTS (
+                    SELECT 1 FROM dim_match WHERE id_whoscored = :sid
+                )
             """), {"sid": int(ws_mid), "mid": existing[0]})
             linked += 1
 
