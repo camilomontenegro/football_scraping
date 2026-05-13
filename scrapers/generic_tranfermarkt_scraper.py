@@ -2,6 +2,8 @@
 
 """ 
 Guia ejecución 
+Permite descargar plantillas, equipos y lesiones de competicioens de Transfermarkt
+Soporta la descarga  por temporada  o de todas a las  temporadas de una competicion
 
 # descargar todas las temporadas de La Liga
 python -m scrapers.transfermarkt_scraper --competition "La Liga"
@@ -11,9 +13,6 @@ python -m scrapers.transfermarkt_scraper --competition "Premier League" --season
 
 # descargar solo 2022 de Champions
 python -m scrapers.transfermarkt_scraper --competition "Champions League" --seasons 2022
-
-# ver ayuda
-python -m scrapers.transfermarkt_scraper --help
 
 """
 

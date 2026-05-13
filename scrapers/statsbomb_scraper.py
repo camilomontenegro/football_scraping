@@ -47,11 +47,14 @@ log = logging.getLogger(__name__)
 # â”€â”€ CONSTANTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 COMPETITION_ID = 11    # La Liga en StatsBomb
-SEASON_IDS     = [90, 106, 113, 120, 127]    # 2020/21, 2021/22, 2022/23, 2023/24, 2024/25
-SEASON_LABELS  = ["2020/21", "2021/22", "2022/23", "2023/24", "2024/25"]
+#SEASON_IDS     = [90, 106, 113, 120, 127]    # 2020/21, 2021/22, 2022/23, 2023/24, 2024/25
+#SEASON_LABELS  = ["2020/21", "2021/22", "2022/23", "2023/24", "2024/25"]
+# solo hay datos de estas temporadas
+SEASON_IDS     = [90]          # solo 2020/21
+SEASON_LABELS  = ["2020/21"]
 DELAY_SEC      = 0.3   # pausa entre peticiones (Open Data sin rate limit estricto)
 PROJECT_ROOT   = Path(__file__).resolve().parent.parent
-OUTPUT_DIR     = PROJECT_ROOT / "data" / "raw" / "statsbomb"
+OUTPUT_DIR     = PROJECT_ROOT / "data" / "raw" / "statsbomb"/"la_liga"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # StatsBomb Open Data no requiere credenciales
@@ -394,7 +397,8 @@ def main():
         df_players = extract_players(df_events)
 
         # Guardar CSVs
-        season_dir = OUTPUT_DIR / f"competition_{COMPETITION_ID}" / f"season_{season_id}"
+        #season_dir = OUTPUT_DIR / f"competition_{COMPETITION_ID}" / f"season_{season_id}"
+        season_dir = OUTPUT_DIR / f"season={season_label.replace('/', '_')}"
         season_dir.mkdir(parents=True, exist_ok=True)
 
         paths = {
