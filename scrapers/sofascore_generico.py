@@ -29,11 +29,11 @@ Los loaders/ son los únicos que escriben en la DB.
 
 from __future__ import annotations
 
-import argparse
-import json
-import logging
-import re
-import sys
+import argparse 
+import json 
+import logging 
+import re 
+import sys 
 import time
 from pathlib import Path
 from typing import Optional, Dict
@@ -56,6 +56,7 @@ from scripts.competitions import get_competition
 log = logging.getLogger(__name__)
 
 
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 1. CONSTANTS
 # ══════════════════════════════════════════════════════════════════════════════
@@ -66,6 +67,7 @@ log = logging.getLogger(__name__)
 #   --competition "La Liga"        → TOURNAMENT_ID=8,  slug="la_liga"
 #   --competition "Champions League" → TOURNAMENT_ID=7,  slug="champions_league"
 #   --competition "Europa League"  → TOURNAMENT_ID=679, slug="europa_league"
+
 
 def _load_config(competition_name: str) -> dict:
     """
@@ -110,18 +112,25 @@ def create_driver(headless: bool = True) -> webdriver.Chrome:
     """
     options = Options()
     if headless:
-        options.add_argument("--headless")
+        options.add_argument("--headless=new") # Usa el nuevo modo headless de Chrome, más rápido y menos detectable
     options.add_argument("--disable-gpu")
     options.add_argument("--disable-images")
     options.add_argument("--disable-extensions")
     options.add_argument("--no-sandbox")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
+    options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.7727.117 Safari/537.36")
     
     options.page_load_strategy = "eager"
 
-    return webdriver.Chrome(
+    driver = webdriver.Chrome(
         service=Service(ChromeDriverManager().install()),
         options=options,
     )
+    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    return driver
+
 
 
 def get_json(driver: webdriver.Chrome, url: str, timeout: float = 5) -> dict:
@@ -172,6 +181,7 @@ def get_season_id(driver: webdriver.Chrome, tournament_id: int, season_name: str
         driver,
         f"https://api.sofascore.com/api/v1/unique-tournament/{tournament_id}/seasons",
     )
+    
     for s in data.get("seasons", []):
         if season_name in s.get("name", ""):
             return s["id"], s["name"]
@@ -225,7 +235,7 @@ def _save_json(data, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-        
+         
 def scrape_sofascore(
     season_name:   str,
     tournament_id: int,
@@ -248,7 +258,7 @@ def scrape_sofascore(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    driver = create_driver()
+    driver = create_driver(headless=False) # Cambia a headless=True si quieres que el navegador no se abra, pero ten cuidado con los bloqueos.
     all_shots:   list[dict] = []
     all_events:  list[dict] = []
     all_lineups: list[dict] = []
@@ -315,7 +325,7 @@ def scrape_sofascore(
                 log.warning("Lineups failed match %d: %s", match_id, e)
 
             # Pausa entre partidos completos (shots + events + lineups = 3 peticiones seguidas)
-            time.sleep(random.uniform(3.0, 7.0))
+            time.sleep(random.uniform(3.0, 7.0))  # Ajusta este rango si sigues experimentando bloqueos 
 
     finally:
         driver.quit()
@@ -375,13 +385,13 @@ def transform_shots(shots_raw: list[dict]) -> pd.DataFrame:
     return df
 
 
-def transform_events(events_raw: list[dict]) -> pd.DataFrame:
+def transform_events(events_raw: list[dict]) -> pd.DataFrame: 
     """Adapta los incidentes crudos a las columnas de fact_events."""
     rows = []
-    for ev in events_raw:
+    for ev in events_raw: 
         player = ev.get("player", {})
         point  = ev.get("incidentPoint") or {}
-        rows.append({
+        rows.append({ # Nota: no todos los eventos tienen coordenadas, pero los que las tienen son valiosos para análisis espaciales.
             "match_id_ss":  ev.get("_match_id_ss"),
             "player_id_ss": player.get("id"),
             "player_name":  player.get("name"),
@@ -416,9 +426,15 @@ def extract_teams(matches: list[dict]) -> pd.DataFrame:
             t   = m.get(side, {})
             tid = t.get("id")
             if tid and tid not in teams:
-                teams[tid] = t.get("name")
+                country_obj = t.get("country") or {}
+
+                teams[tid] = {
+                    "id_sofascore": tid, # el ID del equipo en SofaScore
+                    "canonical_name": t.get("name"), # el nombre del equipo
+                    "country": country_obj.get("name") # el país del equipo, 
+                }
     return (
-        pd.DataFrame([{"id_sofascore": k, "canonical_name": v} for k, v in teams.items()])
+        pd.DataFrame(list(teams.values())) # convierte el dict de equipos a DataFrame
         .sort_values("id_sofascore")
         .reset_index(drop=True)
     )
@@ -478,7 +494,7 @@ def main():
 
     # ── Temporadas ────────────────────────────────────────────────────────────
     # Si no se pasan --seasons, avisa al usuario para que las especifique.
-    # No podemos asumir nombres de temporada porque cambian entre competiciones.
+    # Los nombres de temporada cambian entre competiciones.
     if args.seasons is None:
         print(
             f"\n[!] No especificaste --seasons.\n"
