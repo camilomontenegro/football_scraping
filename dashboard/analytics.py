@@ -41,7 +41,17 @@ def get_heatmap_data(
     Zones with fewer than 10 shots are excluded.
     """
     params: dict = {"season": season_label}
-    sql = """
+    comp_join = ""
+    comp_filter = ""
+    if competition is not None:
+        comp_join = "JOIN dim_competition dc ON dc.canonical_id = m.competition_id"
+        comp_filter = "AND dc.canonical_name = :competition"
+        params["competition"] = competition
+    team_filter = ""
+    if team_id is not None:
+        team_filter = "AND fs.team_id = :tid"
+        params["tid"] = team_id
+    sql = f"""
         SELECT
             FLOOR(fs.x / 10) * 10            AS x_band,
             FLOOR(fs.y / 10) * 10            AS y_band,
@@ -54,19 +64,14 @@ def get_heatmap_data(
                 3
             )                                AS conversion_rate
         FROM fact_shots fs
-        JOIN dim_match m   ON fs.match_id  = m.match_id
+        JOIN dim_match m ON fs.match_id = m.match_id
+        {comp_join}
         WHERE m.season = :season
           AND fs.data_source = 'understat'
           AND fs.x IS NOT NULL
           AND fs.y IS NOT NULL
-    """
-    if team_id is not None:
-        sql += " AND fs.team_id = :tid"
-        params["tid"] = team_id
-    if competition is not None:
-        sql += " AND m.competition = :competition"
-        params["competition"] = competition
-    sql += """
+          {comp_filter}
+          {team_filter}
         GROUP BY x_band, y_band
         HAVING COUNT(*) >= 10
         ORDER BY avg_xg DESC
@@ -84,7 +89,17 @@ def get_player_finishing(
     Minimum 20 shots to qualify.
     """
     params: dict = {"season": season_label}
-    sql = """
+    comp_join = ""
+    comp_filter = ""
+    if competition is not None:
+        comp_join = "JOIN dim_competition dc ON dc.canonical_id = m.competition_id"
+        comp_filter = "AND dc.canonical_name = :competition"
+        params["competition"] = competition
+    team_filter = ""
+    if team_id is not None:
+        team_filter = "AND fs.team_id = :tid"
+        params["tid"] = team_id
+    sql = f"""
         SELECT
             p.canonical_name AS player,
             COUNT(*) AS shots,
@@ -96,18 +111,13 @@ def get_player_finishing(
                 2
             ) AS goals_minus_xg
         FROM fact_shots fs
-        JOIN dim_player p  ON fs.player_id = p.canonical_id
-        JOIN dim_match m   ON fs.match_id  = m.match_id
+        JOIN dim_player p ON fs.player_id = p.canonical_id
+        JOIN dim_match m  ON fs.match_id  = m.match_id
+        {comp_join}
         WHERE m.season = :season
           AND fs.data_source = 'understat'
-    """
-    if team_id is not None:
-        sql += " AND fs.team_id = :tid"
-        params["tid"] = team_id
-    if competition is not None:
-        sql += " AND m.competition = :competition"
-        params["competition"] = competition
-    sql += """
+          {comp_filter}
+          {team_filter}
         GROUP BY p.canonical_name
         HAVING COUNT(*) >= 20
         ORDER BY goals_minus_xg DESC

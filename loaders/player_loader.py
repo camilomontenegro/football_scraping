@@ -38,7 +38,7 @@ import pandas as pd
 from sqlalchemy import text
 
 from loaders.common import engine
-from utils.mdm_engine import resolve_player
+from utils.mdm_engine import normalize, resolve_player
 
 log = logging.getLogger(__name__)
 
@@ -120,7 +120,7 @@ def _load_phase1_transfermarkt(conn) -> int:
         
         try:
             # El scraper usa 'player_name' y 'player_id'
-            name    = row.get("player_name") or row.get("canonical_name")
+            name    = normalize(row.get("player_name") or row.get("canonical_name") or "")
             nat     = row.get("nationality")    or None
             birth   = _ensure_date(row.get("birth_date"))
             pos     = row.get("position")       or None
