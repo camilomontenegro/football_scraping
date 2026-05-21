@@ -1,7 +1,7 @@
 """
-loaders/ligue1_loader.py
+loaders/eredivisie_loader.py
 ============================
-Carga los datos de la Ligue 1 en la base de datos.
+Carga los datos de la Eredivisie en la base de datos.
 """
 import logging
 from pathlib import Path
@@ -17,10 +17,10 @@ log = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-TM_LIGUE1 = PROJECT_ROOT / "data" / "raw" / "transfermarkt" / "ligue_1"
-WS_LIGUE1 = PROJECT_ROOT / "data" / "raw" / "whoscored" / "ligue_1"
-SS_LIGUE1 = PROJECT_ROOT / "data" / "raw" / "sofascore" / "ligue_1"
-US_LIGUE1 = PROJECT_ROOT / "data" / "raw" / "understat" / "ligue_1"
+TM_EREDIVISIE = PROJECT_ROOT / "data" / "raw" / "transfermarkt" / "eredivisie"
+WS_EREDIVISIE = PROJECT_ROOT / "data" / "raw" / "whoscored" / "eredivisie"
+SS_EREDIVISIE = PROJECT_ROOT / "data" / "raw" / "sofascore" / "eredivisie"
+US_EREDIVISIE = PROJECT_ROOT / "data" / "raw" / "understat" / "eredivisie"
 
 
 def _setup_logging(log_filename: str) -> None:
@@ -34,16 +34,16 @@ def _setup_logging(log_filename: str) -> None:
 
 
 def _get_competition_id(conn) -> int:
-    """Obtiene el canonical_id de la Ligue 1 en dim_competition."""
+    """Obtiene el canonical_id de la Eredivisie en dim_competition."""
     return conn.execute(text(
-        "SELECT canonical_id FROM dim_competition WHERE id_transfermarkt = 'FR1'"
+        "SELECT canonical_id FROM dim_competition WHERE id_transfermarkt = 'NL1'"
     )).scalar()
 
 
 def _load_dimensions(competition_id: int) -> None:
     opcion = None
     while opcion != "4":
-        print("\n=== Ligue 1 — Dimensiones ===")
+        print("\n=== Eredivisie — Dimensiones ===")
         print("1. Teams")
         print("2. Players")
         print("3. Matches")
@@ -54,19 +54,19 @@ def _load_dimensions(competition_id: int) -> None:
         if opcion == "1":
             log.info("Cargando teams...")
             with engine.begin() as conn:
-                load_teams(conn, ss_path=SS_LIGUE1, tm_path=TM_LIGUE1, ws_path=WS_LIGUE1, us_path=US_LIGUE1)
+                load_teams(conn, ss_path=SS_EREDIVISIE, tm_path=TM_EREDIVISIE, ws_path=WS_EREDIVISIE)
             log.info("Teams completado.")
             log.info("-"*50)
         elif opcion == "2":
             log.info("Cargando players...")
             with engine.begin() as conn:
-                load_players(conn, tm_path=TM_LIGUE1, ss_path=SS_LIGUE1, ws_path=WS_LIGUE1, us_path=US_LIGUE1)
+                load_players(conn, tm_path=TM_EREDIVISIE, ss_path=SS_EREDIVISIE, ws_path=WS_EREDIVISIE)
             log.info("Players completado.")
             log.info("-"*50)
         elif opcion == "3":
             log.info("Cargando matches...")
             with engine.begin() as conn:
-                load_matches(conn, ss_path=SS_LIGUE1, competition_id=competition_id, ws_path=WS_LIGUE1, us_path=US_LIGUE1)
+                load_matches(conn, ss_path=SS_EREDIVISIE, competition_id=competition_id, ws_path=WS_EREDIVISIE, )
             log.info("Matches completado.")
             log.info("-"*50)
 
@@ -74,7 +74,7 @@ def _load_dimensions(competition_id: int) -> None:
 def _load_facts(competition_id: int) -> None:
     opcion = None
     while opcion != "4":
-        print("\n=== Ligue 1 — Hechos ===")
+        print("\n=== Eredivisie — Hechos ===")
         print("1. Shots")
         print("2. Events")
         print("3. Injuries")
@@ -85,19 +85,19 @@ def _load_facts(competition_id: int) -> None:
         if opcion == "1":
             log.info("Cargando shots...")
             with engine.begin() as conn:
-                load_shots(conn, ss_path=SS_LIGUE1, us_path=US_LIGUE1, competition_id=competition_id)
+                load_shots(conn, ss_path=SS_EREDIVISIE , competition_id=competition_id)
             log.info("Shots completado.")
             log.info("-"*50)
         elif opcion == "2":
             log.info("Cargando events...")
             with engine.begin() as conn:
-                load_events(conn, ss_path=SS_LIGUE1, ws_path=WS_LIGUE1)
+                load_events(conn, ss_path=SS_EREDIVISIE, ws_path=WS_EREDIVISIE)
             log.info("Events completado.")
             log.info("-"*50)
         elif opcion == "3":
             log.info("Cargando injuries...")
             with engine.begin() as conn:
-                load_injuries(conn, tm_path=TM_LIGUE1)
+                load_injuries(conn, tm_path=TM_EREDIVISIE)
             log.info("Injuries completado.")
             log.info("-"*50)
 
@@ -106,7 +106,7 @@ def main() -> None:
     # dentro de main poque necesita ejecutarse antes de cualquier operación de logging
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s - %(message)s")
     # configura el logging  para este loader. 
-    _setup_logging("ligue1_loader.log")
+    _setup_logging("eredivisie_loader.log")
 
     with engine.begin() as conn:
         competition_id = _get_competition_id(conn)
