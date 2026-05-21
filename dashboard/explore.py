@@ -153,9 +153,16 @@ def get_season_summary(
                   AND fs.team_id = :tid
             """), {"season": season_label, "tid": tid, **comp_params}).scalar() or 0
 
-            injuries = conn.execute(text(
-                "SELECT COUNT(*) FROM fact_injuries WHERE season = :season"
-            ), {"season": _short_season(season_label)}).scalar() or 0
+            injuries = conn.execute(text("""
+                SELECT COUNT(*) FROM fact_injuries fi
+                WHERE fi.season = :short_season
+                  AND fi.player_id IN (
+                      SELECT fe.player_id FROM fact_events fe
+                      JOIN dim_match m ON m.match_id = fe.match_id
+                      WHERE fe.team_id = :tid
+                        AND m.season  = :season
+                  )
+            """), {"short_season": _short_season(season_label), "season": season_label, "tid": tid}).scalar() or 0
 
     return {
         "matches":  int(matches),
@@ -615,9 +622,23 @@ def get_injuries_standalone(season_label: str | None, team: str | None) -> pd.Da
         tid = _team_id(conn, team)
     params: dict = {}
     season_filter = ""
+    team_filter = ""
     if season_label is not None:
         season_filter = "AND fi.season = :season"
         params["season"] = _short_season(season_label)
+    if tid is not None:
+        season_join_filter = "AND m.season = :full_season" if season_label is not None else ""
+        team_filter = f"""
+            AND fi.player_id IN (
+                SELECT fe.player_id FROM fact_events fe
+                JOIN dim_match m ON m.match_id = fe.match_id
+                WHERE fe.team_id = :tid
+                  {season_join_filter}
+            )
+        """
+        params["tid"] = tid
+        if season_label is not None:
+            params["full_season"] = season_label
     sql = f"""
         SELECT p.canonical_name AS player,
                fi.season,
@@ -628,7 +649,7 @@ def get_injuries_standalone(season_label: str | None, team: str | None) -> pd.Da
                fi.matches_missed
         FROM fact_injuries fi
         JOIN dim_player p ON fi.player_id = p.canonical_id
-        WHERE 1=1 {season_filter}
+        WHERE 1=1 {season_filter} {team_filter}
         ORDER BY fi.days_absent DESC NULLS FIRST, fi.date_from DESC
     """
     return query_df(sql, params)
@@ -636,17 +657,35 @@ def get_injuries_standalone(season_label: str | None, team: str | None) -> pd.Da
 
 def get_injury_type_breakdown(season_label: str | None, team: str | None) -> pd.DataFrame:
     # fact_injuries has no competition link
+    eng = get_engine()
+    with eng.connect() as conn:
+        tid = _team_id(conn, team)
     params: dict = {}
     season_filter = ""
+    team_filter = ""
     if season_label is not None:
         season_filter = "AND fi.season = :season"
         params["season"] = _short_season(season_label)
+    if tid is not None:
+        season_join_filter = "AND m.season = :full_season" if season_label is not None else ""
+        team_filter = f"""
+            AND fi.player_id IN (
+                SELECT fe.player_id FROM fact_events fe
+                JOIN dim_match m ON m.match_id = fe.match_id
+                WHERE fe.team_id = :tid
+                  {season_join_filter}
+            )
+        """
+        params["tid"] = tid
+        if season_label is not None:
+            params["full_season"] = season_label
     sql = f"""
         SELECT fi.injury_type,
                COUNT(*) AS count
         FROM fact_injuries fi
         WHERE fi.injury_type IS NOT NULL
           {season_filter}
+          {team_filter}
         GROUP BY fi.injury_type
         ORDER BY count DESC
     """
