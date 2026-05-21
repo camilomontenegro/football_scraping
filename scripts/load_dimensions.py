@@ -1,9 +1,10 @@
 """
 load_dimensions.py
 ==================
-Cargar dimensiones (dim_player, dim_team, dim_match) de forma individual.
+Cargar dimensiones (dim_competition, dim_player, dim_team, dim_match) de forma individual.
 
 Uso:
+    python -m scripts.load_dimensions --competitions   # Cargar solo competiciones
     python -m scripts.load_dimensions --teams          # Cargar solo equipos
     python -m scripts.load_dimensions --players        # Cargar solo jugadores
     python -m scripts.load_dimensions --matches        # Cargar solo partidos
@@ -12,9 +13,10 @@ Uso:
 
 Flujo recomendado:
     1. python -m scrapers.understat_scraper        # Descargar datos
-    2. python -m scripts.load_dimensions --teams   # Cargar dim_team
-    3. python -m scripts.load_dimensions --players # Cargar dim_player
-    4. python -m scripts.load_dimensions --matches # Cargar dim_match
+    2. python -m scripts.load_dimensions --competitions # Cargar dim_competition
+    3. python -m scripts.load_dimensions --teams        # Cargar dim_team
+    4. python -m scripts.load_dimensions --players      # Cargar dim_player
+    5. python -m scripts.load_dimensions --matches      # Cargar dim_match
     5. python -m scripts.pipeline_runner --load-facts # Cargar facts
 """
 
@@ -34,6 +36,7 @@ log = logging.getLogger(__name__)
 from loaders.team_loader import load_teams
 from loaders.player_loader import load_players
 from loaders.match_loader import load_matches
+from loaders.competition_loader import load_competitions
 
 
 def main():
@@ -50,6 +53,7 @@ Ejemplos:
         """
     )
     
+    parser.add_argument("--competitions", action="store_true", help="Cargar dim_competition")
     parser.add_argument("--teams", action="store_true", help="Cargar dim_team")
     parser.add_argument("--players", action="store_true", help="Cargar dim_player")
     parser.add_argument("--matches", action="store_true", help="Cargar dim_match")
@@ -58,7 +62,7 @@ Ejemplos:
     args = parser.parse_args()
     
     # Cargar todo si no se especifica nada
-    if not any([args.teams, args.players, args.matches, args.all]):
+    if not any([args.competitions, args.teams, args.players, args.matches, args.all]):
         args.all = True
     
     # Usar engine.begin() para asegurar que los cambios se guarden (COMMIT) automÃ¡ticamente al terminar
@@ -66,6 +70,16 @@ Ejemplos:
     
     try:
         with engine.begin() as conn:
+            # =====================================================
+            # CARGAR COMPETICIONES
+            # =====================================================
+            if args.all or args.competitions:
+                print("\n" + "=" * 60)
+                print("[+] Cargando DIM_COMPETITION (Dimensión de Competiciones)")
+                print("=" * 60)
+                load_competitions(conn)
+                print("[OK] dim_competition cargado exitosamente")
+
             # =====================================================
             # CARGAR EQUIPOS
             # =====================================================

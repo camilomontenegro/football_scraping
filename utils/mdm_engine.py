@@ -63,14 +63,29 @@ def normalize(name: str) -> Optional[str]:
     # Solo letras, dígitos y espacios
     name = re.sub(r"[^a-z0-9 ]", " ", name)
     name = re.sub(r"\s+", " ", name).strip()
-    return name or None
+    
+    # ── Diccionario Manual de Alias (Fútbol) ──
+    ALIASES = {
+        "papakouli diop": "pape diop",
+        "joselu": "jose luis mato",
+        "koke": "jorge resurreccion",
+        "isco": "francisco alarcon",
+        "pedri": "pedro gonzalez",
+        "gavi": "pablo martin paez gavira",
+        "rodri": "rodrigo hernandez",
+        "vini jr": "vinicius junior",
+        "pepe": "kepler laveran",
+    }
+    return ALIASES.get(name, name) or None
 
 
 def _similarity_score(a: str, b: str) -> int:
     """Puntúa la similitud entre dos strings normalizados (0-100).
-
-    Algoritmo simple basado en palabras compartidas, suficiente para
-    nombres de jugadores donde la coincidencia suele ser alta o baja.
+    
+    Aplica estrategias avanzadas:
+    1. Subconjuntos completos (ej. "lionel messi" vs "lionel andres messi cuccittini")
+    2. Iniciales (ej. "l messi" vs "lionel messi")
+    3. Typos (distancia de Levenshtein vía SequenceMatcher)
     """
     if not a or not b:
         return 0
@@ -78,10 +93,64 @@ def _similarity_score(a: str, b: str) -> int:
     words_b = set(b.split())
     if not words_a or not words_b:
         return 0
+        
     intersection = words_a & words_b
     union        = words_a | words_b
-    # Jaccard index * 100
-    return int(100 * len(intersection) / len(union))
+    
+    # 1. Subconjuntos (Nombres largos vs cortos)
+    if len(intersection) == len(words_a) or len(intersection) == len(words_b):
+        # Si comparten al menos 2 palabras completas, es casi seguro
+        if len(intersection) >= 2:
+            return 95
+        # Si uno de los nombres es de 1 sola palabra y está contenida
+        if len(words_a) == 1 or len(words_b) == 1:
+            return 90
+            
+    # 2. Análisis estructural (Nombre vs Apellido)
+    score = 0
+    list_a = a.split()
+    list_b = b.split()
+    
+    if len(list_a) >= 2 and len(list_b) >= 2:
+        last_a = list_a[-1]
+        last_b = list_b[-1]
+        first_a = list_a[0]
+        first_b = list_b[0]
+        
+        # El apellido tiene mucho peso
+        if last_a == last_b:
+            score += 50
+            if first_a == first_b:
+                score += 45 # Exacto (95)
+            elif first_a[0] == first_b[0]:
+                if len(first_a) == 1 or len(first_b) == 1:
+                    score += 38 # Inicial compatible (88)
+                else:
+                    score += 15 # Nombres distintos pero misma inicial (65 - Duda)
+            else:
+                score += 0 # Mismo apellido, distinto nombre (50 - Duda/Nuevo)
+        else:
+            # Apellidos distintos penalizan fuertemente. ¿Comparte el penúltimo?
+            # Ej: Transfermarkt = "Alejandro Pozo Pozo", Sofascore = "Alejandro Pozo"
+            if len(list_a) >= 3 and list_a[-2] == last_b:
+                score += 50
+            elif len(list_b) >= 3 and list_b[-2] == last_a:
+                score += 50
+                
+    # 3. Jaccard Index básico
+    jaccard = int(100 * len(intersection) / len(union))
+    score = max(score, jaccard)
+    
+    # 4. Similitud de secuencias (para typos menores como "mesi" vs "messi")
+    seq_match = 0
+    if jaccard > 30 or a[0] == b[0]:
+        from difflib import SequenceMatcher
+        seq_match = int(SequenceMatcher(None, a, b).ratio() * 100)
+        # Cortafuegos vital: Si difieren demasiado (ej: "Maximiliano Gomez" vs "Lovera" = 74%)
+        if seq_match < 85:
+            seq_match = 0
+        
+    return max(score, seq_match)
 
 
 # ── Resolución de EQUIPOS ────────────────────────────────────────────────────
@@ -159,6 +228,34 @@ def resolve_team(
     return canonical_id
 
 
+# ── Caché en memoria para JUGADORES ──────────────────────────────────────────
+
+_PLAYER_CACHE = None
+
+def clear_player_cache():
+    """Limpia la caché de jugadores (útil después de ingestas masivas)."""
+    global _PLAYER_CACHE
+    _PLAYER_CACHE = None
+
+def _get_player_cache(conn) -> list[dict]:
+    """Obtiene y construye la caché de jugadores si no existe."""
+    global _PLAYER_CACHE
+    if _PLAYER_CACHE is None:
+        log.info("Construyendo caché de jugadores para resolución sin tildes...")
+        rows = conn.execute(text("SELECT canonical_id, canonical_name FROM dim_player")).fetchall()
+        _PLAYER_CACHE = []
+        for cid, cname in rows:
+            norm = normalize(cname)
+            if norm:
+                _PLAYER_CACHE.append({
+                    "id": cid,
+                    "name": cname,
+                    "norm": norm
+                })
+        log.info("Caché construida: %d jugadores", len(_PLAYER_CACHE))
+    return _PLAYER_CACHE
+
+
 # ── Resolución de JUGADORES ──────────────────────────────────────────────────
 
 def resolve_player(
@@ -172,7 +269,7 @@ def resolve_player(
 
     Estrategia:
         1. Búsqueda por ID externo → match definitivo
-        2. Búsqueda por nombre exacto (normalizado)
+        2. Búsqueda por nombre exacto (normalizado) en caché
         3. Búsqueda fuzzy → insertar en player_review si similitud ≥ threshold
         4. Sin match → insertar en player_review para revisión manual
 
@@ -197,52 +294,38 @@ def resolve_player(
         if row:
             return row[0]
 
-    # 2. Búsqueda por nombre exacto normalizado
+    # 2. Búsqueda por nombre exacto normalizado en caché
     norm = normalize(player_name)
     if not norm:
         log.warning("resolve_player: nombre vacío/inválido '%s'", player_name)
         return None
 
-    row = conn.execute(
-        text("""
-            SELECT canonical_id
-            FROM dim_player
-            WHERE LOWER(canonical_name) = :n
-            LIMIT 1
-        """),
-        {"n": norm},
-    ).fetchone()
+    cache = _get_player_cache(conn)
 
-    if row:
-        canonical_id = row[0]
+    exact_match_id = None
+    for p in cache:
+        if p["norm"] == norm:
+            exact_match_id = p["id"]
+            break
+
+    if exact_match_id:
         # Actualizar ID externo si no estaba registrado
         if source_id is not None and id_col:
             conn.execute(
                 text(f"UPDATE dim_player SET {id_col} = :sid WHERE canonical_id = :cid AND {id_col} IS NULL"),
-                {"sid": source_id, "cid": canonical_id},
+                {"sid": source_id, "cid": exact_match_id},
             )
-        return canonical_id
+        return exact_match_id
 
-    # 3. Búsqueda fuzzy: comparar contra todos los jugadores de dim_player
-    #    Para escalabilidad, se hace solo si hay pocos candidatos (nombre parcial)
-    first_word = norm.split()[0] if norm.split() else norm
-    candidates = conn.execute(
-        text("""
-            SELECT canonical_id, canonical_name
-            FROM dim_player
-            WHERE LOWER(canonical_name) LIKE :pattern
-            LIMIT 20
-        """),
-        {"pattern": f"%{first_word}%"},
-    ).fetchall()
-
+    # 3. Búsqueda fuzzy: comparar contra todos los jugadores en caché
     best_score = 0
     best_id    = None
-    for cand_id, cand_name in candidates:
-        score = _similarity_score(norm, normalize(cand_name) or "")
+    
+    for p in cache:
+        score = _similarity_score(norm, p["norm"])
         if score > best_score:
             best_score = score
-            best_id    = cand_id
+            best_id    = p["id"]
 
     if best_id and best_score >= similarity_threshold:
         # Match fuzzy con suficiente confianza → actualizar ID si no estaba

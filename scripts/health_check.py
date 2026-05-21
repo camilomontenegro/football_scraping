@@ -13,6 +13,10 @@ Uso:
 import sys
 import logging
 import argparse
+from pathlib import Path
+
+# Asegurar que la raíz esté en el path
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 from utils.health import check_all, check_database, check_data_directories, check_schema
 
 logging.basicConfig(

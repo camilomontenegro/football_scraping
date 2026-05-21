@@ -1,9 +1,31 @@
-data/raw/
+# Entorno virtual
+.venv/
 venv/
-.env
-*.pyc
-__pycache__/
-*.egg-info/
-.pytest_cache/
-*.db
 
+# Datos descargados (son muy pesados y no van al repo)
+data/raw/
+data/processed/
+data/*.db
+data/logs/*.log
+
+#Dump de la base de datos
+db\dump-db_football_completa-202605190935.sql
+
+# Variables de entorno (contraseñas, credenciales DB)
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# VS Code
+.vscode/
+
+# Screenshots de errores del scraper
+*.png
+
+# Jupyter
+.ipynb_checkpoints/

@@ -1,593 +1,337 @@
-# Football Data Pipeline
+# Football Scraping Wizard
 
-Multi-source ETL system that collects, integrates, and stores football statistics from five data providers into a unified PostgreSQL database.
-
-**Scope:** La Liga — seasons 2020/21 to 2024/25.
+Pipeline ETL de fútbol que combina varios scrapers (WhoScored, SofaScore, Understat, Transfermarkt, StatsBomb) en una única base de datos PostgreSQL, con un wizard interactivo y soporte multi‑competición (LaLiga, Bundesliga, Premier League, Champions, Mundial, etc.).
 
 ---
 
-## Table of Contents
+## ⚡ Inicio rápido — comandos en orden
 
-1. [Architecture](#architecture)
-2. [Database Schema](#database-schema)
-3. [Setup](#setup)
-4. [Running the Pipeline](#running-the-pipeline)
-5. [Scrapers Reference](#scrapers-reference)
-6. [Scripts Reference](#scripts-reference)
-7. [Player Review Queue](#player-review-queue)
-8. [Troubleshooting](#troubleshooting)
+Asumiendo Windows + PowerShell, Python 3.12 y PostgreSQL ya instalado y arrancado.
 
----
+```powershell
+# 1) Posicionarse en la raíz del proyecto
+cd C:\Users\ivanm\Desktop\Dev\Mercanza\football_scraping_wizard
 
-## Architecture
+# 2) Crear y activar el entorno virtual
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        DATA SOURCES                                  │
-│                                                                       │
-│  Transfermarkt   SofaScore   Understat   StatsBomb   WhoScored       │
-│  (players,       (matches,   (shots,     (events,    (events,        │
-│   injuries)       events,    xG)          lineups)    coords)         │
-│                   shots)                                              │
-└───────┬──────────────┬────────────┬───────────┬───────────┬─────────┘
-        │              │            │           │           │
-        ▼              ▼            ▼           ▼           ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                     RAW LAYER  (data/raw/)                           │
-│         JSON / CSV files — never modified after download             │
-└───────┬──────────────┬────────────┬───────────┬───────────┬─────────┘
-        │              │            │           │           │
-        ▼              ▼            ▼           ▼           ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                   STAGING LAYER  (PostgreSQL)                        │
-│  stg_transfermarkt_*   stg_sofascore_*   stg_understat_shots        │
-│  stg_statsbomb_events  stg_whoscored_events                          │
-└─────────────────────────────┬───────────────────────────────────────┘
-                              │
-                    ┌─────────▼─────────┐
-                    │   MDM ENGINE       │
-                    │  name resolution   │
-                    │  alias matching    │
-                    │  player_review     │
-                    └─────────┬─────────┘
-                              │
-        ┌─────────────────────┼──────────────────────┐
-        ▼                     ▼                      ▼
-┌──────────────┐    ┌──────────────────┐    ┌───────────────┐
-│ DIMENSIONS   │    │ FACTS            │    │ ALIGNMENT     │
-│              │    │                  │    │               │
-│ dim_player   │    │ fact_shots       │    │ external_ids  │
-│ dim_team     │    │ fact_events      │    │ player_alias  │
-│ dim_match    │    │ fact_injuries    │    │ team_alias    │
-│ dim_season   │    │                  │    │ match_align   │
-│ dim_injury_  │    │                  │    │               │
-│   type       │    │                  │    │               │
-└──────────────┘    └──────────────────┘    └───────────────┘
-```
-
----
-
-## Database Schema
-
-### Dimensions
-
-#### `dim_player`
-Canonical player registry. One row per real-world player.
-
-| Column | Type | Description |
-|---|---|---|
-| player_id | SERIAL PK | Internal ID |
-| name_canonical | VARCHAR(150) | Canonical full name |
-| nationality | VARCHAR(80) | Country of nationality |
-| birth_date | DATE | Date of birth |
-| player_position | VARCHAR(50) | Position (e.g. Delantero, Portero) |
-| created_at | TIMESTAMP | Row creation time |
-
-#### `dim_team`
-| Column | Type | Description |
-|---|---|---|
-| team_id | SERIAL PK | Internal ID |
-| name_canonical | VARCHAR(150) | Canonical team name |
-| country | VARCHAR(80) | Country |
-| created_at | TIMESTAMP | |
-
-#### `dim_match`
-| Column | Type | Description |
-|---|---|---|
-| match_id | SERIAL PK | Internal ID |
-| match_date | DATE | Date of the match |
-| season_id | INTEGER FK | → dim_season |
-| home_team_id | INTEGER FK | → dim_team |
-| away_team_id | INTEGER FK | → dim_team |
-| home_score | SMALLINT | Final home goals |
-| away_score | SMALLINT | Final away goals |
-| data_source | VARCHAR(30) | Source that created this row |
-| created_at | TIMESTAMP | |
-
-#### `dim_season`
-| Column | Type | Description |
-|---|---|---|
-| season_id | SERIAL PK | |
-| label | VARCHAR(20) | e.g. `2020/2021` |
-| year_start | SMALLINT | e.g. 2020 |
-| year_end | SMALLINT | e.g. 2021 |
-
-#### `dim_injury_type`
-| Column | Type | Description |
-|---|---|---|
-| injury_type_id | SERIAL PK | |
-| name | VARCHAR(200) | Injury label (e.g. "Muscle Injury") |
-| category | VARCHAR(80) | Broad category |
-
----
-
-### Facts
-
-#### `fact_shots`
-One row per shot attempt. Sources: Understat (primary), SofaScore, StatsBomb.
-
-| Column | Type | Description |
-|---|---|---|
-| shot_id | SERIAL PK | |
-| match_id | INTEGER FK | → dim_match (nullable) |
-| player_id | INTEGER FK | → dim_player (nullable) |
-| team_id | INTEGER FK | → dim_team |
-| minute | SMALLINT | Minute of the shot |
-| x | DECIMAL(7,4) | Pitch X coordinate |
-| y | DECIMAL(7,4) | Pitch Y coordinate |
-| xg | DECIMAL(7,4) | Expected goals value |
-| result | VARCHAR(30) | Goal / SavedShot / MissedShots / BlockedShot |
-| shot_type | VARCHAR(30) | RightFoot / LeftFoot / Head |
-| situation | VARCHAR(50) | OpenPlay / SetPiece / Corner / Penalty |
-| data_source | VARCHAR(30) | understat / sofascore / statsbomb |
-| external_id | TEXT | ID in source system |
-
-#### `fact_events`
-One row per on-pitch event. Sources: WhoScored (with coords), SofaScore (incidents), StatsBomb (detailed).
-
-| Column | Type | Description |
-|---|---|---|
-| event_id | SERIAL PK | |
-| match_id | INTEGER FK | → dim_match (nullable) |
-| player_id | INTEGER FK | → dim_player |
-| team_id | INTEGER FK | → dim_team |
-| event_type | VARCHAR(50) | Pass / Shot / Tackle / Card / Substitution… |
-| minute | SMALLINT | |
-| second | SMALLINT | (StatsBomb only) |
-| x | DECIMAL(7,4) | Start X (WhoScored / StatsBomb only) |
-| y | DECIMAL(7,4) | Start Y |
-| end_x | DECIMAL(7,4) | End X (StatsBomb only) |
-| end_y | DECIMAL(7,4) | End Y (StatsBomb only) |
-| outcome | VARCHAR(50) | Result of the event |
-| data_source | VARCHAR(30) | whoscored / sofascore / statsbomb |
-| external_id | TEXT | |
-
-> **Note:** SofaScore events (substitutions, cards, VAR decisions) have NULL coordinates by design — they are incident markers, not spatial events.
-
-#### `fact_injuries`
-One row per injury spell per player.
-
-| Column | Type | Description |
-|---|---|---|
-| injury_id | SERIAL PK | |
-| player_id | INTEGER FK | → dim_player |
-| team_id | INTEGER FK | → dim_team |
-| injury_type_id | INTEGER FK | → dim_injury_type |
-| season_id | INTEGER FK | → dim_season |
-| date_from | DATE | Start of absence |
-| date_until | DATE | Return date |
-| days_absent | INTEGER | |
-| matches_missed | SMALLINT | |
-
----
-
-### MDM / Resolution Tables
-
-| Table | Purpose |
-|---|---|
-| `player_name_alias` | Maps variant spellings to a canonical player |
-| `team_name_alias` | Maps variant team names to a canonical team |
-| `player_external_ids` | Source IDs per player (transfermarkt, sofascore…) |
-| `team_external_ids` | Source IDs per team |
-| `match_external_ids` | Source IDs per match |
-| `transfermarkt_player_mapping` | Transfermarkt ID → canonical player_id |
-| `player_resolution_log` | Audit trail of every MDM resolution decision |
-| `match_alignment` | Cross-source match linking records |
-| `player_alignment` | Cross-source player linking records |
-| `player_review` | Manual review queue for ambiguous player matches (score 60–84) |
-
----
-
-### Staging Tables
-
-Temporary landing zone — idempotent, reloaded on each pipeline run.
-
-| Table | Source |
-|---|---|
-| `stg_transfermarkt_players` | Transfermarkt player roster |
-| `stg_transfermarkt_injuries` | Transfermarkt injury records |
-| `stg_sofascore_shots` | SofaScore shot data |
-| `stg_sofascore_events` | SofaScore incident data |
-| `stg_understat_shots` | Understat shot + xG data |
-| `stg_statsbomb_events` | StatsBomb event data |
-| `stg_whoscored_events` | WhoScored event data with coordinates |
-
----
-
-## Setup
-
-### Requirements
-
-- Python 3.10+
-- PostgreSQL 14+
-- Google Chrome (for SofaScore and WhoScored scrapers)
-
-### Installation
-
-```bash
-# 1. Clone the repository
-git clone https://github.com/camilomontenegro/football_scraping.git
-cd football_scrapping
-
-# 2. Create virtual environment
-python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
-
-# 3. Install dependencies
+# 3) Instalar dependencias
 pip install -r requirements.txt
+# Si falta playwright/selenium driver, además:
+pip install statsbombpy  # si vas a usar StatsBomb
 
-# 4. Configure database credentials
-cp .env.example .env
-# Edit .env and fill in DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD
+# 4) Configurar variables de entorno (BD, etc.)
+copy .env.example .env
+notepad .env             # rellena DB_HOST/PORT/NAME/USER/PASSWORD
 
-# 5. Create database tables
+# 5) Crear/recrear el schema en PostgreSQL
 python db/setup_db.py
 
-# 6. Verify everything is ready
-python -m scripts.health_check
+# 6) Lanzar el wizard interactivo
+python -m wizard.wizard
+
+# 7) Lanzar el dashboard Streamlit
+streamlit run dashboard/app.py
 ```
 
-### `.env` file
+A partir del wizard se elige acción (descargar / actualizar), competición, temporada y fuente(s). Internamente lanza el scraping y la carga a BD.
 
+> **Nota sobre compatibilidad:** Aunque el wizard principal se ha movido a `wizard/wizard.py`, el comando `python -m scripts.wizard` seguirá funcionando gracias a un *wrapper* de compatibilidad. Se recomienda usar la nueva ruta para mayor claridad.
+
+---
+
+## Reset completo de base de datos
+
+Si hay datos mal insertados y quieres eliminar la base configurada en `.env`:
+
+```powershell
+# Borra la base completa indicada por DB_NAME
+python -m db.drop_database --yes
+
+# La vuelve a crear, recrea todas las tablas y siembra dim_competition
+python db/setup_db.py
 ```
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=football_db
-DB_USER=postgres
-DB_PASSWORD=your_password
+
+Si sólo quieres vaciar/recrear tablas sin borrar la base PostgreSQL, basta con:
+
+```powershell
+python db/setup_db.py
+```
+
+`setup_db.py` ejecuta `db/create_tables.sql`, que hace `DROP TABLE ... CASCADE`
+de las tablas del proyecto antes de recrearlas.
+
+---
+
+## Dashboard Streamlit
+
+El repositorio incluye un dashboard en `dashboard/` para explorar y monitorizar la BD:
+
+```powershell
+streamlit run dashboard/app.py
+```
+
+Pestañas principales:
+
+- `Exploration`: resultados, jugadores, tiros por fuente y eventos.
+- `Teams`, `Goalkeepers`, `Players`, `Injuries`: vistas analíticas por competición, temporada y equipo.
+- `Shot Intelligence`: mapa de peligro, finishing y especialistas a balón parado.
+- `Pipeline monitoring`: métricas de BD, coverage por fuente, cola de revisión de jugadores y últimos partidos.
+- `Wizard`: ejecuta el pipeline desde Streamlit y guarda el log en `data/logs/wizard_latest_log.txt`.
+
+Salvo la pestaña `Wizard`, el dashboard sólo lee de la base de datos.
+
+---
+
+## 🛠 Comandos útiles habituales
+
+```powershell
+# Diagnóstico rápido del estado de la BD
+python -m scripts.inspect_db
+python -m scripts.inspect_db -c "Bundesliga" -s 2025/2026
+
+# Normalizar formatos heterogéneos de season en BD
+python -m scripts.normalize_db_seasons --dry-run     # preview
+python -m scripts.normalize_db_seasons               # aplica
+
+# Rellenar match_date de partidos cargados sin fecha (WhoScored)
+python -m scripts.backfill_match_dates --limit 20    # prueba
+python -m scripts.backfill_match_dates               # todos
+
+# Cargar dimensiones / facts manualmente (sin scrape)
+python -m scripts.load_dimensions --all
+python -m scripts.load_facts --all
+
+# Pipeline completo en una línea (sin wizard)
+python -m wizard.pipeline_runner --scrape -c "Bundesliga" -s 2025/2026
+python -m wizard.pipeline_runner --scrape -c "Bundesliga" -s 2025/2026 --source whoscored
+python -m wizard.pipeline_runner --update  -c "Bundesliga" -s 2025/2026  # incremental
+
+# Scraper suelto (sin pasar por el pipeline)
+python -m scrapers.whoscored_scraper -c "FIFA World Cup" -s 2026
+python -m scrapers.understat_scraper --competition Bundesliga --seasons 2025
 ```
 
 ---
 
-## Running the Pipeline
-
-### Full pipeline (recommended order)
-
-```bash
-# Step 1 — Download raw data (30 min – 3 hours depending on sources)
-python -m scripts.scrape_only --transfermarkt
-python -m scripts.scrape_only --understat
-python -m scripts.scrape_only --statsbomb
-python -m scripts.scrape_only --sofascore     # slowest (~2-3h)
-# WhoScored: run scrapers/whoscored_scraper.py manually (see below)
-
-# Step 2 — Load dimensions
-python -m scripts.load_dimensions --teams
-python -m scripts.load_dimensions --players
-python -m scripts.load_dimensions --matches
-
-# Step 3 — Load facts
-python -m scripts.load_facts --injuries
-python -m scripts.load_facts --shots
-python -m scripts.load_facts --events
-
-# Step 4 — Review unresolved players (optional)
-python -m scripts.review_players --stats
-```
-
-### Using the full orchestrator
-
-```bash
-# Everything in one command (extract + load)
-python pipeline_runner.py
-
-# Skip re-downloading if raw data already exists
-python pipeline_runner.py --skip-extract
-
-# Dry run — shows what would happen without writing to DB
-python pipeline_runner.py --dry-run
-
-# Only specific sources
-python pipeline_runner.py --sources transfermarkt understat
-```
-
----
-
-## Scrapers Reference
-
-### Transfermarkt
-**Method:** HTTP requests + BeautifulSoup  
-**Anti-bot:** None (respectful delays 2–4s between requests)  
-**Output:** `data/raw/transfermarkt/`  
-**Seasons:** 2020 → 2024  
-**Data collected:** Squad rosters, player profiles (name, position, nationality, DOB), injury history  
-**Estimated time:** 10–15 minutes
-
-```bash
-python -m scripts.scrape_only --transfermarkt
-# or directly:
-python scrapers/transfermarkt_scraper.py
-```
-
-**Configuration** (in `scrapers/transfermarkt_scraper.py`):
-```python
-SEASONS = [2020, 2021, 2022, 2023, 2024]   # year = season start
-```
-
----
-
-### Understat
-**Method:** Async HTTP (aiohttp)  
-**Anti-bot:** None (with realistic headers + 1.5s delay)  
-**Output:** `data/raw/understat/`  
-**Seasons:** 2020 → 2024  
-**Data collected:** Shot-level data with xG values, match results  
-**Estimated time:** 15–20 minutes  
-**Note:** Does not cover Champions League.
-
-```bash
-python -m scripts.scrape_only --understat
-# or directly:
-python scrapers/understat_scraper.py
-```
-
----
-
-### StatsBomb
-**Method:** `statsbombpy` library (Open Data — no API key needed)  
-**Anti-bot:** N/A (free public dataset)  
-**Output:** `data/raw/statsbomb/`  
-**Seasons:** 2020/21 → 2024/25 (competition ID 11 = La Liga)  
-**Data collected:** Full event sequences with coordinates, lineups, detailed shot data  
-**Estimated time:** 5–10 minutes  
-**Note:** Open Data is limited to specific competitions. Coverage may be partial.
-
-```bash
-python -m scripts.scrape_only --statsbomb
-# or directly:
-python scrapers/statsbomb_scraper.py
-```
-
----
-
-### SofaScore
-**Method:** Selenium + headless Chrome (unofficial API)  
-**Anti-bot:** Mild — Chrome is used to bypass JS rendering  
-**Output:** `data/raw/sofascore/`  
-**Seasons:** Configurable via `SOFASCORE_SEASON_NAME`  
-**Data collected:** Matches, shots, incidents (cards, substitutions, VAR decisions)  
-**Estimated time:** 2–3 hours  
-**Parallel workers:** 4 (configurable via `PARALLEL_WORKERS`)
-
-```bash
-python -m scripts.scrape_only --sofascore
-# or directly:
-python scrapers/sofascore_scraper.py
-```
-
-**Configuration** (in `scrapers/sofascore_scraper.py`):
-```python
-HEADLESS = True            # Set False to see the browser
-PARALLEL_WORKERS = 4       # Simultaneous match requests
-```
-
-> **Important:** SofaScore events do not contain pitch coordinates. They are incident-type events only (substitutions, cards, VAR). Do not expect x/y values in `fact_events` rows with `data_source = 'sofascore'`.
-
----
-
-### WhoScored
-**Method:** Selenium + headless Chrome  
-**Anti-bot:** Strong — WhoScored actively blocks automated access  
-**Output:** `data/raw/whoscored/`  
-**Seasons:** 2020/21 → 2025/26 (season URLs hardcoded)  
-**Data collected:** Full event sequences with X/Y pitch coordinates  
-**Estimated time:** Variable — may require manual intervention if blocked
-
-```bash
-python scrapers/whoscored_scraper.py
-```
-
-**Configuration** (in `scrapers/whoscored_scraper.py`):
-```python
-HEADLESS = False    # Recommended: False so you can intervene if blocked
-DELAY_MIN = 3.0     # Seconds between requests
-DELAY_MAX = 6.0
-OUTPUT_DIR = 'data/raw/whoscored'   # Update this path if needed
-```
-
-**If blocked:** Set `HEADLESS = False`, complete any CAPTCHA manually in the opened browser window, then let the scraper continue.
-
-**Season URLs** are hardcoded in `SEASON_URLS` dict — update if WhoScored changes their URL structure.
-
----
-
-## Scripts Reference
-
-All scripts are in the `scripts/` directory and run as Python modules from the project root.
-
-| Script | Purpose | Key flags |
-|---|---|---|
-| `scrape_only.py` | Download raw data without touching DB | `--transfermarkt` `--understat` `--statsbomb` `--sofascore` `--all` |
-| `load_dimensions.py` | Load dim_team, dim_player, dim_match | `--teams` `--players` `--matches` `--all` |
-| `load_facts.py` | Load fact_shots, fact_events, fact_injuries | `--shots` `--events` `--injuries` `--all` |
-| `review_players.py` | Inspect and manage the player_review queue | `--stats` `--unresolved` `--candidates` `--export` |
-| `health_check.py` | Verify DB connection, schema, directories | `--verbose` `--fix` |
-| `check_teams.py` | Inspect team name resolution issues | — |
-| `query_players.py` | Search players in the DB | — |
-| `resolve_players.py` | Batch-resolve player_review entries | — |
-| `pipeline_runner.py` | Full orchestrator (extract + load) | `--skip-extract` `--dry-run` `--sources` |
-
----
-
-## Player Review Queue
-
-When the MDM engine processes a player name, it scores similarity against existing canonical players (0–100):
+## 📁 Estructura del proyecto
 
 ```
-Score ≥ 85  →  Automatic match    →  linked to existing dim_player
-Score 60–84 →  Manual review      →  inserted into player_review
-Score < 60  →  New player         →  inserted as new dim_player row
-```
-
-### Checking the queue
-
-```bash
-# Summary statistics
-python -m scripts.review_players --stats
-
-# List unresolved cases
-python -m scripts.review_players --unresolved
-
-# Export to CSV for batch review
-python -m scripts.review_players --export
-```
-
-### Resolving a case manually (SQL)
-
-```sql
--- 1. Confirm a suggested match
-UPDATE player_review
-SET resolved = TRUE,
-    canonical_id_assigned = <confirmed_player_id>
-WHERE id = <review_id>;
-
--- 2. If the player is genuinely new, insert and resolve
-INSERT INTO dim_player (name_canonical, nationality, birth_date, player_position)
-VALUES ('Player Name', 'Spain', '1995-03-15', 'Delantero');
-
-UPDATE player_review
-SET resolved = TRUE,
-    canonical_id_assigned = <new_player_id>
-WHERE id = <review_id>;
-```
-
-**Scoring weights:**
-- Name similarity (fuzzy): 40 pts
-- Birth date exact match: 35 pts / ±1 year: 15 pts
-- Nationality match: 15 pts
-- Position match: 10 pts
-
----
-
-## Troubleshooting
-
-### `DB_PASSWORD environment variable not set`
-Copy `.env.example` to `.env` and fill in your PostgreSQL credentials.
-
-### `psycopg2` encoding errors with Spanish characters
-PostgreSQL locale may be set to `Spanish_Spain.1252`. The connection in `loaders/common.py` already sets `client_encoding=utf8`. If errors persist, run in PostgreSQL:
-```sql
-ALTER SYSTEM SET lc_messages = 'en_US.UTF-8';
-SELECT pg_reload_conf();
-```
-
-### `DECIMAL` overflow on coordinates
-The schema uses `DECIMAL(7,4)` for x/y columns. If you see overflow errors on an older schema version, run:
-```sql
-ALTER TABLE fact_shots  ALTER COLUMN x TYPE DECIMAL(7,4),
-                        ALTER COLUMN y TYPE DECIMAL(7,4),
-                        ALTER COLUMN xg TYPE DECIMAL(7,4);
-ALTER TABLE fact_events ALTER COLUMN x TYPE DECIMAL(7,4),
-                        ALTER COLUMN y TYPE DECIMAL(7,4),
-                        ALTER COLUMN end_x TYPE DECIMAL(7,4),
-                        ALTER COLUMN end_y TYPE DECIMAL(7,4);
-```
-
-### SofaScore shots have NULL `team_id`
-The SofaScore scraper does not always capture `team_id` in shot records. This is a known data gap — shots from Understat are the primary source for xG analysis.
-
-### WhoScored blocks the scraper
-Set `HEADLESS = False` in `scrapers/whoscored_scraper.py`. If a CAPTCHA appears, solve it manually. Increase `DELAY_MIN` / `DELAY_MAX` if blocks persist.
-
-### `dim_season` not found when loading dim_match
-Run `load_dimensions --teams` and `load_dimensions --players` before `--matches`. The season row must exist before matches can be linked to it.
-
----
-
-## Project Structure
-
-```
-football_scrapping/
-│
-├── scrapers/               Raw data collection (no DB writes)
-│   ├── transfermarkt_scraper.py
-│   ├── sofascore_scraper.py
-│   ├── understat_scraper.py
-│   ├── statsbomb_scraper.py
-│   └── whoscored_scraper.py
-│
-├── staging/                Load raw files into staging tables
-│   ├── load_transfermarkt.py
-│   ├── load_sofascore.py
-│   ├── load_understat.py
-│   ├── load_statsbomb.py
-│   └── load_whoscored.py
-│
-├── loaders/                Load staging → dimensions + facts
-│   ├── common.py           DB engine / connection
-│   ├── player_loader.py
-│   ├── team_loader.py
-│   ├── match_loader.py
-│   └── fact_loader.py
-│
-├── transform/              Alternative transform layer (pipeline_runner.py path)
-│   ├── dim_players.py
-│   ├── dim_teams.py
-│   ├── dim_match.py
-│   ├── fact_shots.py
-│   ├── fact_events.py
-│   └── fact_injuries.py
-│
-├── utils/                  Shared utilities
-│   ├── mdm_engine.py       Name resolution engine
-│   ├── mdm_config.py       Entity configuration
-│   ├── canonical_teams.py  Team name normalization map
-│   ├── player_matcher.py   Fuzzy scoring for player MDM
-│   └── db.py               SQLAlchemy engine (pipeline_runner path)
-│
-├── scripts/                Runnable entry points
-│   ├── scrape_only.py
-│   ├── load_dimensions.py
-│   ├── load_facts.py
-│   ├── review_players.py
-│   ├── health_check.py
-│   └── pipeline_runner.py
-│
+football_scraping_wizard/
 ├── db/
-│   ├── create_tables.sql   Full DDL reference
-│   └── setup_db.py         Creates DB schema via SQLAlchemy
-│
-├── data/
-│   └── raw/                Raw scraped files (gitignored)
-│       ├── transfermarkt/
-│       ├── sofascore/
-│       ├── understat/
-│       ├── statsbomb/
-│       └── whoscored/
-│
-├── pipeline_runner.py      Root-level orchestrator
+│   ├── setup_db.py              # crea BD y schema (DROP+CREATE idempotente)
+│   ├── create_tables.sql        # schema PostgreSQL
+│   └── normalize_seasons.sql    # script SQL de limpieza/normalización
+├── scrapers/                    # uno por fuente externa
+│   ├── whoscored_scraper.py     # multi-stage genérico (ligas + Mundial/EURO)
+│   ├── sofascore_scraper.py     # API JSON (Osen)
+│   ├── understat_scraper.py     # JSON + HTML, ligas europeas (Osen)
+│   ├── statsbomb_scraper.py     # statsbombpy Open Data (Osen)
+│   ├── transfermarkt_scraper.py # plantillas + lesiones (Osen)
+│   └── base_extractor.py        # helpers JSON
+├── loaders/                     # CSV → PostgreSQL
+│   ├── team_loader.py           # dim_team
+│   ├── player_loader.py         # dim_player + player_review
+│   ├── match_loader.py          # dim_match
+│   ├── fact_loader.py           # fact_shots / fact_events / fact_injuries
+│   ├── team_loader_generico.py     # versión multi-liga (globs **/*teams*.csv)
+│   ├── player_loader_generico.py   # versión multi-liga (globs **/*players*.csv)
+│   ├── match_loader_generico.py    # versión multi-liga
+│   ├── fact_loader_generico.py     # multi-liga + normaliza coordenadas a 0-1
+│   ├── competition_loader.py       # dim_competition
+│   ├── champions_loader.py         # orquestador Champions League
+│   ├── la_liga_loader.py           # orquestador LaLiga
+│   ├── ligue1_loader.py            # orquestador Ligue 1
+│   └── premier_league_loader.py    # orquestador Premier League
+├── wizard/                      # Componentes principales del wizard y pipeline
+│   ├── wizard.py                # menú interactivo principal
+│   ├── pipeline_runner.py       # orquestador no interactivo del pipeline
+│   ├── competitions.py          # IDs de cada fuente por competición
+│   └── __init__.py              # para que Python lo reconozca como paquete
+├── scripts/                     # Scripts de utilidad y wrappers de compatibilidad
+│   ├── wizard.py                # Wrapper para python -m scripts.wizard
+│   ├── pipeline_runner.py       # Wrapper para python -m scripts.pipeline_runner
+│   ├── competitions.py          # Wrapper para imports de scripts.competitions
+│   ├── __init__.py              # Re-exporta componentes de wizard/ para compatibilidad
+│   ├── load_dimensions.py       # carga manual de dim_*
+│   ├── load_facts.py            # carga manual de fact_*
+│   ├── inspect_db.py            # diagnóstico de BD
+│   ├── normalize_db_seasons.py  # normalización retroactiva de season
+│   └── backfill_match_dates.py  # rellena match_date desde WhoScored
+├── utils/
+│   ├── season_utils.py             # normalize_season() canónico
+│   ├── canonical_teams.py          # alias de nombres de equipo (218+ aliases)
+│   ├── coordinate_normalization.py # normaliza x,y al rango 0-1 (mezcla 0-100 / 0-1)
+│   ├── mdm_engine.py               # resolve_player / resolve_or_create_player
+│   └── ...
+├── data/raw/<fuente>/...        # CSVs descargados por los scrapers
 ├── requirements.txt
-└── .env.example
+├── .env.example
+└── README.md
 ```
 
 ---
 
-## Data Source Summary
+## 🌍 Competiciones soportadas
 
-| Source | Method | Speed | Coordinates | Seasons | Champions League |
-|---|---|---|---|---|---|
-| Transfermarkt | HTTP + BS4 | Fast | No | 2020–2024 | Partial |
-| Understat | Async HTTP | Fast | Yes (xG) | 2020–2024 | No |
-| StatsBomb | Library | Fast | Yes (full) | 2020–2024 | Limited |
-| SofaScore | Selenium | Slow | Incidents only | Configurable | Yes |
-| WhoScored | Selenium | Variable | Yes (full) | 2020–2025 | Partial |
+Definidas en `wizard/competitions.py`. Cada una mapea su ID interno por fuente.
+
+**Ligas nacionales**
+LaLiga · Segunda División · Premier League · Championship · Bundesliga ·
+Serie A · Ligue 1 · Primeira Liga · Eredivisie
+
+**Continentales (Europa)**
+Champions · Europa League · Europa Conference League · European Championship ·
+UEFA Women's EURO · UEFA Nations League A/B/C/D · World Cup Qualification UEFA
+
+**Selecciones / Internacional**
+FIFA World Cup · Copa America · Africa Cup of Nations · Asian Cup ·
+FIFA Women's World Cup · FIFA Club World Cup · World Cup Qualification CONMEBOL · Int. Friendly
+
+Para añadir una temporada nueva en WhoScored basta con añadir una entrada en
+`WHOSCORED_STAGES` de `scrapers/whoscored_scraper.py` con `(season_id, [stage_ids])`.
+
+---
+
+## 🔁 Flujos típicos
+
+### 1. Primera carga de una nueva temporada (Bundesliga 2025/26)
+
+```powershell
+python db/setup_db.py
+python -m wizard.wizard
+# → 1 (descargar) → Bundesliga → 2025/2026 → all → todos los partidos → S
+```
+
+El wizard ejecuta scraping + carga en BD. Tarda ~90 min para 306 partidos por
+las pausas anti‑bot de WhoScored.
+
+### 2. Actualizar con partidos nuevos
+
+```powershell
+python -m wizard.wizard
+# → 2 (actualizar) → Bundesliga → 2025/2026 → ...
+```
+
+Lee la última `match_date` en BD y descarga solo lo posterior. Para que esto
+funcione, los partidos en `dim_match` deben tener `match_date` rellenado
+(usa `backfill_match_dates` si falta).
+
+### 3. Solo cargar (los CSVs ya existen)
+
+```powershell
+python -m scripts.load_dimensions --all
+python -m scripts.load_facts --all
+```
+
+### 4. Verificar qué hay en la BD
+
+```powershell
+python -m scripts.inspect_db -c "Bundesliga" -s 2025/2026
+```
+
+---
+
+## 🧹 Convenciones internas
+
+- **`season`** se guarda siempre como `\'YYYY/YYYY\'` (`\'2025/2026\'`).
+  La función única de normalización es `utils.season_utils.normalize_season()`.
+- **`competition`** se guarda con el `name` de `wizard/competitions.py`
+  (`"LaLiga"`, `"Bundesliga"`, …).
+- **CSVs por fuente y liga**: cada scraper escribe en `data/raw/<fuente>/`
+  con sufijo de slug (`whoscored_teams_<slug>.csv` plano) o estructura
+  jerárquica (`<fuente>/<comp_slug>/season=YYYY/...csv`).
+- **Convención de PKs**: `dim_team.canonical_id`, `dim_player.canonical_id`,
+  `dim_match.match_id`. Cada dim tiene además `id_<fuente>` para cruzar.
+
+---
+
+## 🩹 Troubleshooting
+
+**`Understat` devuelve 404 para shotmaps**
+→ Corregido: el scraper ahora omite los `404` de shotmaps inexistentes sin marcar el scraping como fallido. Esto ocurre cuando Understat aún no ha publicado los datos de tiros para un partido específico.
+
+**`SofaScore` devuelve 403 Forbidden o un challenge anti-bot**
+→ Corregido a nivel de código: el scraper de SofaScore ahora intenta primero una petición HTTP con *fingerprint* TLS de navegador (`curl_cffi`). Si falla, recurre a Selenium con un navegador Chrome real. Sin embargo, en algunos entornos (especialmente servidores o IPs con mala reputación), SofaScore puede seguir bloqueando el acceso.
+
+  **Posibles soluciones si el bloqueo persiste:**
+  *   **Usar un proxy residencial/sticky:** Define la variable de entorno `SOFASCORE_PROXY` (o `HTTPS_PROXY`/`HTTP_PROXY`) con la URL de un proxy de alta calidad antes de ejecutar el pipeline. Ejemplo: `SOFASCORE_PROXY="http://user:pass@ip:port" python -m wizard.wizard`.
+  *   **Ejecutar en un entorno local con navegador:** El fallback a Selenium es más efectivo en máquinas con un navegador Chrome instalado y una IP residencial.
+
+**"Error en el SQL: error de sintaxis en o cerca de «CREATE»" al lanzar `setup_db.py`**
+→ Ya parcheado: el `create_tables.sql` lleva el `;` correcto y `DROP TABLE IF EXISTS`. Asegúrate de tener la última versión.
+
+**"`\'list\' object has no attribute \'items\'`" al scrapear con WhoScored**
+→ Reparado tras refactor multi-stage. Si vuelves a verlo, es que el archivo se quedó truncado: relanza `python -m py_compile scrapers/whoscored_scraper.py` para detectarlo.
+
+**Wizard "Actualizar" dice "no se encontraron partidos en BD" pero sí los hay**
+→ Causa habitual: `match_date` está NULL o `season` está en formato distinto a `\'YYYY/YYYY\'`. Solución:
+```powershell
+python -m scripts.normalize_db_seasons   # unifica seasons
+python -m scripts.backfill_match_dates   # rellena fechas desde WhoScored
+```
+
+**`fact_events` cuelga con cientos de miles de filas**
+→ Ya optimizado: el loader cachea las FKs en memoria (matches/players/teams) y hace inserts por lotes de 5000. Debería tardar pocos minutos para 500K eventos.
+
+**Null bytes / archivos truncados**
+→ Si compilas y sale `ValueError: source code string cannot contain null bytes`:
+```powershell
+python -c "
+for f in [r\'loaders\\player_loader.py\', r\'loaders\\match_loader.py\', r\'loaders\\team_loader.py\', r\'loaders\\fact_loader.py\']:
+    d = open(f,\'rb\').read()
+    if b\'\\x00\' in d:
+        open(f,\'wb\').write(d.replace(b\'\\x00\', b\'\'))
+        print(f, \'limpiado\')
+\"
+```
+
+**El backfill de fechas falla por "matchCentreData no encontrado"**
+→ WhoScored detectó scraping. Espera 10‑15 min y reintenta; el scraper ya tiene anti‑bot (reinicio de driver + pausas exponenciales).
+
+---
+
+## ✏️ Notas de diseño
+
+- **Whoscored multi‑stage**: torneos como el Mundial tienen 12 grupos + final. El scraper itera por todas las stages registradas en `WHOSCORED_STAGES[(comp, season)][\'stages\']` y agrega los eventos.
+- **Sin Transfermarkt como master obligatorio**: `resolve_or_create_player()` crea jugadores canónicos desde Understat/WhoScored cuando TM no está disponible (antes todos iban a `player_review` y `dim_player` quedaba vacía).
+- **Dos convenciones de output**: la antigua (`whoscored_teams_<slug>.csv` plano) y la nueva de Osen (`<fuente>/<comp_slug>/season=YYYY/...csv`). Los loaders soportan ambas con `glob` recursivo.
+- **MDM (Master Data Management)** en `utils/mdm_engine.py`: `resolve_player()` busca por id de fuente → nombre exacto → fuzzy. Los no resueltos van a `player_review` para revisión manual.
+
+---
+
+## 📚 Documentos adicionales
+
+- `DESCARGA_GUIA.md` — guía detallada del proceso de descarga.
+- `FLUJO_GRANULAR.md` — flujo paso a paso del pipeline.
+- `PLAYER_REVIEW_GUIDE.md` — cómo resolver entradas de `player_review`.
+
+---
+
+## 🔀 Notas del merge (rama database-loader)
+
+Este repo `football_scraping_wizard` integra cambios del trabajo de Álvaro
+(rama `database-loader`, snapshot 13-may) sobre la base `unified` (19-may):
+
+- **Globs genéricos en los `*_loader_generico.py`** — antes los loaders solo
+  reconocían `understat_players_laliga.csv` (hardcoded). Ahora usan
+  `**/*players*.csv`, `**/*teams*.csv`, `**/*matches*.csv` y funcionan para
+  cualquier liga sin renombrar ficheros.
+- **`utils/coordinate_normalization.py`** — todas las coordenadas x,y de tiros
+  y eventos se normalizan al rango 0-1 en el loader. SofaScore y WhoScored
+  llegan en 0-100, Understat en 0-1; antes se mezclaban en BD.
+- **Loaders por liga** — `la_liga_loader.py`, `ligue1_loader.py`,
+  `premier_league_loader.py` (mismo patrón que `champions_loader.py`).
+- **`champions_loader.py` con `engine.begin()` por operación** — cada carga
+  de dimensión/hecho abre su propia transacción para mejor aislamiento.
+- **+49 alias nuevos en `canonical_teams.py`** — equipos de Premier League
+  (Bournemouth, Brentford, Wolves…) y Ligue 1 (Lyon, Marseille, Lens…).
+
+⚠️ **Antes de recargar facts tras el merge**:
+
+```sql
+TRUNCATE fact_shots, fact_events RESTART IDENTITY CASCADE;
+```
+
+Las coordenadas viejas (escala 0-100) no son comparables con las nuevas (0-1).

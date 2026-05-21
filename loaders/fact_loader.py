@@ -31,7 +31,7 @@ from typing import Optional
 import pandas as pd
 from sqlalchemy import text
 
-from loaders.common import engine
+from loaders.common import engine, safe_read_csv as _safe_read_csv
 from utils.canonical_teams import normalize_team_name
 
 log = logging.getLogger(__name__)
@@ -59,18 +59,36 @@ def _ensure_date(val) -> Optional[str]:
 
 # ── Helpers de resolución de FKs ───────────────────────────────────────────
 
+_SOURCE_COL_MAP = {
+    "sofascore":     "id_sofascore",
+    "understat":     "id_understat",
+    "statsbomb":     "id_statsbomb",
+    "whoscored":     "id_whoscored",
+    "transfermarkt": "id_transfermarkt",
+}
+
+
+def _build_id_cache(conn, table: str, pk: str, source: str) -> dict:
+    """Construye un dict {ext_id: canonical_id/match_id} con UN solo SELECT.
+
+    Reemplaza llamadas N×_match_id_by_source / _player_id_by_source /
+    _team_id_by_source por un acceso O(1) en memoria. Es lo que evita
+    que la carga de fact_events se cuelgue con cientos de miles de filas.
+    """
+    col = _SOURCE_COL_MAP.get(source)
+    if not col:
+        return {}
+    rows = conn.execute(
+        text(f"SELECT {col}, {pk} FROM {table} WHERE {col} IS NOT NULL")
+    ).fetchall()
+    return {ext: int(canon) for ext, canon in rows if ext is not None}
+
+
 def _match_id_by_source(conn, source: str, ext_id) -> Optional[int]:
     """Devuelve dim_match.match_id dado el ID externo de una fuente."""
     if ext_id is None:
         return None
-    col_map = {
-        "sofascore":     "id_sofascore",
-        "understat":     "id_understat",
-        "statsbomb":     "id_statsbomb",
-        "whoscored":     "id_whoscored",
-        "transfermarkt": "id_transfermarkt",
-    }
-    col = col_map.get(source)
+    col = _SOURCE_COL_MAP.get(source)
     if not col:
         return None
     row = conn.execute(
@@ -136,6 +154,9 @@ def _safe_float(val) -> Optional[float]:
         return None
 
 
+# `_safe_read_csv` se importa de loaders.common (ver alias en el import).
+
+
 # ── FACT_SHOTS ────────────────────────────────────────────────────────────────
 
 def _load_shots_sofascore(conn) -> int:
@@ -147,12 +168,10 @@ def _load_shots_sofascore(conn) -> int:
 
     all_rows: list[dict] = []
     for f in files:
-        try:
-            df = pd.read_csv(f)
-            all_rows.extend(df.to_dict("records"))
-        except Exception as e:
-            log.error("Error reading file %s: %s", f, e)
+        df = _safe_read_csv(f)
+        if df is None or df.empty:
             continue
+        all_rows.extend(df.to_dict("records"))
 
     count = skipped = 0
     for row in all_rows:
@@ -196,17 +215,22 @@ def _load_shots_sofascore(conn) -> int:
 
 
 def _load_shots_understat(conn) -> int:
-    """Carga tiros de Understat desde understat_shots_laliga.csv."""
-    f = RAW_US / "understat_shots_laliga.csv"
-    if not f.exists():
-        log.info("fact_shots: no hay understat_shots_laliga.csv")
+    """Carga tiros desde TODOS los understat_shots_*.csv (cualquier liga)."""
+    files = sorted(RAW_US.glob("understat_shots_*.csv"))
+    if not files:
+        log.info("fact_shots: no hay understat_shots_*.csv")
         return 0
 
-    try:
-        df = pd.read_csv(f)
-    except Exception as e:
-        log.error("Error reading understat shots: %s", e)
+    dfs = []
+    for f in files:
+        df = _safe_read_csv(f)
+        if df is None or df.empty:
+            continue
+        dfs.append(df)
+        log.info("  · %s", f.name)
+    if not dfs:
         return 0
+    df = pd.concat(dfs, ignore_index=True)
 
     count = skipped = 0
     for _, row in df.iterrows():
@@ -279,65 +303,92 @@ def _load_events_source(conn, source: str, file_pattern: str, files_dir: Path) -
 
     all_rows: list[dict] = []
     for f in files:
-        try:
-            df = pd.read_csv(f)
-            all_rows.extend(df.to_dict("records"))
-        except Exception as e:
-            log.warning("Error leyendo %s: %s", f, e)
+        df = _safe_read_csv(f)
+        if df is None or df.empty:
+            continue
+        all_rows.extend(df.to_dict("records"))
 
     # Columnas de ID de fuente difieren según el scraper
     mid_col = {
         "sofascore": "match_id_ss",
         "statsbomb": "match_id_sb",
-        "whoscored": "match_id_ws",
+        "whoscored": "whoscored_match_id",
     }.get(source, "match_id_ss")
 
     pid_col = {
         "sofascore": "player_id_ss",
         "statsbomb": "player_id_sb",
-        "whoscored": "player_id_ws",
+        "whoscored": "whoscored_player_id",
     }.get(source, "player_id_ss")
 
     tid_col = {
         "sofascore": "team_id_ss",
         "statsbomb": "team_id_sb",
-        "whoscored": None,          # WhoScored no tiene team_id en events
+        "whoscored": "whoscored_team_id",          # WhoScored no tiene team_id en events
     }.get(source)
 
+    # Pre-cachear FKs en memoria. Sin esto, con cientos de miles de filas
+    # se ejecutarían millones de SELECTs y el proceso se cuelga.
+    log.info("  precargando cachés de FKs (%s)...", source)
+    match_cache  = _build_id_cache(conn, "dim_match",  "match_id",     source)
+    player_cache = _build_id_cache(conn, "dim_player", "canonical_id", source)
+    team_cache   = _build_id_cache(conn, "dim_team",   "canonical_id", source)
+    home_team_by_match: dict[int, int] = {}
+    rows = conn.execute(
+        text("SELECT match_id, home_team_id FROM dim_match WHERE home_team_id IS NOT NULL")
+    ).fetchall()
+    for mid, hid in rows:
+        home_team_by_match[int(mid)] = int(hid)
+    log.info(
+        "  cachés: matches=%d  players=%d  teams=%d",
+        len(match_cache), len(player_cache), len(team_cache),
+    )
+
     count = skipped = 0
+    batch: list[dict] = []
+    BATCH_SIZE = 5000
+    insert_sql = text("""
+        INSERT INTO fact_events
+            (match_id, player_id, team_id, event_type,
+             minute, second, x, y, end_x, end_y,
+             outcome, data_source)
+        VALUES
+            (:mid, :pid, :tid, :etype,
+             :min, :sec, :x, :y, :ex, :ey,
+             :out, :src)
+        ON CONFLICT (match_id, player_id, event_type, minute,
+                     COALESCE(second, -1),
+                     COALESCE(x, -1.0),
+                     COALESCE(y, -1.0),
+                     data_source)
+        DO NOTHING
+    """)
+
+    def _flush():
+        nonlocal batch
+        if batch:
+            conn.execute(insert_sql, batch)
+            batch = []
+
     for row in all_rows:
-        mid = _match_id_by_source(conn, source, _safe_int(row.get(mid_col)))
-        pid = _player_id_by_source(conn, source, _safe_int(row.get(pid_col)))
-        tid = _team_id_by_source(conn, source, _safe_int(row.get(tid_col))) if tid_col else None
+        mid_ext = _safe_int(row.get(mid_col))
+        pid_ext = _safe_int(row.get(pid_col))
+        tid_ext = _safe_int(row.get(tid_col)) if tid_col else None
+
+        mid = match_cache.get(mid_ext) if mid_ext is not None else None
+        pid = player_cache.get(pid_ext) if pid_ext is not None else None
+        tid = team_cache.get(tid_ext) if tid_ext is not None else None
 
         if not mid or not pid:
             skipped += 1
             continue
-
-        # Si no hay team_id, intentar derivarlo del partido (home o away)
         if not tid:
-            m_row = conn.execute(
-                text("SELECT home_team_id FROM dim_match WHERE match_id = :mid LIMIT 1"),
-                {"mid": mid},
-            ).fetchone()
-            tid = m_row[0] if m_row else None
-
+            tid = home_team_by_match.get(mid)
         if not tid:
             skipped += 1
             continue
 
-        conn.execute(text("""
-            INSERT INTO fact_events
-                (match_id, player_id, team_id, event_type,
-                 minute, second, x, y, end_x, end_y,
-                 outcome, data_source)
-            VALUES
-                (:mid, :pid, :tid, :etype,
-                 :min, :sec, :x, :y, :ex, :ey,
-                 :out, :src)
-            ON CONFLICT (match_id, player_id, event_type, minute, second, x, y, data_source)
-            DO NOTHING
-        """), {
+        batch.append({
             "mid":   mid,
             "pid":   pid,
             "tid":   tid,
@@ -352,6 +403,11 @@ def _load_events_source(conn, source: str, file_pattern: str, files_dir: Path) -
             "src":   source,
         })
         count += 1
+        if len(batch) >= BATCH_SIZE:
+            _flush()
+            log.info("  · %d eventos insertados...", count)
+
+    _flush()
 
     log.info("fact_events ← %s: %d insertados | %d sin FKs", source, count, skipped)
     return count
@@ -363,7 +419,7 @@ def load_events(conn) -> int:
     total = 0
     total += _load_events_source(conn, "sofascore", "**/events_clean.json", RAW_SS)
     total += _load_events_source(conn, "statsbomb",  "**/events_clean.json", RAW_SB)
-    total += _load_events_source(conn, "whoscored",  "events_clean.json",   RAW_WS)
+    total += _load_events_source(conn, "whoscored",  "whoscored_events_*.csv", RAW_WS)
     log.info("[OK] fact_events completado — %d eventos insertados", total)
     return total
 
@@ -371,29 +427,45 @@ def load_events(conn) -> int:
 # ── FACT_INJURIES ─────────────────────────────────────────────────────────────
 
 def load_injuries(conn) -> int:
-    """Carga fact_injuries desde injuries_clean.json de Transfermarkt."""
+    """Carga fact_injuries desde cualquier CSV de lesiones de Transfermarkt.
+
+    Recoge:
+        data/raw/transfermarkt/**/transfermarkt_*injuries*.csv
+        data/raw/transfermarkt/**/injuries_clean.csv
+        data/raw/transfermarkt/**/*injuries*.csv
+
+    El CSV puede usar 'player_id' o 'player_id_tm' como ID del jugador.
+    """
     log.info("[START] Cargando fact_injuries...")
-    files = list(RAW_TM.glob("**/injuries_clean.csv"))
+
+    files: list[Path] = []
+    files += list(RAW_TM.glob("**/transfermarkt_*injuries*.csv"))
+    files += list(RAW_TM.glob("**/injuries_clean.csv"))
+    files += list(RAW_TM.glob("**/*injuries*.csv"))
+    files = list(dict.fromkeys(files))  # dedup preservando orden
+
     if not files:
-        log.warning("fact_injuries: no hay injuries_clean.csv en %s", RAW_TM)
+        log.warning("fact_injuries: no hay *injuries*.csv en %s", RAW_TM)
+        log.warning("  → ejecuta el scraper de Transfermarkt para generar lesiones")
         return 0
 
     all_rows: list[dict] = []
     for f in files:
-        try:
-            df = pd.read_csv(f)
-            all_rows.extend(df.to_dict("records"))
-        except Exception as e:
-            log.warning("Error leyendo %s: %s", f, e)
+        df = _safe_read_csv(f)
+        if df is None or df.empty:
+            continue
+        all_rows.extend(df.to_dict("records"))
+        log.info("  · %s (%d filas)", f.name, len(df))
 
     count = skipped = 0
     for row in all_rows:
-        # Usar player_id_tm como parte del nombre del savepoint para depuración
-        sp_name = f"injury_{_safe_int(row.get('player_id_tm'))}_{count}"
+        # El ID puede venir como 'player_id' (Osen) o 'player_id_tm' (legado)
+        tm_id = _safe_int(row.get("player_id") or row.get("player_id_tm"))
+        sp_name = f"injury_{tm_id}_{count}"
         conn.execute(text(f"SAVEPOINT {sp_name}"))
-        
+
         try:
-            pid = _player_id_by_source(conn, "transfermarkt", _safe_int(row.get("player_id_tm")))
+            pid = _player_id_by_source(conn, "transfermarkt", tm_id)
 
             if not pid:
                 conn.execute(text(f"RELEASE SAVEPOINT {sp_name}"))

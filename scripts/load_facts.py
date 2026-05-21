@@ -61,68 +61,52 @@ Ejemplos:
     parser.add_argument("--all", action="store_true", help="Cargar todo")
     
     args = parser.parse_args()
-    
+
     # Si no hay args, cargar todo
     if not any([args.shots, args.events, args.injuries, args.all]):
         args.all = True
-    
-    # =====================================================
-    # CARGAR TIROS
-    # =====================================================
+
+    # Cada fact loader se ejecuta en su propia transacción para que un
+    # fallo en uno no haga rollback de los demás.
+    from loaders.common import engine
+
+    any_failure = False
+
+    def _run_loader(name: str, fn) -> None:
+        nonlocal any_failure
+        print("\n" + "=" * 60)
+        print(f"[+] Cargando {name}")
+        print("=" * 60)
+        try:
+            with engine.begin() as conn:
+                fn(conn)
+            print(f"[OK] {name} cargado exitosamente")
+        except Exception as e:
+            any_failure = True
+            log.error(
+                "[ERROR] Error cargando %s: %s", name, e, exc_info=True
+            )
+
     if args.all or args.shots:
-        print("\n" + "=" * 60)
-        print("📦 Cargando FACT_SHOTS (Hechos de Tiros)")
-        print("=" * 60)
-        try:
-            load_shots()
-            print("[OK] fact_shots cargado exitosamente")
-        except Exception as e:
-            log.error(f"[ERROR] Error cargando fact_shots: {e}", exc_info=True)
-            if not args.all:
-                return 1
-    
-    # =====================================================
-    # CARGAR EVENTOS
-    # =====================================================
+        _run_loader("FACT_SHOTS", load_shots)
+
     if args.all or args.events:
-        print("\n" + "=" * 60)
-        print("📦 Cargando FACT_EVENTS (Hechos de Eventos)")
-        print("=" * 60)
-        try:
-            load_events()
-            print("[OK] fact_events cargado exitosamente")
-        except Exception as e:
-            log.error(f"[ERROR] Error cargando fact_events: {e}", exc_info=True)
-            if not args.all:
-                return 1
-    
-    # =====================================================
-    # CARGAR LESIONES
-    # =====================================================
+        _run_loader("FACT_EVENTS", load_events)
+
     if args.all or args.injuries:
-        print("\n" + "=" * 60)
-        print("📦 Cargando FACT_INJURIES (Hechos de Lesiones)")
-        print("=" * 60)
-        try:
-            load_injuries()
-            print("[OK] fact_injuries cargado exitosamente")
-        except Exception as e:
-            log.error(f"[ERROR] Error cargando fact_injuries: {e}", exc_info=True)
-            if not args.all:
-                return 1
-    
-    # =====================================================
-    # RESUMEN
-    # =====================================================
+        _run_loader("FACT_INJURIES", load_injuries)
+
     print("\n" + "=" * 60)
-    print("✅ FACTS CARGADOS EXITOSAMENTE")
+    if any_failure:
+        print("[!] FACTS CARGADOS CON ERRORES — revisa el log")
+    else:
+        print("[OK] FACTS CARGADOS EXITOSAMENTE")
     print("=" * 60)
-    print("\n¡Base de datos completamente poblada!")
-    print("\nPróximo paso:")
-    print("  python health_check.py --verbose")
+    print("\nProximo paso:")
+    print("  python -m scripts.health_check --verbose")
     print("  (para verificar integridad de datos)")
-    
-    return 0
+
+    return 1 if any_failure else 0
 
 
 if __name__ == "__main__":

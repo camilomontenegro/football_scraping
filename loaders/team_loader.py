@@ -28,7 +28,7 @@ from pathlib import Path
 import pandas as pd
 from sqlalchemy import text
 
-from loaders.common import engine
+from loaders.common import engine, safe_read_csv
 from utils.canonical_teams import normalize_team_name
 
 log = logging.getLogger(__name__)
@@ -147,7 +147,9 @@ def _load_from_sofascore(conn) -> int:
 
 def _load_from_transfermarkt(conn) -> int:
     """Lee players_clean.csv de TM → añade country e id_transfermarkt a dim_team."""
+
     files = list(RAW_TM.glob("**/players_clean.csv"))
+
     if not files:
         log.info("team_loader: no hay players_clean.csv de TM")
         return 0
@@ -158,18 +160,27 @@ def _load_from_transfermarkt(conn) -> int:
         try:
             df = pd.read_csv(f)
             for _, row in df.iterrows():
-                slug    = row.get("team_slug")
+
+                #slug    = row.get("team_slug")
+                name= row.get("team_name")
                 country = row.get("team_country") if "team_country" in df.columns else None
-                tm_id   = row.get("team_id_tm")
-                if slug and slug not in team_rows:
-                    team_rows[slug] = {"country": country, "team_id_tm": tm_id}
+                
+                #tm_id   = row.get("team_id_tm")
+                tm_id = row.get("team_id")
+                
+                # cambio slug por name
+                if name and name not in team_rows:
+                    team_rows[name] = {"country": country, "team_id_tm": tm_id}
+
         except Exception as e:
             log.warning("Error leyendo %s: %s", f, e)
 
     count = 0
-    for slug, info in team_rows.items():
+     # cambio slug por name 
+    for name, info in team_rows.items():
         tm_id = info.get("team_id_tm")
-        cid = _upsert_team(conn, slug, "id_transfermarkt", tm_id)
+       
+        cid = _upsert_team(conn, name, "id_transfermarkt", tm_id)
 
         # Enriquecer con country si es necesario
         if info.get("country"):
@@ -184,29 +195,34 @@ def _load_from_transfermarkt(conn) -> int:
 
 
 def _load_from_understat(conn) -> int:
-    """Lee understat_teams_laliga.csv → añade id_understat a dim_team."""
-    f = RAW_US / "understat_teams_laliga.csv"
-    if not f.exists():
-        log.info("team_loader: no hay understat_teams_laliga.csv")
-        return 0
+    """Lee TODOS los understat_teams_*.csv → añade id_understat a dim_team.
 
-    try:
-        df = pd.read_csv(f)
-    except Exception as e:
-        log.warning("Error leyendo %s: %s", f, e)
+    Soporta dos convenciones de archivo:
+        - antigua : data/raw/understat/understat_teams_<slug>.csv
+        - Osen    : data/raw/understat/<slug>/season=YYYY/understat_teams.csv
+    """
+    files = sorted(RAW_US.glob("understat_teams_*.csv"))
+    files += sorted(RAW_US.glob("**/understat_teams.csv"))
+    files = list(dict.fromkeys(files))  # dedup
+    if not files:
+        log.info("team_loader: no hay understat_teams_*.csv")
         return 0
 
     count = 0
-    for _, row in df.iterrows():
-        us_id   = row.get("understat_team_id")
-        us_name = row.get("team_name")
-        if not us_id or not us_name:
+    for f in files:
+        df = safe_read_csv(f)
+        if df is None or df.empty:
             continue
+        for _, row in df.iterrows():
+            us_id   = row.get("understat_team_id")
+            us_name = row.get("team_name") or row.get("name")
+            if not us_id or not us_name:
+                continue
+            _upsert_team(conn, us_name, "id_understat", us_id)
+            count += 1
+        log.info("  · %s", f.name)
 
-        _upsert_team(conn, us_name, "id_understat", us_id)
-        count += 1
-
-    log.info("dim_team ← Understat: %d equipos", count)
+    log.info("dim_team ← Understat: %d equipos (%d archivos)", count, len(files))
     return count
 
 
@@ -219,10 +235,8 @@ def _load_from_statsbomb(conn) -> int:
 
     count = 0
     for fp in files:
-        try:
-            df = pd.read_csv(fp)
-        except Exception as e:
-            log.warning("Error leyendo %s: %s", fp, e)
+        df = safe_read_csv(fp)
+        if df is None or df.empty:
             continue
 
         for _, row in df.iterrows():
@@ -239,29 +253,27 @@ def _load_from_statsbomb(conn) -> int:
 
 
 def _load_from_whoscored(conn) -> int:
-    """Lee whoscored_teams_laliga.csv → añade id_whoscored a dim_team."""
-    f = RAW_WS / "whoscored_teams_laliga.csv"
-    if not f.exists():
-        log.info("team_loader: no hay whoscored_teams_laliga.csv")
-        return 0
-
-    try:
-        df = pd.read_csv(f)
-    except Exception as e:
-        log.warning("Error leyendo %s: %s", f, e)
+    """Lee TODOS los whoscored_teams_*.csv → añade id_whoscored a dim_team."""
+    files = sorted(RAW_WS.glob("whoscored_teams_*.csv"))
+    if not files:
+        log.info("team_loader: no hay whoscored_teams_*.csv")
         return 0
 
     count = 0
-    for _, row in df.iterrows():
-        ws_id   = row.get("whoscored_team_id")
-        ws_name = row.get("team_name")
-        if not ws_id or not ws_name:
+    for f in files:
+        df = safe_read_csv(f)
+        if df is None or df.empty:
             continue
+        for _, row in df.iterrows():
+            ws_id   = row.get("whoscored_team_id")
+            ws_name = row.get("team_name") or row.get("name")
+            if not ws_id or not ws_name:
+                continue
+            _upsert_team(conn, ws_name, "id_whoscored", ws_id)
+            count += 1
+        log.info("  · %s", f.name)
 
-        _upsert_team(conn, ws_name, "id_whoscored", ws_id)
-        count += 1
-
-    log.info("dim_team ← WhoScored: %d equipos", count)
+    log.info("dim_team ← WhoScored: %d equipos (%d archivos)", count, len(files))
     return count
 
 
@@ -283,9 +295,9 @@ def load_teams(conn) -> int:
     total = 0
     total += _load_from_sofascore(conn)
     total += _load_from_transfermarkt(conn)
+    total += _load_from_whoscored(conn)
     total += _load_from_understat(conn)
     total += _load_from_statsbomb(conn)
-    total += _load_from_whoscored(conn)
     log.info("[OK] dim_team completado — %d registros procesados", total)
     return total
 

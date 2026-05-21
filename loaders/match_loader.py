@@ -1,16 +1,17 @@
 """
 loaders/match_loader.py
 ========================
-Carga dim_match desde los archivos CSV producidos por los scrapers.
+Carga dim_match desde los CSVs producidos por los scrapers.
 
-FUENTES (en orden de prioridad):
-    1. SofaScore matches_clean.csv  → MASTER (establece id_sofascore)
-    2. Understat matches CSV        → añade id_understat a partidos ya existentes
+FUENTES (en orden):
+    1. SofaScore matches_clean.csv  → MASTER (id_sofascore)
+    2. Understat understat_matches_*.csv  → enlaza/inserta + id_understat
+    3. StatsBomb matches_clean.csv  → enlaza id_statsbomb por nombre
+    4. WhoScored events CSV  → enlaza/inserta partidos por id_whoscored
 
-Dependencias:
-    - dim_team debe estar cargado antes (necesitamos canonical_id por id_sofascore)
-
-    data_source, id_sofascore, id_understat, id_statsbomb, id_whoscored
+Convenciones:
+    - season SIEMPRE en formato canónico 'YYYY/YYYY' (utils.season_utils.normalize_season)
+    - dim_team debe estar cargado antes (necesitamos canonical_id por id_*).
 """
 
 from __future__ import annotations
@@ -23,11 +24,11 @@ from typing import Optional
 import pandas as pd
 from sqlalchemy import text
 
-from loaders.common import engine
+from loaders.common import engine, safe_read_csv
+from utils.season_utils import normalize_season
 
 log = logging.getLogger(__name__)
 
-# Usar ruta absoluta basada en la carpeta del proyecto
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 RAW_SS = PROJECT_ROOT / "data" / "raw" / "sofascore"
 RAW_US = PROJECT_ROOT / "data" / "raw" / "understat"
@@ -41,18 +42,119 @@ def _ensure_date(val) -> Optional[str]:
         return None
     if isinstance(val, (int, float)):
         try:
-            from datetime import datetime
             return datetime.fromtimestamp(val / 1000.0).date().isoformat()
         except Exception:
             return None
     return str(val)[:10]
 
 
+def _safe_int(val) -> Optional[int]:
+    """Convierte valores numericos opcionales; NaN/cadenas vacias -> None."""
+    if val is None or pd.isna(val):
+        return None
+    text_val = str(val).strip()
+    if text_val.lower() in ("", "nan", "none"):
+        return None
+    try:
+        return int(float(text_val))
+    except (TypeError, ValueError):
+        return None
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _resolve_team_by_ss_id(conn, ss_id: int) -> Optional[int]:
-    """Devuelve canonical_id de dim_team dado un id_sofascore."""
+def _build_competition_alias_map() -> dict[str, str]:
+    """alias-en-minúsculas → canonical_name esperado en dim_competition.
+
+    Construido en tiempo de ejecución desde `wizard.competitions.COMPETITIONS`:
+        • La key del dict (el nombre canónico que usa el wizard).
+        • `name` (cómo se llama en los CSV de algunos scrapers, p.ej. "LaLiga").
+        • `sources.<src>.name` de cada fuente.
+    """
+    try:
+        from wizard.competitions import COMPETITIONS
+    except Exception:
+        return {}
+    out: dict[str, str] = {}
+    for canonical, conf in COMPETITIONS.items():
+        out[canonical.lower()] = canonical
+        nm = conf.get("name")
+        if isinstance(nm, str) and nm:
+            out.setdefault(nm.lower(), canonical)
+        for src_conf in (conf.get("sources") or {}).values():
+            src_nm = (src_conf or {}).get("name")
+            if isinstance(src_nm, str) and src_nm:
+                out.setdefault(src_nm.lower(), canonical)
+    return out
+
+
+_COMPETITION_ALIAS_MAP: dict[str, str] = _build_competition_alias_map()
+
+
+def _competition_id_resolver(conn):
+    """Devuelve `resolve(raw_name) → canonical_id | None`, cacheado por loader.
+
+    Estrategia:
+        1. Match exacto contra `dim_competition.canonical_name`.
+        2. Match contra el alias-map construido desde COMPETITIONS.
+        3. Si `raw_name` es "X, Y" (p.ej. "UEFA Champions League, Group A"),
+           se prueba sólo con la parte antes de la coma.
+        4. ILIKE substring contra `canonical_name` como último recurso.
+    El valor `None` (no encontrado) también se cachea para no repetir queries.
+    """
+    name_to_id: dict[str, int] = {}
+    for r in conn.execute(
+        text("SELECT canonical_id, canonical_name FROM dim_competition")
+    ).fetchall():
+        name_to_id[(r[1] or "").lower()] = r[0]
+
+    cache: dict[str, Optional[int]] = {}
+
+    def _lookup(raw: Optional[str]) -> Optional[int]:
+        if not raw:
+            return None
+        key = raw.strip().lower()
+        if key in cache:
+            return cache[key]
+
+        cid = name_to_id.get(key)
+        if cid is None:
+            mapped = _COMPETITION_ALIAS_MAP.get(key)
+            if mapped:
+                cid = name_to_id.get(mapped.lower())
+
+        if cid is None and "," in raw:
+            head = raw.split(",", 1)[0].strip().lower()
+            cid = name_to_id.get(head)
+            if cid is None:
+                mapped = _COMPETITION_ALIAS_MAP.get(head)
+                if mapped:
+                    cid = name_to_id.get(mapped.lower())
+
+        if cid is None:
+            row = conn.execute(
+                text(
+                    "SELECT canonical_id FROM dim_competition "
+                    "WHERE LOWER(canonical_name) = :n "
+                    "   OR LOWER(canonical_name) LIKE :like_n "
+                    "ORDER BY LENGTH(canonical_name) ASC LIMIT 1"
+                ),
+                {"n": key, "like_n": f"%{key}%"},
+            ).fetchone()
+            cid = row[0] if row else None
+
+        cache[key] = cid
+        if cid is None:
+            log.warning(
+                "match_loader: no se pudo mapear competition=%r a dim_competition",
+                raw,
+            )
+        return cid
+
+    return _lookup
+
+
+def _resolve_team_by_ss_id(conn, ss_id) -> Optional[int]:
     if ss_id is None:
         return None
     row = conn.execute(
@@ -62,8 +164,7 @@ def _resolve_team_by_ss_id(conn, ss_id: int) -> Optional[int]:
     return row[0] if row else None
 
 
-def _resolve_team_by_understat_id(conn, us_id: int) -> Optional[int]:
-    """Devuelve canonical_id de dim_team dado un id_understat."""
+def _resolve_team_by_understat_id(conn, us_id) -> Optional[int]:
     if us_id is None:
         return None
     row = conn.execute(
@@ -73,8 +174,7 @@ def _resolve_team_by_understat_id(conn, us_id: int) -> Optional[int]:
     return row[0] if row else None
 
 
-def _resolve_team_by_sb_id(conn, sb_id: str) -> Optional[int]:
-    """Devuelve canonical_id de dim_team dado un id_statsbomb."""
+def _resolve_team_by_sb_id(conn, sb_id) -> Optional[int]:
     if not sb_id:
         return None
     row = conn.execute(
@@ -84,15 +184,9 @@ def _resolve_team_by_sb_id(conn, sb_id: str) -> Optional[int]:
     return row[0] if row else None
 
 
-# ── Carga desde SofaScore ─────────────────────────────────────────────────────
+# ── SofaScore ─────────────────────────────────────────────────────────────────
 
 def _load_from_sofascore(conn) -> int:
-    """Lee matches_clean.csv de SofaScore → upsert en dim_match.
-
-    SofaScore es la fuente master de partidos:
-        - canonical_name de equipos via id_sofascore
-        - match_date, competition, season, scores
-    """
     files = list(RAW_SS.glob("**/matches_clean.csv"))
     if not files:
         log.warning("match_loader: no se encontraron matches_clean.csv en %s", RAW_SS)
@@ -100,14 +194,11 @@ def _load_from_sofascore(conn) -> int:
 
     all_rows: list[dict] = []
     for f in files:
-        try:
-            df = pd.read_csv(f)
-            all_rows.extend(df.to_dict("records"))
-        except Exception as e:
-            log.error("Error reading matches file %s: %s", f, e)
+        df = safe_read_csv(f)
+        if df is None or df.empty:
             continue
+        all_rows.extend(df.to_dict("records"))
 
-    # Deduplicar por id_sofascore
     seen: dict[int, dict] = {}
     for row in all_rows:
         sid = row.get("id_sofascore")
@@ -120,56 +211,57 @@ def _load_from_sofascore(conn) -> int:
         if sid not in seen:
             seen[sid] = row
 
+    resolve_comp_id = _competition_id_resolver(conn)
+
     inserted = skipped = 0
     for sid, row in seen.items():
         sp_name = f"match_{sid}"
         conn.execute(text(f"SAVEPOINT {sp_name}"))
-        
         try:
             h_ss_id = row.get("home_team_id_ss")
             a_ss_id = row.get("away_team_id_ss")
-
             h_canonical = _resolve_team_by_ss_id(conn, h_ss_id) if h_ss_id else None
             a_canonical = _resolve_team_by_ss_id(conn, a_ss_id) if a_ss_id else None
 
             if not h_canonical or not a_canonical:
-                log.debug("match %d: equipos no resueltos (h=%s, a=%s) — skip", sid, h_ss_id, a_ss_id)
                 conn.execute(text(f"RELEASE SAVEPOINT {sp_name}"))
                 skipped += 1
                 continue
 
             match_date  = _ensure_date(row.get("match_date"))
             competition = row.get("competition") or "La Liga"
-            season      = row.get("season")      or None
-            home_score  = row.get("home_score")  if pd.notna(row.get("home_score")) else None
-            away_score  = row.get("away_score")  if pd.notna(row.get("away_score")) else None
+            season      = normalize_season(row.get("season"))
+            home_score  = row.get("home_score") if pd.notna(row.get("home_score")) else None
+            away_score  = row.get("away_score") if pd.notna(row.get("away_score")) else None
+            comp_id     = resolve_comp_id(competition)
 
             conn.execute(text("""
                 INSERT INTO dim_match
                     (match_date, competition, season,
                      home_team_id, away_team_id,
+                     competition_id,
                      home_score, away_score,
                      data_source, id_sofascore)
                 VALUES
-                    (:date, :comp, :season,
-                     :hid, :aid,
-                     :hsc, :asc,
-                     'sofascore', :sid)
+                    (:date, :comp, :season, :hid, :aid, :cid,
+                     :hsc, :asc, 'sofascore', :sid)
                 ON CONFLICT (id_sofascore) WHERE id_sofascore IS NOT NULL
                 DO UPDATE SET
-                    match_date  = EXCLUDED.match_date,
-                    home_score  = EXCLUDED.home_score,
-                    away_score  = EXCLUDED.away_score,
-                    competition = EXCLUDED.competition,
-                    season      = EXCLUDED.season
+                    match_date     = EXCLUDED.match_date,
+                    home_score     = EXCLUDED.home_score,
+                    away_score     = EXCLUDED.away_score,
+                    competition    = EXCLUDED.competition,
+                    season         = EXCLUDED.season,
+                    competition_id = COALESCE(EXCLUDED.competition_id, dim_match.competition_id)
             """), {
                 "date": match_date,
                 "comp": competition,
                 "season": season,
                 "hid":  h_canonical,
                 "aid":  a_canonical,
-                "hsc":  int(home_score) if home_score is not None else None,
-                "asc":  int(away_score) if away_score is not None else None,
+                "cid":  comp_id,
+                "hsc":  _safe_int(home_score),
+                "asc":  _safe_int(away_score),
                 "sid":  sid,
             })
             conn.execute(text(f"RELEASE SAVEPOINT {sp_name}"))
@@ -178,31 +270,46 @@ def _load_from_sofascore(conn) -> int:
             conn.execute(text(f"ROLLBACK TO SAVEPOINT {sp_name}"))
             log.error("Error inserting match %d: %s", sid, e)
             skipped += 1
-            continue
 
     log.info("dim_match ← SofaScore: %d insertados | %d sin equipos resueltos", inserted, skipped)
     return inserted
 
 
-# ── Carga desde Understat ─────────────────────────────────────────────────────
+# ── Understat ─────────────────────────────────────────────────────────────────
 
 def _load_from_understat(conn) -> int:
-    """Lee understat_matches_laliga.csv → añade id_understat a partidos SS ya cargados.
+    """Lee TODOS los understat_matches_*.csv → enlaza/inserta partidos.
 
-    Estrategia de matching:
-        Buscar dim_match por (match_date, home_team_id, away_team_id) donde
-        equipos se resuelven via id_understat en dim_team.
+    Matching:
+      1. Exacto por (match_date, home_id, away_id).
+      2. Fallback laxo por (home_id, away_id, season) — útil cuando los partidos
+         vinieron de WhoScored sin match_date. Aprovecha para rellenar la fecha.
     """
-    f = RAW_US / "understat_matches_laliga.csv"
-    if not f.exists():
-        log.info("match_loader: no hay understat_matches_laliga.csv")
+    files = sorted(RAW_US.glob("understat_matches_*.csv"))
+    files += sorted(RAW_US.glob("**/understat_matches.csv"))
+    files = list(dict.fromkeys(files))
+    if not files:
+        log.info("match_loader: no hay understat_matches_*.csv")
         return 0
 
-    try:
-        df = pd.read_csv(f)
-    except Exception as e:
-        log.warning("Error leyendo %s: %s", f, e)
+    dfs = []
+    for f in files:
+        d = safe_read_csv(f)
+        if d is None or d.empty:
+            continue
+        try:
+            if "competition" not in d.columns:
+                slug = f.stem.replace("understat_matches_", "").replace("understat_matches", "")
+                d["competition"] = slug.replace("_", " ").title() if slug else "Unknown"
+            dfs.append(d)
+            log.info("  · %s", f.name)
+        except Exception as e:
+            log.warning("Error leyendo %s: %s", f, e)
+    if not dfs:
         return 0
+    df = pd.concat(dfs, ignore_index=True)
+
+    resolve_comp_id = _competition_id_resolver(conn)
 
     linked = 0
     for _, row in df.iterrows():
@@ -214,238 +321,374 @@ def _load_from_understat(conn) -> int:
         if not us_mid:
             continue
 
-        # Convertir fecha
         match_date = None
         if date_str:
             try:
-                match_date = str(date_str)[:10]  # YYYY-MM-DD
+                match_date = str(date_str)[:10]
             except Exception:
                 pass
 
-        # Resolver equipos por id_understat
         h_canonical = _resolve_team_by_understat_id(conn, us_home_id)
         a_canonical = _resolve_team_by_understat_id(conn, us_away_id)
-
-        if not h_canonical or not a_canonical or not match_date:
+        if not h_canonical or not a_canonical:
             continue
 
-        # Buscar el partido en dim_match por fecha y equipos
-        existing = conn.execute(text("""
-            SELECT match_id FROM dim_match
-            WHERE match_date = :date
-              AND home_team_id = :hid
-              AND away_team_id = :aid
-            LIMIT 1
-        """), {"date": match_date, "hid": h_canonical, "aid": a_canonical}).fetchone()
+        norm_season = normalize_season(row.get("season"))
+        raw_comp    = str(row.get("competition") or "Unknown")
+        comp_id     = resolve_comp_id(raw_comp)
+
+        # 1) Match exacto por fecha + equipos
+        existing = None
+        if match_date:
+            existing = conn.execute(text("""
+                SELECT match_id, match_date FROM dim_match
+                WHERE match_date = :date
+                  AND home_team_id = :hid
+                  AND away_team_id = :aid
+                LIMIT 1
+            """), {"date": match_date, "hid": h_canonical, "aid": a_canonical}).fetchone()
+
+        # 2) Fallback laxo por equipos + season
+        if not existing and norm_season:
+            existing = conn.execute(text("""
+                SELECT match_id, match_date FROM dim_match
+                WHERE home_team_id = :hid
+                  AND away_team_id = :aid
+                  AND season = :season
+                LIMIT 1
+            """), {"hid": h_canonical, "aid": a_canonical, "season": norm_season}).fetchone()
 
         if existing:
+            ex_id, ex_date = existing
             conn.execute(text("""
                 UPDATE dim_match
-                SET id_understat = :uid
-                WHERE match_id = :mid AND id_understat IS NULL
-            """), {"uid": int(us_mid), "mid": existing[0]})
+                SET id_understat   = COALESCE(id_understat, :uid),
+                    competition_id = COALESCE(competition_id, :cid)
+                WHERE match_id = :mid
+            """), {"uid": int(us_mid), "cid": comp_id, "mid": ex_id})
+            if match_date and not ex_date:
+                conn.execute(text("""
+                    UPDATE dim_match SET match_date = :d
+                    WHERE match_id = :mid AND match_date IS NULL
+                """), {"d": match_date, "mid": ex_id})
             linked += 1
         else:
-            # Partido no cargado desde SS → insertar desde Understat
             hsc = row.get("home_goals")
             asc = row.get("away_goals")
             conn.execute(text("""
                 INSERT INTO dim_match
                     (match_date, competition, season,
                      home_team_id, away_team_id,
+                     competition_id,
                      home_score, away_score,
                      data_source, id_understat)
                 VALUES
-                    (:date, 'La Liga', :season,
-                     :hid, :aid,
-                     :hsc, :asc,
-                     'understat', :uid)
+                    (:date, :comp, :season, :hid, :aid, :cid,
+                     :hsc, :asc, 'understat', :uid)
                 ON CONFLICT (id_understat) WHERE id_understat IS NOT NULL DO NOTHING
             """), {
-                "date": match_date,
-                "season": str(row.get("season", "")),
-                "hid": h_canonical, "aid": a_canonical,
-                "hsc": int(hsc) if hsc is not None else None,
-                "asc": int(asc) if asc is not None else None,
-                "uid": int(us_mid),
+                "date":   match_date,
+                "comp":   raw_comp,
+                "season": norm_season,
+                "hid":    h_canonical,
+                "aid":    a_canonical,
+                "cid":    comp_id,
+                "hsc":    _safe_int(hsc),
+                "asc":    _safe_int(asc),
+                "uid":    int(us_mid),
             })
             linked += 1
 
-    log.info("dim_match ← Understat: %d partidos enlazados/insertados", linked)
+    log.info("dim_match ← Understat: %d enlazados/insertados", linked)
     return linked
 
 
+# ── StatsBomb ────────────────────────────────────────────────────────────────
+
 def _load_from_statsbomb(conn) -> int:
-    """Lee matches_clean.csv de StatsBomb → añade id_statsbomb a partidos existentes."""
     files = list(RAW_SB.glob("**/matches_clean.csv"))
     if not files:
         return 0
 
+    resolve_comp_id = _competition_id_resolver(conn)
+
     linked = 0
     for f in files:
-        try:
-            df = pd.read_csv(f)
-        except Exception as e:
-            log.warning("Error leyendo %s: %s", f, e)
+        df = safe_read_csv(f)
+        if df is None or df.empty:
             continue
 
         for _, row in df.iterrows():
-            sb_mid = row.get("id_statsbomb")
+            sb_mid    = row.get("id_statsbomb")
             data_date = _ensure_date(row.get("match_date"))
-            
-            # Normalizar season: "2020/2021" -> "LaLiga 20/21"
-            sb_season = str(row.get("season", ""))
-            if len(sb_season) >= 9: # ejemplo 2020/2021
-                s_part = f"{sb_season[2:4]}/{sb_season[7:9]}"
-                norm_season = f"LaLiga {s_part}"
-            else:
-                norm_season = sb_season
+            norm_season = normalize_season(row.get("season")) or str(row.get("season", ""))
+            raw_comp = row.get("competition")
 
             h_name = row.get("home_team_name")
             a_name = row.get("away_team_name")
-            
             if not sb_mid or not data_date or not h_name or not a_name:
                 continue
 
-            # Buscar equipos canónicos en la BD por nombre
             from utils.canonical_teams import normalize_team_name
             h_norm = normalize_team_name(h_name).lower()
             a_norm = normalize_team_name(a_name).lower()
 
-            h_row = conn.execute(text("SELECT canonical_id FROM dim_team WHERE LOWER(canonical_name) = :n"), {"n": h_norm}).fetchone()
-            a_row = conn.execute(text("SELECT canonical_id FROM dim_team WHERE LOWER(canonical_name) = :n"), {"n": a_norm}).fetchone()
-
+            h_row = conn.execute(text(
+                "SELECT canonical_id FROM dim_team WHERE LOWER(canonical_name) = :n"
+            ), {"n": h_norm}).fetchone()
+            a_row = conn.execute(text(
+                "SELECT canonical_id FROM dim_team WHERE LOWER(canonical_name) = :n"
+            ), {"n": a_norm}).fetchone()
             if not h_row or not a_row:
                 continue
 
-            hid, aid = h_row[0], a_row[0]
-
-            # Buscar partido en dim_match
             existing = conn.execute(text("""
                 SELECT match_id FROM dim_match
                 WHERE match_date = :date
                   AND home_team_id = :hid
                   AND away_team_id = :aid
-                  AND (season = :season OR season LIKE :s_like)
+                  AND season = :season
                 LIMIT 1
             """), {
-                "date": data_date, 
-                "hid": hid, 
-                "aid": aid, 
+                "date":   data_date,
+                "hid":    h_row[0],
+                "aid":    a_row[0],
                 "season": norm_season,
-                "s_like": f"%{norm_season.replace('LaLiga ', '')}%"
             }).fetchone()
 
             if existing:
+                comp_id = resolve_comp_id(raw_comp) if raw_comp else None
                 conn.execute(text("""
                     UPDATE dim_match
-                    SET id_statsbomb = :sid
-                    WHERE match_id = :mid AND id_statsbomb IS NULL
-                """), {"sid": str(sb_mid), "mid": existing[0]})
+                    SET id_statsbomb   = COALESCE(id_statsbomb, :sid),
+                        competition_id = COALESCE(competition_id, :cid)
+                    WHERE match_id = :mid
+                """), {"sid": str(sb_mid), "cid": comp_id, "mid": existing[0]})
                 linked += 1
 
     log.info("dim_match ← StatsBomb: %d partidos enlazados", linked)
     return linked
 
 
+# ── WhoScored ────────────────────────────────────────────────────────────────
+
 def _load_from_whoscored(conn) -> int:
-    """Lee whoscored_events_laliga.csv → añade id_whoscored a partidos existentes.
-    
-    Como el CSV de matches de WS no tiene equipos, los extraemos de los eventos.
+    """Lee TODOS los whoscored_events_*.csv → enlaza/inserta partidos.
+
+    Saca equipos de los eventos y la fecha del CSV de matches.
+    Funciona con cualquier liga.
     """
-    f = RAW_WS / "whoscored_events_laliga.csv"
-    if not f.exists():
+    files = sorted(RAW_WS.glob("whoscored_events_*.csv"))
+    if not files:
+        log.info("match_loader: no hay whoscored_events_*.csv")
         return 0
 
-    log.info("Analizando eventos de WhoScored para vincular partidos...")
-    
-    # 1. Mapear match_id -> (home_team_ws_id, away_team_ws_id, season)
-    # Heurística: Los eventos de 'Start' vienen ordenados. 
-    # El primero suele ser el local en la estructura de WS.
+    log.info("Analizando eventos de WhoScored para vincular partidos (%d archivos)...", len(files))
+
+    # Cache whoscored_match_id -> match_date desde whoscored_matches_*.csv
+    match_dates: dict[str, str] = {}
+    for f in sorted(RAW_WS.glob("whoscored_matches_*.csv")):
+        mdf = safe_read_csv(f)
+        if mdf is None or mdf.empty:
+            continue
+        if "match_date" not in mdf.columns or "whoscored_match_id" not in mdf.columns:
+            continue
+        for _, mr in mdf.iterrows():
+            mid_v = mr.get("whoscored_match_id")
+            mdate = mr.get("match_date")
+            if pd.notna(mid_v) and pd.notna(mdate) and str(mdate).strip():
+                match_dates[str(mid_v)] = str(mdate)[:10]
+    if match_dates:
+        log.info("  fechas cargadas: %d partidos con match_date conocida", len(match_dates))
+
     match_map: dict[str, dict] = {}
-    
-    try:
-        # Leemos en trozos si es muy grande, pero aquí procesaremos nombres de equipos e IDs
-        df = pd.read_csv(f)
-        
+    for f in files:
+        slug = f.stem.replace("whoscored_events_", "")
+        df = safe_read_csv(f)
+        if df is None or df.empty:
+            continue
+
+        comp_from_file = slug.replace("_", " ").title()
         for mid, group in df.groupby("whoscored_match_id"):
-            # Obtener IDs de equipos únicos en el orden en que aparecen
-            # Nos fijamos especialmente en los eventos de tipo 'Start'
             starts = group[group["event_type"] == "Start"]
             unique_teams = starts["whoscored_team_id"].unique().tolist()
-            
             if len(unique_teams) < 2:
-                # Si no hay 'Start', probamos con cualquier evento
                 unique_teams = group["whoscored_team_id"].dropna().unique().tolist()
-            
-            if len(unique_teams) >= 2:
-                # Normalizar season: "2020/21" -> "LaLiga 20/21"
-                ws_season = group["season"].iloc[0]
-                if "/" in ws_season and not ws_season.startswith("LaLiga"):
-                    norm_season = f"LaLiga {ws_season}" # Ya viene como 20/21 o 2020/21?
-                    # Si viene como 2020/21 -> queremos 20/21
-                    if len(ws_season) > 5:
-                        parts = ws_season.split("/")
-                        norm_season = f"LaLiga {parts[0][-2:]}/{parts[1][-2:]}"
-                else:
-                    norm_season = ws_season
+            if len(unique_teams) < 2:
+                continue
 
-                match_map[str(mid)] = {
-                    "home_ws_id": int(unique_teams[0]),
-                    "away_ws_id": int(unique_teams[1]),
-                    "season": norm_season
-                }
-    except Exception as e:
-        log.error("Error analizando eventos de WhoScored: %s", e)
-        return 0
+            ws_season = str(group["season"].iloc[0])
+            comp_value = (
+                str(group["competition"].iloc[0])
+                if "competition" in group.columns and pd.notna(group["competition"].iloc[0])
+                else comp_from_file
+            )
+            norm_season = normalize_season(ws_season) or ws_season
 
-    linked = 0
+            match_map[str(mid)] = {
+                "home_ws_id":  int(unique_teams[0]),
+                "away_ws_id":  int(unique_teams[1]),
+                "season":      norm_season,
+                "competition": comp_value,
+            }
+
+    # Pre-cache id_whoscored -> canonical_id
+    team_cache: dict[int, int] = {}
+    rows = conn.execute(
+        text("SELECT id_whoscored, canonical_id FROM dim_team WHERE id_whoscored IS NOT NULL")
+    ).fetchall()
+    for ws_id, can_id in rows:
+        team_cache[int(ws_id)] = can_id
+
+    resolve_comp_id = _competition_id_resolver(conn)
+
+    linked = inserted = updated_dates = skipped_no_team = skipped_duplicate = 0
     for ws_mid, info in match_map.items():
-        # Resolver IDs canónicas
-        h_row = conn.execute(text("SELECT canonical_id FROM dim_team WHERE id_whoscored = :sid"), {"sid": info["home_ws_id"]}).fetchone()
-        a_row = conn.execute(text("SELECT canonical_id FROM dim_team WHERE id_whoscored = :sid"), {"sid": info["away_ws_id"]}).fetchone()
-        
-        if not h_row or not a_row:
+        hid = team_cache.get(info["home_ws_id"])
+        aid = team_cache.get(info["away_ws_id"])
+        if not hid or not aid:
+            skipped_no_team += 1
             continue
-            
-        hid, aid = h_row[0], a_row[0]
-        
-        # Buscar en dim_match (usamos season para filtrar)
-        # Nota: La season en WS viene como "2020/21" y en dim_match puede variar, 
-        # pero SofaScore usa el mismo formato.
+
+        m_date = match_dates.get(str(ws_mid))
+        ws_mid_int = int(ws_mid)
+        comp_id = resolve_comp_id(info.get("competition"))
+
+        assigned = conn.execute(text("""
+            SELECT match_id, match_date FROM dim_match
+            WHERE id_whoscored = :sid
+            LIMIT 1
+        """), {"sid": ws_mid_int}).fetchone()
+        if assigned:
+            assigned_id, assigned_date = assigned
+            if m_date and not assigned_date:
+                conn.execute(text("""
+                    UPDATE dim_match SET match_date = :d
+                    WHERE match_id = :mid AND match_date IS NULL
+                """), {"d": m_date, "mid": assigned_id})
+                updated_dates += 1
+            if comp_id is not None:
+                conn.execute(text("""
+                    UPDATE dim_match
+                    SET competition_id = COALESCE(competition_id, :cid)
+                    WHERE match_id = :mid
+                """), {"cid": comp_id, "mid": assigned_id})
+            linked += 1
+            continue
+
         existing = conn.execute(text("""
-            SELECT match_id FROM dim_match
+            SELECT match_id, match_date, id_whoscored FROM dim_match
             WHERE home_team_id = :hid
               AND away_team_id = :aid
               AND season = :season
             LIMIT 1
         """), {"hid": hid, "aid": aid, "season": info["season"]}).fetchone()
-        
+
         if existing:
+            ex_id, ex_date, ex_ws_id = existing
+            if ex_ws_id is not None:
+                skipped_duplicate += 1
+                continue
             conn.execute(text("""
                 UPDATE dim_match
-                SET id_whoscored = :sid
-                WHERE match_id = :mid AND id_whoscored IS NULL
-            """), {"sid": int(ws_mid), "mid": existing[0]})
+                SET id_whoscored   = COALESCE(id_whoscored, :sid),
+                    competition_id = COALESCE(competition_id, :cid)
+                WHERE match_id = :mid
+            """), {"sid": ws_mid_int, "cid": comp_id, "mid": ex_id})
             linked += 1
+            if m_date and not ex_date:
+                conn.execute(text("""
+                    UPDATE dim_match SET match_date = :d
+                    WHERE match_id = :mid AND match_date IS NULL
+                """), {"d": m_date, "mid": ex_id})
+                updated_dates += 1
+        else:
+            conn.execute(text("""
+                INSERT INTO dim_match
+                    (match_date, competition, season,
+                     home_team_id, away_team_id,
+                     competition_id,
+                     data_source, id_whoscored)
+                VALUES
+                    (:date, :comp, :season, :hid, :aid, :cid,
+                     'whoscored', :sid)
+                ON CONFLICT (id_whoscored) WHERE id_whoscored IS NOT NULL DO NOTHING
+            """), {
+                "date":   m_date,
+                "comp":   info["competition"],
+                "season": info["season"],
+                "hid":    hid,
+                "aid":    aid,
+                "cid":    comp_id,
+                "sid":    ws_mid_int,
+            })
+            inserted += 1
 
-    log.info("dim_match ← WhoScored: %d partidos enlazados", linked)
-    return linked
+    log.info(
+        "dim_match ← WhoScored: %d enlazados | %d insertados | %d fechas añadidas | %d sin equipos",
+        linked, inserted, updated_dates, skipped_no_team,
+    )
+    return linked + inserted
 
 
 # ── Punto de entrada ──────────────────────────────────────────────────────────
 
-def load_matches(conn) -> int:
-    """Carga dim_match desde SofaScore (master) y Understat (complementario).
+def backfill_competition_id(conn) -> int:
+    """Rellena `dim_match.competition_id` en las filas que lo tienen NULL.
 
-    Returns:
-        Número total de partidos en dim_match.
+    Usa el mismo resolutor que los loaders, de modo que aplica el mismo
+    mapeo de alias ("LaLiga" → "La Liga", "UEFA Champions League, Group A"
+    → "Champions League", …). Idempotente: vuelve a ejecutarlo cuando
+    quieras; sólo toca filas con NULL.
     """
+    resolve_comp_id = _competition_id_resolver(conn)
+    rows = conn.execute(text("""
+        SELECT DISTINCT competition
+        FROM dim_match
+        WHERE competition_id IS NULL AND competition IS NOT NULL
+    """)).fetchall()
+
+    total_updated = 0
+    for (raw_comp,) in rows:
+        cid = resolve_comp_id(raw_comp)
+        if cid is None:
+            continue
+        result = conn.execute(text("""
+            UPDATE dim_match
+            SET competition_id = :cid
+            WHERE competition_id IS NULL
+              AND competition = :raw
+        """), {"cid": cid, "raw": raw_comp})
+        updated = result.rowcount or 0
+        if updated:
+            log.info(
+                "backfill competition_id: %s → id=%d (%d filas)",
+                raw_comp, cid, updated,
+            )
+        total_updated += updated
+
+    remaining = conn.execute(text(
+        "SELECT COUNT(*) FROM dim_match WHERE competition_id IS NULL"
+    )).scalar() or 0
+    log.info(
+        "[OK] backfill competition_id: %d filas actualizadas, %d siguen NULL",
+        total_updated, remaining,
+    )
+    return total_updated
+
+
+def load_matches(conn) -> int:
+    """Carga dim_match desde todas las fuentes."""
     log.info("[START] Cargando dim_match...")
     _load_from_sofascore(conn)
     _load_from_understat(conn)
     _load_from_statsbomb(conn)
     _load_from_whoscored(conn)
+
+    # Backfill defensivo por si alguna fuente no resolvió competition_id en su
+    # propia pasada (p.ej. partido enlazado vía Understat antes de existir la
+    # competición en dim_competition).
+    backfill_competition_id(conn)
 
     total = conn.execute(text("SELECT COUNT(*) FROM dim_match")).scalar()
     log.info("[OK] dim_match completado — %d partidos", total)

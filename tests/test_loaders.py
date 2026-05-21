@@ -16,6 +16,7 @@ from sqlalchemy import text
 
 # Importar loaders
 from loaders.team_loader import _upsert_team, _load_from_sofascore
+from loaders.match_loader import _safe_int
 from loaders.common import engine
 from utils.mdm_engine import resolve_team, resolve_player, normalize
 
@@ -76,6 +77,14 @@ class TestDataValidation:
         for date_str in invalid_dates:
             # Deberían fallar o retornar None
             assert date_str not in ["2020-01-01"]
+
+    def test_safe_int_handles_nan_scores(self):
+        """Los marcadores NaN de fixtures no jugados se guardan como NULL."""
+        assert _safe_int(pd.NA) is None
+        assert _safe_int(float("nan")) is None
+        assert _safe_int("") is None
+        assert _safe_int("2.0") == 2
+        assert _safe_int(3) == 3
 
 
 # ═════════════════════════════════════════════════════════════════

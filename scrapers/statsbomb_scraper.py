@@ -1,4 +1,4 @@
-﻿"""
+"""
 scrapers/statsbomb_scraper.py
 ===============================
 Scraper unificado de StatsBomb Open Data. Sigue el mismo patrÃ³n que understat_scraper.py:
@@ -120,9 +120,11 @@ def get_lineups(match_id: int) -> dict:
 # â”€â”€ ORCHESTRATOR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def scrape_statsbomb(
+    competition_name: str = None,
     competition_id: int = COMPETITION_ID,
     season_id: int      = None,
     sleep_between: float = DELAY_SEC,
+    from_date: Optional[str] = None,
 ) -> tuple[pd.DataFrame, list[dict], list[dict]]:
     """Orquestador principal: descarga partidos, eventos y lineups.
 
@@ -130,6 +132,7 @@ def scrape_statsbomb(
         competition_id: ID de la competicion en StatsBomb (p.ej. 11 = La Liga)
         season_id:      ID de la temporada (p.ej. 90 = 2020/21). Si es None, usa la primera.
         sleep_between:  Pausa entre partidos en segundos
+        from_date:      Fecha mínima para partidos (formato YYYY-MM-DD)
 
     Returns:
         (matches_df, all_events, all_lineups) where:
@@ -139,6 +142,13 @@ def scrape_statsbomb(
     """
     if season_id is None:
         season_id = SEASON_IDS[0]
+    
+    # Parse from_date if provided
+    from_date_obj = None
+    if from_date:
+        from datetime import datetime
+        from_date_obj = datetime.strptime(from_date, "%Y-%m-%d").date()
+        log.info("Filtrando partidos desde: %s", from_date_obj)
     
     from utils.batch import generate_batch_id
     batch_id = generate_batch_id()
@@ -155,10 +165,32 @@ def scrape_statsbomb(
         log.warning("Sin partidos para competition=%d season=%d", competition_id, season_id)
         return pd.DataFrame(), [], []
 
+    # Filter by from_date if provided
+    if from_date_obj and "match_date" in matches_df.columns:
+        matches_df = matches_df[matches_df["match_date"] >= from_date_obj]
+        log.info("Filtrados %d partidos desde %s", len(matches_df), from_date_obj)
+    elif from_date_obj:
+        log.warning("Columna 'match_date' no encontrada, sin filtrar por fecha")
+
     print(f"  [OK] {len(matches_df)} partidos encontrados")
 
     # Directorio base
-    comp_dir = OUTPUT_DIR / f"competition_{competition_id}" / f"season_{season_id}"
+    from scripts.competitions import get_competition
+    comp_slug = "la-liga" # Default
+    if competition_name:
+        comp_slug = competition_name.lower().replace(" ", "-")
+    elif competition_id:
+        from scripts.competitions import COMPETITIONS
+        for key, config in COMPETITIONS.items():
+            if config.get("sources", {}).get("statsbomb", {}).get("competition_id") == competition_id:
+                comp_slug = key.lower().replace(" ", "-")
+                break
+
+    # StatsBomb uses simple season format like 2020_2021 if we had it, but season_id is an int.
+    # We'll try to get a better label if possible, or just use the ID for now.
+    folder_season = f"{season_id}" 
+    
+    comp_dir = OUTPUT_DIR / comp_slug / f"season={folder_season}"
 
     all_events:  list[dict] = []
     all_lineups: list[dict] = []
@@ -415,4 +447,18 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Scraper de StatsBomb")
+    parser.add_argument("--competition-id", "-c", type=int, default=None,
+                        help="ID de la competición en StatsBomb (ej: 11 para La Liga)")
+    parser.add_argument("--season-id", "-s", type=int, default=None,
+                        help="ID de la temporada en StatsBomb (ej: 90 para 2020/21)")
+    
+    args = parser.parse_args()
+    
+    # Usar valores por defecto si no se especifican
+    competition_id = args.competition_id if args.competition_id else COMPETITION_ID
+    season_id = args.season_id if args.season_id else SEASON_IDS[0]
+    
+    scrape_statsbomb(competition_id=competition_id, season_id=season_id)
