@@ -23,11 +23,14 @@ Schema destino (dim_team):
 
 from __future__ import annotations
 
+from importlib.resources import files
 import logging
 from pathlib import Path
 
 import pandas as pd
 from sqlalchemy import text
+# necesario para asegurar conversion entidades html de understat
+import html 
 
 from loaders.common import engine
 from utils.canonical_teams import normalize_team_name
@@ -45,6 +48,11 @@ _ALLOWED_ID_COLS = {
 
 def _upsert_team(conn, canonical_name: str, source_id_col: str, source_id) -> int:
     """Inserta o actualiza un equipo en dim_team.
+
+    1. Busca por ID de fuente → si existe devuelve el canonical_id
+    2. Busca por nombre normalizado → si existe devuelve el canonical_id
+    3. Si no existe → INSERT nuevo equipo
+    4. UPDATE id de la fuente si estaba NULL
 
     Returns:
         canonical_id del equipo.
@@ -144,9 +152,10 @@ def _load_from_transfermarkt(conn,tm_path: Path) -> int:
     """Lee players_clean.csv de TM → añade country e id_transfermarkt a dim_team."""
     
     files = list(tm_path.glob("**/teams_clean.csv"))
+    
 
     if not files:
-        log.info("team_loader: no hay players_clean.csv de TM")
+        log.info("team_loader: no hay teams_clean.csv de TM en %s", tm_path)
         return 0
 
     # Construir tabla única de equipos TM (team_slug, team_country)
@@ -213,6 +222,13 @@ def _load_from_understat(conn, us_path: Path) -> int:
     for _, row in df.iterrows():
         us_id   = row.get("understat_team_id")
         us_name = row.get("team_name")
+
+         # proteccion por si del scrapper no vienen las entitidades html convertidas a sus caracteres reales 
+        # unescape convierte entidades html a caracteres reales. Si el string ya esta, limpio no hace nada 
+        #"Lewis O&#039;Brien" → "Lewis O'Brien"
+        if us_name:
+            us_name = html.unescape(us_name)
+
         if not us_id or not us_name:
             continue
 

@@ -56,7 +56,11 @@ def _ensure_date(val) -> Optional[str]:
 # ── Helpers de resolución de FKs ───────────────────────────────────────────
 
 def _match_id_by_source(conn, source: str, ext_id) -> Optional[int]:
-    """Devuelve dim_match.match_id dado el ID externo de una fuente."""
+    """
+    Devuelve dim_match.match_id dado el ID externo de una fuente.
+    
+    ext_id: id del partido en la fuente 
+    """
     if ext_id is None:
         return None
     col_map = {
@@ -69,9 +73,15 @@ def _match_id_by_source(conn, source: str, ext_id) -> Optional[int]:
     col = col_map.get(source)
     if not col:
         return None
+    
+    # en dim_match id_statsbomb es VARCHAR. Se pasa como String
+    eid = _safe_str(ext_id) if source == "statsbomb" else ext_id
+    if eid is None: 
+        return None
+
     row = conn.execute(
         text(f"SELECT match_id FROM dim_match WHERE {col} = :eid LIMIT 1"),
-        {"eid": ext_id},
+        {"eid": eid},
     ).fetchone()
     return row[0] if row else None
 
@@ -90,9 +100,15 @@ def _player_id_by_source(conn, source: str, ext_id) -> Optional[int]:
     col = col_map.get(source)
     if not col:
         return None
+    
+    # en dim_team id_statsbomb es VARCHAR. Se pasa como String
+    eid = _safe_str(ext_id) if source == "statsbomb" else ext_id
+    if eid is None:
+        return None
+    
     row = conn.execute(
         text(f"SELECT canonical_id FROM dim_player WHERE {col} = :eid LIMIT 1"),
-        {"eid": ext_id},
+        {"eid": eid},
     ).fetchone()
     return row[0] if row else None
 
@@ -111,6 +127,12 @@ def _team_id_by_source(conn, source: str, ext_id) -> Optional[int]:
     col = col_map.get(source)
     if not col:
         return None
+    
+    # en dim_team id_statsbomb es VARCHAR. Se pasa como String
+    eid = _safe_str(ext_id) if source == "statsbomb" else ext_id
+    if eid is None:
+        return None
+    
     row = conn.execute(
         text(f"SELECT canonical_id FROM dim_team WHERE {col} = :eid LIMIT 1"),
         {"eid": ext_id},
@@ -162,7 +184,24 @@ def _safe_float(val) -> Optional[float]:
     except (ValueError, TypeError):
         return None
 
-
+def _safe_str(val) -> Optional[str]:
+    """
+    Convierte un valor a string de forma segura.
+    
+    Útil para campos como id_statsbomb en dim_match que son VARCHAR
+    pero vienen como enteros en los CSV.
+    
+    Ejemplos:
+        _safe_str(3773386)  → "3773386"
+        _safe_str("abc")    → "abc"
+        _safe_str(None)     → None
+        _safe_str("nan")    → None
+        _safe_str("")       → None
+    """
+    try:
+        return str(val) if val is not None and str(val).strip() not in ("", "nan") else None
+    except (ValueError, TypeError):
+        return None
 
 
 
@@ -300,6 +339,7 @@ def _load_shots_understat(conn, us_path: Path) -> int:
             # no todos los csv de understat vienen  con el id del equipo. El de la Liga sí. El resto, no
             #  Intentar por nombre de equipo  ( la liga) 
             team_name = row.get("understat_team")
+            
             tid = None
             if team_name:
                 canonical = normalize_team_name(team_name)  # resuelve aliases y acentos

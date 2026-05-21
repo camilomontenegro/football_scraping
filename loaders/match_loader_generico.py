@@ -41,6 +41,14 @@ def _ensure_date(val) -> Optional[str]:
     return str(val)[:10]
 
 
+def _safe_int(val) -> Optional[int]:
+    """Convierte un valor a entero de forma segura, devuelve None si falla."""
+    try:
+        return int(val) if val is not None and str(val).strip() not in ("", "nan") else None
+    except (ValueError, TypeError):
+        return None
+
+
 # ── Helpers de resolución de FKs ─────────────────────────────────────────────
 
 def _resolve_team_by_ss_id(conn, ss_id: int) -> Optional[int]:
@@ -256,9 +264,9 @@ def _load_from_understat(conn, us_path: Path, competition_id: int) -> int:
                 "season":   normalize_season(str(row.get("season", ""))),
                 "hid":      h_canonical,
                 "aid":      a_canonical,
-                "hsc":      int(hsc) if hsc is not None else None,
-                "asc":      int(asc) if asc is not None else None,
-                "uid":      int(us_mid),
+                "hsc":      _safe_int(hsc),
+                "asc":      _safe_int(asc),
+                "uid":      _safe_int(us_mid),
                 "comp_id":  competition_id,
             })
             linked += 1

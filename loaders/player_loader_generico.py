@@ -37,8 +37,11 @@ from typing import Optional
 import pandas as pd
 from sqlalchemy import text
 
+import html
+import json
+
 from loaders.common import engine
-from utils.mdm_engine import resolve_player
+from utils.mdm_engine import resolve_player,clear_player_cache
 
 log = logging.getLogger(__name__)
 
@@ -157,15 +160,17 @@ def _load_phase2_sofascore(conn, ss_path: Path) -> tuple[int, int]:
     - Match fuzzy   → INSERT player_review (resolved=False)
     - Sin match     → INSERT player_review para revisión
 
+    uentes de jugadores:
+        - players.csv: jugadores con tiros o eventos (shots_clean, events_clean)
+        - lineups.json: todos los convocados por partido (incluye suplentes sin eventos, ni tiros)
+
     Returns:
         (linked, queued) — enlaces directos y encolados en player_review.
     """
     
     files = list(ss_path.glob("**/*players*.csv"))
-
     if not files:
-        log.info("player_loader fase 2: no hay players.csv de SofaScore")
-        return 0, 0
+        log.info("player_loader fase 2: no hay players.csv de SofaScore en %s", ss_path)
 
     all_rows: list[dict] = []
     for f in files:
@@ -174,6 +179,32 @@ def _load_phase2_sofascore(conn, ss_path: Path) -> tuple[int, int]:
             all_rows.extend(df.to_dict("records"))
         except Exception as e:
             log.warning("Error leyendo %s: %s", f, e)
+
+    # ── Jugadores de lineups.json (convocados por partido) ────────────────
+    # Los lineups tienen jugadores adicionales que no aparecen en shots ni events
+    # (porteros suplentes, jugadores sin incidentes, etc.)
+    lineup_files = list(ss_path.glob("**/lineups.json"))
+    log.info("player_loader fase 2: %d lineups.json encontrados", len(lineup_files))
+
+    for f in lineup_files:
+        try:
+            data = json.load(open(f, encoding="utf-8"))
+            for side in ("home", "away"):
+                for p in data.get(side, {}).get("players", []):
+                    player = p.get("player", {})
+                    pid  = player.get("id")
+                    name = player.get("name")
+                    if pid and name:
+                        all_rows.append({
+                            "id_sofascore":   pid,
+                            "canonical_name": name,
+                        })
+        except Exception as e:
+            log.warning("Error leyendo lineup %s: %s", f, e)
+
+    if not all_rows:
+        log.info("player_loader fase 2: no hay datos de SofaScore")
+        return 0, 0
 
     # Deduplicar por id_sofascore
     seen: dict[int, dict] = {}
@@ -231,6 +262,14 @@ def _load_phase3_understat(conn, us_path: Path) -> tuple[int, int]:
     for _, row in df.iterrows():
         us_id   = row.get("understat_player_id")
         us_name = row.get("player_name")
+
+        # proteccion por si del scrapper no vienen las entitidades html convertidas a sus caracteres reales 
+        # unescape convierte entidades html a caracteres reales. Si el string ya esta limpio no hace nada 
+        #"Lewis O&#039;Brien" → "Lewis O'Brien"
+        if us_name:
+            us_name = html.unescape(us_name)  
+
+
         if not us_id or not us_name:
             continue
         try:
@@ -319,7 +358,7 @@ def _load_phase5_whoscored(conn,ws_path:Path) -> tuple[int, int]:
     seen: set[int] = set()
     for _, row in df.iterrows():
         ws_id   = row.get("whoscored_player_id")
-        ws_name = row.get("player_name")
+        ws_name = row.get("player_name") or row.get("canonical_name")
         if not ws_id or not ws_name:
             continue
         try:
@@ -357,6 +396,10 @@ def load_players(conn,tm_path: Optional[Path] = None,
 
     if tm_path:
         _load_phase1_transfermarkt(conn, tm_path)
+
+    #  Limpiar caché MDM porque la fase 1 inserta nuevos jugadores
+    clear_player_cache()
+
     if ss_path:
         _load_phase2_sofascore(conn, ss_path)
     if us_path:
