@@ -80,8 +80,14 @@ SOFASCORE_HEADERS = {
     "Sec-Fetch-Mode": "cors",
     "Sec-Fetch-Site": "same-site",
 }
-OUTPUT_DIR    = PROJECT_ROOT / "data" / "raw" / "sofascore"
+OUTPUT_DIR    = PROJECT_ROOT / "data" / "raw" / "sofascore"  # legacy; ya no se usa para escribir
 # Note: mkdir() is called inside scrape_sofascore() to avoid side-effects on import
+
+# Helpers centralizados de rutas
+from utils.data_paths import (
+    raw_dir,
+    save_clean_csv,
+)
 
 
 # HELPERS 
@@ -378,8 +384,6 @@ def scrape_sofascore(
     from utils.batch import generate_batch_id
     batch_id = generate_batch_id()
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)  # crear directorio al scrapear, no al importar
-
     client = create_http_session()
     driver = None
     all_shots:    list[dict] = []
@@ -418,30 +422,38 @@ def scrape_sofascore(
                 ) from selenium_error
         print(f"  [+] {len(matches)} partidos encontrados")
 
-        # Configurar carpeta base con nombre de la competicion
-        comp_slug = "la-liga"  # default
-        if competition_name:
-            comp_slug = competition_name.lower().replace(" ", "-")
-        elif tournament_id:
-            # Intentar encontrar la competición por tournament_id
-            from wizard.competitions import COMPETITIONS
-            for key, config in COMPETITIONS.items():
-                if config.get("sources", {}).get("sofascore", {}).get("id") == tournament_id:
-                    comp_slug = key.lower().replace(" ", "-")
-                    break
+        # Resolución de competition_name: si llegó vacío intentamos por
+        # tournament_id contra wizard.competitions. Cae a "La Liga" por defecto.
+        resolved_comp = competition_name
+        if not resolved_comp and tournament_id:
+            try:
+                from wizard.competitions import COMPETITIONS
+                for key, config in COMPETITIONS.items():
+                    if config.get("sources", {}).get("sofascore", {}).get("id") == tournament_id:
+                        resolved_comp = key
+                        break
+            except Exception:
+                pass
+        if not resolved_comp:
+            resolved_comp = "La Liga"
 
-        # Convertir season "2024/2025" a "2024_2025"
-        if season_name:
-            folder_season = season_name.replace("/", "_")
-        else:
-            folder_season = season_label.replace("/", "_").replace(" ", "_")
-        
-        season_dir = OUTPUT_DIR / comp_slug / f"season={folder_season}"
-        season_dir.mkdir(parents=True, exist_ok=True)
-        base_path = season_dir
+        # Etiqueta de temporada para carpetas (YYYY_YYYY).
+        from utils.data_paths import normalize_season as _norm
+        folder_season = (
+            _norm(season_name) or _norm(season_label)
+            or (season_name or season_label or "")
+              .replace("/", "_").replace(" ", "_")
+        )
 
-        # Guardar partidos crudos
-        _save_json(matches, base_path / f"matches_batch_{batch_id}.json")
+        # Rutas canónicas:
+        #   raw/<comp>/<season>/sofascore/                 ← fixtures + por-partido
+        #   clean/<comp>/<season>/sofascore/<table>.csv    ← CSVs DB-ready
+        season_raw_dir = raw_dir(resolved_comp, folder_season, "sofascore")
+        season_raw_dir.mkdir(parents=True, exist_ok=True)
+        base_path = season_raw_dir
+
+        # Listado crudo de partidos de la temporada
+        _save_json(matches, base_path / "fixtures.json")
 
         # Filtrar por fecha si se especifica from_date.
         # Diagnóstico: distinguir entre "sin fecha extraíble" y "anteriores"
@@ -477,7 +489,8 @@ def scrape_sofascore(
                 
             print(f"  [{i}/{len(matches)}] Match {match_id}: {home} vs {away}")
 
-            match_dir = base_path / f"match_{match_id}" / f"batch_id={batch_id}"
+            # raw/<comp>/<season>/sofascore/matches/<match_id>/{shots,events,lineups}.json
+            match_dir = base_path / "matches" / str(match_id)
             match_dir.mkdir(parents=True, exist_ok=True)
 
             # Tiros
@@ -527,20 +540,21 @@ def scrape_sofascore(
         df_teams   = extract_teams(matches)
         df_players = extract_players(df_shots, df_events)
 
-        # Helper: solo escribir si el DataFrame tiene filas. Si está vacío,
-        # NO escribimos el CSV — un archivo vacío hace que pd.read_csv()
-        # falle con "No columns to parse from file" al cargar después.
-        def _write_if_not_empty(df, path):
+        # Cada CSV se escribe en data/clean/<comp>/<season>/sofascore/ con
+        # nombres simples (la fuente ya está en la carpeta). Se omiten DataFrames
+        # vacíos para evitar "No columns to parse from file" al leerlos.
+        def _maybe_save(name, df):
             if df is None or df.empty:
-                print(f"  [skip] DataFrame vacío, no escribo {path.name}")
+                print(f"  [skip] DataFrame vacío, no escribo {name}.csv")
                 return
-            df.to_csv(path, index=False, encoding="utf-8-sig")
+            out = save_clean_csv(resolved_comp, folder_season, "sofascore", name, df)
+            print(f"  CSV {name}: {out}")
 
-        _write_if_not_empty(df_matches, base_path / "matches_clean.csv")
-        _write_if_not_empty(df_shots,   base_path / "shots_clean.csv")
-        _write_if_not_empty(df_events,  base_path / "events_clean.csv")
-        _write_if_not_empty(df_teams,   base_path / "teams.csv")
-        _write_if_not_empty(df_players, base_path / "players.csv")
+        _maybe_save("matches", df_matches)
+        _maybe_save("shots",   df_shots)
+        _maybe_save("events",  df_events)
+        _maybe_save("teams",   df_teams)
+        _maybe_save("players", df_players)
 
     return matches, all_shots, all_events, all_lineups
 
@@ -710,65 +724,54 @@ def _ss_timestamp_to_date(ts) -> Optional[str]:
 # â”€â”€ MAIN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def main():
+    """CLI: `python -m scrapers.sofascore_scraper --competition "La Liga" --seasons 2024 2025`."""
+    import argparse
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s - %(message)s")
 
+    parser = argparse.ArgumentParser(description="Scraper de SofaScore por comp+temporada")
+    parser.add_argument("--competition", default="La Liga",
+                        help='Nombre canónico (ej. "La Liga", "Premier League")')
+    parser.add_argument("--seasons", nargs="+", default=None,
+                        help='Etiquetas de temporada (ej. "2024/2025" "2025/2026"). '
+                             'Si se omite, usa SEASON_NAMES.')
+    parser.add_argument("--from-date", type=str, help="YYYY-MM-DD (filtra partidos)")
+    parser.add_argument("--full-refresh", action="store_true",
+                        help="Ignora la caché de partidos ya cargados en BD")
+    args = parser.parse_args()
+
+    # Resuelve el tournament_id de la competición elegida.
+    tournament_id = TOURNAMENT_ID
+    try:
+        from wizard.competitions import COMPETITIONS, get_competition
+        cfg = get_competition(args.competition) if args.competition else None
+        if cfg:
+            tournament_id = cfg.get("sources", {}).get("sofascore", {}).get("id", TOURNAMENT_ID)
+    except Exception:
+        pass
+
+    seasons = args.seasons or SEASON_NAMES
+
     print("=" * 55)
-    print(f"  SofaScore scraper - La Liga {SEASON_NAMES[0]} a {SEASON_NAMES[-1]}")
+    print(f"  SofaScore scraper — {args.competition} — {len(seasons)} temporada(s)")
     print("=" * 55)
 
-    for season_name in SEASON_NAMES:
-        print(f"\n[SEASON] Descargando temporada {season_name}...")
-        print("  [DEBUG] Iniciando orquestador scrape_sofascore...")
-        
+    for season_name in seasons:
+        print(f"\n[SEASON] {season_name}")
         try:
             matches, all_shots, all_events, _ = scrape_sofascore(
-                competition_name=args.competition, 
-                season_name=season_name, 
-                tournament_id=TOURNAMENT_ID
+                competition_name=args.competition,
+                season_name=season_name,
+                tournament_id=tournament_id,
+                from_date=args.from_date,
+                full_refresh=args.full_refresh,
             )
         except ValueError as e:
-            log.warning(f"Temporada {season_name} no disponible en SofaScore: {e}")
-            print(f"  [!] Temporada {season_name} no encontrada. Continuando...")
+            log.warning("Temporada %s no disponible: %s", season_name, e)
             continue
-
         if not matches:
             print(f"  [!] No se obtuvieron partidos para {season_name}")
             continue
-
-        print(f"  Temporada {season_name}:")
-        print(f"    Partidos: {len(matches)}")
-        print(f"    Tiros:    {len(all_shots)}")
-        print(f"    Eventos:  {len(all_events)}")
-
-        # Transformar
-        df_matches = transform_matches(matches)
-        df_shots   = transform_shots(all_shots)
-        df_events  = transform_events(all_events)
-        df_teams   = extract_teams(matches)
-        df_players = extract_players(df_shots, df_events)
-
-        # Guardar CSVs (capa de presentaciÃ³n para los loaders)
-        season_dir = OUTPUT_DIR / f"season={season_name.replace('/', '_')}"
-        season_dir.mkdir(parents=True, exist_ok=True)
-
-        paths = {
-            "matches": season_dir / "matches_clean.csv",
-            "shots":   season_dir / "shots_clean.csv",
-            "events":  season_dir / "events_clean.csv",
-            "teams":   season_dir / "teams.csv",
-            "players": season_dir / "players.csv",
-        }
-
-        for key, df in (
-            ("matches", df_matches), ("shots", df_shots),
-            ("events", df_events), ("teams", df_teams),
-            ("players", df_players),
-        ):
-            if df is None or df.empty:
-                continue
-            df.to_csv(paths[key], index=False, encoding="utf-8-sig")
-
-        print(f"Archivos guardados en {season_dir}")
+        print(f"    Partidos: {len(matches)} | Tiros: {len(all_shots)} | Eventos: {len(all_events)}")
 
     print("\n[OK] Descarga de SofaScore completada")
 

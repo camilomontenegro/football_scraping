@@ -12,6 +12,7 @@ DROP TABLE IF EXISTS dim_match       CASCADE;
 DROP TABLE IF EXISTS dim_competition CASCADE;
 DROP TABLE IF EXISTS player_review   CASCADE;
 DROP TABLE IF EXISTS dim_player      CASCADE;
+DROP TABLE IF EXISTS dim_stadium     CASCADE;
 DROP TABLE IF EXISTS dim_team        CASCADE;
 
 -- ══════════════════════════════════════════════════════════
@@ -275,3 +276,50 @@ CREATE UNIQUE INDEX ux_injuries_unique ON fact_injuries (
 );
 
 CREATE INDEX idx_injuries_player ON fact_injuries (player_id);
+
+
+-- ══════════════════════════════════════════════════════════
+-- DIMENSIÓN: ESTADIOS
+-- ══════════════════════════════════════════════════════════
+-- Estadios de cada equipo por temporada (Transfermarkt como fuente).
+-- Granularidad: (team, season). Un equipo puede cambiar de estadio
+-- entre temporadas (obras, mudanza, etc.).
+
+CREATE TABLE dim_stadium (
+    stadium_id           SERIAL PRIMARY KEY,
+    canonical_team_id    INTEGER REFERENCES dim_team (canonical_id) ON DELETE CASCADE,
+    id_transfermarkt_team INTEGER,     -- TM team_id, mismo que dim_team.id_transfermarkt
+    team_slug            VARCHAR(150),
+    season               VARCHAR(20),  -- p.ej. "2025/2026" o "2025_2026"
+    stadium_name         VARCHAR(200),
+    capacity             INTEGER,
+    seats_total          INTEGER,
+    seats_covered        INTEGER,
+    seats_vip            INTEGER,
+    vip_boxes            INTEGER,
+    seats_standing       INTEGER,
+    inaugurated_year     SMALLINT,
+    built_year           SMALLINT,
+    refurbished_year     SMALLINT,
+    owner                VARCHAR(200),
+    operator             VARCHAR(200),
+    address              VARCHAR(300),
+    city                 VARCHAR(120),
+    country              VARCHAR(80),
+    construction_cost    VARCHAR(120),
+    surface              VARCHAR(80),
+    architect            VARCHAR(200),
+    tm_url               VARCHAR(400),
+    data_source          VARCHAR(50) DEFAULT 'transfermarkt',
+    created_at           TIMESTAMP DEFAULT NOW(),
+    updated_at           TIMESTAMP DEFAULT NOW()
+);
+
+-- Unicidad: un único registro de estadio por (equipo, temporada).
+CREATE UNIQUE INDEX ux_stadium_team_season
+    ON dim_stadium (id_transfermarkt_team, season)
+    WHERE id_transfermarkt_team IS NOT NULL;
+
+CREATE INDEX idx_stadium_team       ON dim_stadium (canonical_team_id);
+CREATE INDEX idx_stadium_season     ON dim_stadium (season);
+CREATE INDEX idx_stadium_name_lower ON dim_stadium (LOWER(stadium_name));

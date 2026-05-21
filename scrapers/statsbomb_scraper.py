@@ -51,11 +51,32 @@ SEASON_IDS     = [90, 106, 113, 120, 127]    # 2020/21, 2021/22, 2022/23, 2023/2
 SEASON_LABELS  = ["2020/21", "2021/22", "2022/23", "2023/24", "2024/25"]
 DELAY_SEC      = 0.3   # pausa entre peticiones (Open Data sin rate limit estricto)
 PROJECT_ROOT   = Path(__file__).resolve().parent.parent
+# OUTPUT_DIR legacy. Las rutas reales vienen de utils.data_paths.
 OUTPUT_DIR     = PROJECT_ROOT / "data" / "raw" / "statsbomb"
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+from utils.data_paths import raw_dir as _raw_dir, save_clean_csv  # noqa: E402
 
 # StatsBomb Open Data no requiere credenciales
 _CREDS = {"user": "", "passwd": ""}
+
+
+def _statsbomb_season_label(season_id: int) -> str:
+    """Devuelve 'YYYY_YYYY' canónico a partir del season_id de StatsBomb.
+
+    Si no tenemos un mapeo conocido, cae a `season_<id>` para mantener una
+    carpeta determinista sin reventar el layout.
+    """
+    mapping = {sid: lbl.replace("/", "_").replace(" ", "")
+               for sid, lbl in zip(SEASON_IDS, SEASON_LABELS)}
+    label = mapping.get(season_id)
+    if not label:
+        return f"season_{season_id}"
+    # SEASON_LABELS están como '2020/21' → tras replace queda '2020_21'.
+    # Lo expandimos a 'YYYY_YYYY' si es necesario.
+    parts = label.split("_")
+    if len(parts) == 2 and len(parts[0]) == 4 and len(parts[1]) == 2:
+        return f"{parts[0]}_20{parts[1]}"
+    return label
 
 
 # â”€â”€ HELPERS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -174,23 +195,23 @@ def scrape_statsbomb(
 
     print(f"  [OK] {len(matches_df)} partidos encontrados")
 
-    # Directorio base
-    from scripts.competitions import get_competition
-    comp_slug = "la-liga" # Default
-    if competition_name:
-        comp_slug = competition_name.lower().replace(" ", "-")
-    elif competition_id:
-        from scripts.competitions import COMPETITIONS
-        for key, config in COMPETITIONS.items():
-            if config.get("sources", {}).get("statsbomb", {}).get("competition_id") == competition_id:
-                comp_slug = key.lower().replace(" ", "-")
-                break
+    # Resolver competition_name si vino vacío
+    resolved_comp = competition_name
+    if not resolved_comp and competition_id:
+        try:
+            from scripts.competitions import COMPETITIONS
+            for key, config in COMPETITIONS.items():
+                if config.get("sources", {}).get("statsbomb", {}).get("competition_id") == competition_id:
+                    resolved_comp = key
+                    break
+        except Exception:
+            pass
+    if not resolved_comp:
+        resolved_comp = "La Liga"
 
-    # StatsBomb uses simple season format like 2020_2021 if we had it, but season_id is an int.
-    # We'll try to get a better label if possible, or just use the ID for now.
-    folder_season = f"{season_id}" 
-    
-    comp_dir = OUTPUT_DIR / comp_slug / f"season={folder_season}"
+    folder_season = _statsbomb_season_label(season_id)
+    comp_dir = _raw_dir(resolved_comp, folder_season, "statsbomb")
+    comp_dir.mkdir(parents=True, exist_ok=True)
 
     all_events:  list[dict] = []
     all_lineups: list[dict] = []
@@ -205,7 +226,8 @@ def scrape_statsbomb(
         log.info("Procesando match %d: %s vs %s", match_id, home_name, away_name)
         print(f"  - match {match_id}: {home_name} vs {away_name}")
 
-        match_dir = comp_dir / f"match_{match_id}" / f"batch_id={batch_id}"
+        # raw/<comp>/<season>/statsbomb/matches/<match_id>/{events,lineups}.json
+        match_dir = comp_dir / "matches" / str(match_id)
         match_dir.mkdir(parents=True, exist_ok=True)
 
         try:
@@ -396,69 +418,52 @@ def extract_players(events_df: pd.DataFrame) -> pd.DataFrame:
 # â”€â”€ MAIN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def main():
+    """CLI:
+        python -m scrapers.statsbomb_scraper --competition "La Liga" --seasons 90 106
+    """
+    import argparse
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s - %(message)s")
 
+    parser = argparse.ArgumentParser(description="Scraper de StatsBomb Open Data")
+    parser.add_argument("--competition", default="La Liga",
+                        help='Nombre canónico (ej: "La Liga")')
+    parser.add_argument("--competition-id", type=int, default=COMPETITION_ID,
+                        help="StatsBomb competition_id (sobreescribe el de la competición)")
+    parser.add_argument("--seasons", nargs="+", type=int, default=SEASON_IDS,
+                        help="Lista de StatsBomb season_id (ej: 90 106 113)")
+    args = parser.parse_args()
+
     print("=" * 55)
-    print(f"  StatsBomb scraper - competition={COMPETITION_ID} seasons 2020/21 a 2024/25")
+    print(f"  StatsBomb scraper — {args.competition} — competition_id={args.competition_id}")
     print("=" * 55)
 
-    # Ver competiciones disponibles si se necesita
-    # comps = list_competitions()
-    # print(comps[["competition_id","competition_name","season_id","season_name"]])
-
-    for season_id, season_label in zip(SEASON_IDS, SEASON_LABELS):
-        print(f"\n[SEASON] Descargando temporada {season_label}...")
-        
-        matches_df, all_events, _ = scrape_statsbomb(COMPETITION_ID, season_id)
-
+    for season_id in args.seasons:
+        season_lbl = _statsbomb_season_label(season_id)
+        print(f"\n[SEASON] season_id={season_id} → {season_lbl}")
+        matches_df, all_events, _ = scrape_statsbomb(
+            competition_id=args.competition_id,
+            season_id=season_id,
+            competition_name=args.competition,
+        )
         if matches_df.empty:
-            print(f"  [!] No se obtuvieron partidos para {season_label}")
+            print(f"  [!] No se obtuvieron partidos para {season_lbl}")
             continue
 
-        print(f"  [SEASON] Temporada {season_label}:")
-        print(f"    Partidos: {len(matches_df)}")
-        print(f"    Eventos:  {len(all_events)}")
+        print(f"    Partidos: {len(matches_df)} | Eventos: {len(all_events)}")
 
-        # Transformar
         df_matches = transform_matches(matches_df)
         df_events  = transform_events(all_events)
         df_teams   = extract_teams(matches_df)
         df_players = extract_players(df_events)
 
-        # Guardar CSVs
-        season_dir = OUTPUT_DIR / f"competition_{COMPETITION_ID}" / f"season_{season_id}"
-        season_dir.mkdir(parents=True, exist_ok=True)
+        save_clean_csv(args.competition, season_lbl, "statsbomb", "matches", df_matches)
+        save_clean_csv(args.competition, season_lbl, "statsbomb", "events",  df_events)
+        save_clean_csv(args.competition, season_lbl, "statsbomb", "teams",   df_teams)
+        save_clean_csv(args.competition, season_lbl, "statsbomb", "players", df_players)
+        print(f"  [OK] CSVs → data/clean/{_raw_dir(args.competition, season_lbl, 'statsbomb').name}/...")
 
-        paths = {
-            "matches": season_dir / "matches_clean.csv",
-            "events":  season_dir / "events_clean.csv",
-            "teams":   season_dir / "teams.csv",
-            "players": season_dir / "players.csv",
-        }
-
-        df_matches.to_csv(paths["matches"], index=False, encoding="utf-8-sig")
-        df_events.to_csv( paths["events"],  index=False, encoding="utf-8-sig")
-        df_teams.to_csv(  paths["teams"],   index=False, encoding="utf-8-sig")
-        df_players.to_csv(paths["players"], index=False, encoding="utf-8-sig")
-
-        print(f"  [OK] Archivos guardados en {season_dir}")
-
-    print(f"\n[DONE] Descarga de StatsBomb completada")
+    print("\n[DONE] Descarga de StatsBomb completada")
 
 
 if __name__ == "__main__":
-    import argparse
-    
-    parser = argparse.ArgumentParser(description="Scraper de StatsBomb")
-    parser.add_argument("--competition-id", "-c", type=int, default=None,
-                        help="ID de la competición en StatsBomb (ej: 11 para La Liga)")
-    parser.add_argument("--season-id", "-s", type=int, default=None,
-                        help="ID de la temporada en StatsBomb (ej: 90 para 2020/21)")
-    
-    args = parser.parse_args()
-    
-    # Usar valores por defecto si no se especifican
-    competition_id = args.competition_id if args.competition_id else COMPETITION_ID
-    season_id = args.season_id if args.season_id else SEASON_IDS[0]
-    
-    scrape_statsbomb(competition_id=competition_id, season_id=season_id)
+    main()

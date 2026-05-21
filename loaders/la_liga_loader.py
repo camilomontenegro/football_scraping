@@ -1,62 +1,50 @@
 """
-loaders/laliga_loader.py
-=========================
-Carga los datos de La Liga en la base de datos.
-Utiliza los loaders genericos, en lso que lso metodos  toman la ruta como paramentro,  para cargar los datos de las tablas 
-desde la rutas  especificas para los datos de la liga. 
+loaders/la_liga_loader.py
+==========================
+Orquestador interactivo para cargar La Liga en la base de datos.
 
-Regumen de  fuentes  maestras 
-DIMENSIONES 
-dim_player -> transfermarkt. Del resto de fuentes se introducen los id de los jugadores en las respectivas fuentes.
-dim_team -> sofascore. Tranfermarkt  secundaria. Resto de fuentes cargan ids del equipo en la fuente.
-dim_matches -> sofascore. 
+Delega en los loaders canónicos (`loaders.team_loader`, `player_loader`,
+`match_loader`, `fact_loader`) pasándoles `comp_name="La Liga"`, de modo que
+sólo se procesan los CSVs bajo `data/clean/la_liga/<season>/<source>/<table>.csv`.
 
-HECHOS
-fact_events -> whoscored principal. sofascored secundaria
-fact_shots ->  understat. para sofascore falla la inserccion. 
-fact_injuries -> transfermakrt fuente única
+Resumen de fuentes maestras:
+    DIMENSIONES
+        dim_player -> Transfermarkt (master). Resto sólo añaden id_<source>.
+        dim_team   -> SofaScore (master). Transfermarkt enriquece country.
+        dim_match  -> SofaScore (master). Resto enlazan/insertan por id.
 
-
-
+    HECHOS
+        fact_events    -> WhoScored principal | SofaScore secundaria
+        fact_shots     -> Understat principal | SofaScore secundaria
+        fact_injuries  -> Transfermarkt (única fuente)
 """
 
+from __future__ import annotations
 
 import logging
-from pathlib import Path
-from sqlalchemy import text
-from loaders.common import engine
 
-from loaders.player_loader_generico import load_players
-from loaders.team_loader_generico import load_teams
-from loaders.match_loader_generico import load_matches
-from loaders.fact_loader_generico import load_shots, load_events, load_injuries
+from sqlalchemy import text
+
+from loaders.common import engine
+from loaders.team_loader   import load_teams
+from loaders.player_loader import load_players
+from loaders.match_loader  import load_matches
+from loaders.fact_loader   import load_shots, load_events, load_injuries
 
 log = logging.getLogger(__name__)
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-TM_LALIGA = PROJECT_ROOT / "data" / "raw" / "transfermarkt" / "la_liga"
-SS_LALIGA = PROJECT_ROOT / "data" / "raw" / "sofascore" / "la_liga"
-WS_LALIGA = PROJECT_ROOT / "data" / "raw" / "whoscored" / "la_liga"
-US_LALIGA = PROJECT_ROOT / "data" / "raw" / "understat" / "la_liga"
-SB_LALIGA = PROJECT_ROOT / "data" / "raw" / "statsbomb" / "la_liga"
+COMPETITION_NAME = "La Liga"
 
 
 def _get_competition_id(conn) -> int:
-    """Obtiene el canonical_id de La Liga en dim_competition."""
+    """canonical_id de La Liga en dim_competition (vía id_transfermarkt='ES1')."""
     return conn.execute(text(
         "SELECT canonical_id FROM dim_competition WHERE id_transfermarkt = 'ES1'"
     )).scalar()
 
 
-def _load_dimensions( competition_id: int) -> None:
-    """
-    
-    Menú para cargar dimensiones de La Liga.
-    Cada operación abre su propia conexión — hace commit al terminar
-    y rollback automático si hay error. Así si se interrumpe el proceso
-    lo ya cargado queda guardado.
-    Debe ejecutarse antes que los hechos.
-    """
+def _load_dimensions() -> None:
+    """Menú: teams → players → matches."""
     opcion = None
     while opcion != "4":
         print("\n=== La Liga — Dimensiones ===")
@@ -64,35 +52,27 @@ def _load_dimensions( competition_id: int) -> None:
         print("2. Players")
         print("3. Matches")
         print("4. Continuar a hechos")
-
         opcion = input("Selecciona (1-4): ").strip()
 
         if opcion == "1":
             log.info("Cargando teams...")
             with engine.begin() as conn:
-                load_teams(conn, ss_path=SS_LALIGA, tm_path=TM_LALIGA, ws_path=WS_LALIGA, us_path=US_LALIGA, sb_path=SB_LALIGA)
+                load_teams(conn, comp_name=COMPETITION_NAME)
             log.info("Teams completado.")
         elif opcion == "2":
             log.info("Cargando players...")
             with engine.begin() as conn:
-                load_players(conn, tm_path=TM_LALIGA, ss_path=SS_LALIGA, ws_path=WS_LALIGA, us_path=US_LALIGA, sb_path=SB_LALIGA)
+                load_players(conn, comp_name=COMPETITION_NAME)
             log.info("Players completado.")
         elif opcion == "3":
             log.info("Cargando matches...")
             with engine.begin() as conn:
-                load_matches(conn, ss_path=SS_LALIGA, competition_id=competition_id, ws_path=WS_LALIGA, us_path=US_LALIGA, sb_path=SB_LALIGA)
+                load_matches(conn, comp_name=COMPETITION_NAME)
             log.info("Matches completado.")
 
 
-
-def _load_facts(competition_id: int) -> None:
-    """
-    Menú para cargar las tablas de hechos de La Liga.
-    Cada operación abre su propia conexión — hace commit al terminar
-    y rollback automático si hay error. Así si se interrumpe el proceso
-    lo ya cargado queda guardado.
-    Requiere que las dimensiones estén cargadas previamente.
-    """
+def _load_facts() -> None:
+    """Menú: shots → events → injuries."""
     opcion = None
     while opcion != "4":
         print("\n=== La Liga — Hechos ===")
@@ -100,33 +80,30 @@ def _load_facts(competition_id: int) -> None:
         print("2. Events")
         print("3. Injuries")
         print("4. Salir")
-
         opcion = input("Selecciona (1-4): ").strip()
 
         if opcion == "1":
             log.info("Cargando shots...")
             with engine.begin() as conn:
-                load_shots(conn, ss_path=SS_LALIGA, competition_id=competition_id, us_path=US_LALIGA)
+                load_shots(conn, comp_name=COMPETITION_NAME)
             log.info("Shots completado.")
         elif opcion == "2":
             log.info("Cargando events...")
             with engine.begin() as conn:
-                load_events(conn, ss_path=SS_LALIGA, ws_path=WS_LALIGA, sb_path=SB_LALIGA)
+                load_events(conn, comp_name=COMPETITION_NAME)
             log.info("Events completado.")
         elif opcion == "3":
             log.info("Cargando injuries...")
             with engine.begin() as conn:
-                load_injuries(conn, tm_path=TM_LALIGA)
+                load_injuries(conn, comp_name=COMPETITION_NAME)
             log.info("Injuries completado.")
+
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s - %(message)s")
+    _load_dimensions()
+    _load_facts()
 
-    with engine.begin() as conn:
-        competition_id = _get_competition_id(conn)
-
-    _load_dimensions(competition_id)
-    _load_facts(competition_id)
 
 if __name__ == "__main__":
     main()

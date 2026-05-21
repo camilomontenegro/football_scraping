@@ -72,7 +72,16 @@ HEADLESS = True
 
 
 # Project-local output, independent of the developer machine.
+# OUTPUT_DIR legacy. Las rutas reales vienen de utils.data_paths.
 OUTPUT_DIR = Path(__file__).resolve().parents[1] / "data" / "raw" / "ucl" / "sofascore"
+
+# Imports de helpers centralizados (se importan tarde a propósito para no
+# encadenar dependencias al cargar el módulo en entornos minimal).
+import sys as _sys
+_sys.path.append(str(Path(__file__).resolve().parents[1]))
+from utils.data_paths import raw_dir as _raw_dir, save_clean_csv as _save_clean_csv  # noqa: E402
+
+COMPETITION_NAME = "Champions League"
 
 
 
@@ -388,13 +397,13 @@ def main():
                 continue
             log.info("  %d partidos encontrados", len(matches))
 
-            season_dir = OUTPUT_DIR / _season_name_to_folder(season_name)
-            season_dir.mkdir(parents=True, exist_ok=True)
-            raw_dir = season_dir / "raw"
-            raw_dir.mkdir(parents=True, exist_ok=True)
+            # Etiqueta canónica YYYY_YYYY
+            folder_season = _season_name_to_folder(season_name).replace("season=", "")
+            season_raw_dir = _raw_dir(COMPETITION_NAME, folder_season, "sofascore")
+            season_raw_dir.mkdir(parents=True, exist_ok=True)
+            raw_dir = season_raw_dir  # alias para mantener nombres locales
 
-            # Guardar JSON crudo de partidos
-            _save_json(matches, raw_dir / f"matches_batch_{batch_id}.json")
+            _save_json(matches, raw_dir / "fixtures.json")
 
             # 3. Descargar tiros, eventos y alineaciones partido a partido
             all_shots:   list[dict] = []
@@ -406,7 +415,7 @@ def main():
                 away_name = m.get("awayTeam", {}).get("name", "?")
                 print(f"  [{i:>3}/{len(matches)}] {match_id}: {home_name} vs {away_name}", end="  ")
 
-                match_dir = raw_dir / f"match_{match_id}"
+                match_dir = raw_dir / "matches" / str(match_id)
                 match_dir.mkdir(parents=True, exist_ok=True)
 
                 # Tiros
@@ -451,12 +460,12 @@ def main():
             df_teams   = extract_teams(matches)
             df_players = extract_players(df_shots, df_events)
 
-            # 5. Guardar CSVs limpios
-            df_matches.to_csv(season_dir / "matches_clean.csv", index=False, encoding="utf-8-sig")
-            df_shots.to_csv(  season_dir / "shots_clean.csv",   index=False, encoding="utf-8-sig")
-            df_events.to_csv( season_dir / "events_clean.csv",  index=False, encoding="utf-8-sig")
-            df_teams.to_csv(  season_dir / "teams.csv",         index=False, encoding="utf-8-sig")
-            df_players.to_csv(season_dir / "players.csv",       index=False, encoding="utf-8-sig")
+            # 5. Guardar CSVs canónicos en data/clean/<comp>/<season>/sofascore/
+            _save_clean_csv(COMPETITION_NAME, folder_season, "sofascore", "matches", df_matches)
+            _save_clean_csv(COMPETITION_NAME, folder_season, "sofascore", "shots",   df_shots)
+            _save_clean_csv(COMPETITION_NAME, folder_season, "sofascore", "events",  df_events)
+            _save_clean_csv(COMPETITION_NAME, folder_season, "sofascore", "teams",   df_teams)
+            _save_clean_csv(COMPETITION_NAME, folder_season, "sofascore", "players", df_players)
 
             print(f"\n  ✓ Temporada {season_name} completada:")
             print(f"    Partidos:  {len(df_matches)}")

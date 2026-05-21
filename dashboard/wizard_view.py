@@ -289,6 +289,61 @@ def _start_pipeline(
     thread.start()
 
 
+def _start_stadiums_pipeline(season: str) -> None:
+    """
+    Lanza en background el sub-pipeline de estadios: itera todas las
+    competiciones de `dim_competition` con `id_transfermarkt`, scrapea
+    cada una desde Transfermarkt y carga en `dim_stadium`. Reusa la misma
+    infraestructura de log y holder que `_start_pipeline`, pero NO admite
+    cancelación granular.
+    """
+    log_queue: "queue.Queue[str]" = queue.Queue()
+    queue_handler, file_handler = _install_handlers(log_queue)
+    cancel_event = threading.Event()
+    holder: dict[str, Optional[BaseException]] = {"exc": None}
+
+    def _worker() -> None:
+        old_stdout, old_stderr = sys.stdout, sys.stderr
+        sys.stdout = _StreamTee(old_stdout, log_queue)
+        sys.stderr = _StreamTee(old_stderr, log_queue)
+        try:
+            # Import perezoso para evitar coste si nunca se usa el flujo
+            from wizard.wizard import run_all_stadiums_flow
+            run_all_stadiums_flow(season)
+        except BaseException as e:  # noqa: BLE001
+            holder["exc"] = e
+            logging.getLogger("wizard.stadiums").exception(
+                "Stadium pipeline raised an unexpected exception"
+            )
+        finally:
+            try:
+                sys.stdout.flush()
+                sys.stderr.flush()
+            except Exception:
+                pass
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
+
+    thread = threading.Thread(target=_worker, name="wizard-stadiums", daemon=True)
+
+    st.session_state["wiz_running"] = True
+    st.session_state["wiz_cancel_requested"] = False
+    st.session_state["wiz_cancel_event"] = cancel_event
+    st.session_state["wiz_log_queue"] = log_queue
+    st.session_state["wiz_log_buf"] = []
+    st.session_state["wiz_thread"] = thread
+    st.session_state["wiz_handlers"] = (queue_handler, file_handler)
+    st.session_state["wiz_exc_holder"] = holder
+    st.session_state["wiz_run_team_slug"] = None
+    st.session_state["wiz_run_competition"] = "Todas (dim_competition)"
+    st.session_state["wiz_run_season"] = season
+    st.session_state["wiz_run_source"] = "transfermarkt (stadiums)"
+    st.session_state["wiz_run_full_scrape"] = True
+    st.session_state["wiz_final_exc"] = None
+
+    thread.start()
+
+
 def _finalize_pipeline() -> None:
     """Called once the worker thread has died: drain queue, remove handlers,
     convert any captured exception into a user-facing exception object."""
@@ -410,107 +465,135 @@ def render() -> None:
     # ── Step 1: Operation ─────────────────────────────────────────
     operation = st.radio(
         "¿Qué quieres hacer?",
-        ["Descargar temporada completa", "Actualizar datos con juegos nuevos"],
+        [
+            "Descargar temporada completa",
+            "Actualizar datos con juegos nuevos",
+            "Descargar estadios por temporada",
+        ],
         key="wiz_operation",
     )
-    full_scrape = operation.lower().startswith("descargar")
+    op_lower      = operation.lower()
+    stadiums_only = "estadio" in op_lower
+    full_scrape   = (not stadiums_only) and op_lower.startswith("descargar")
 
-    # ── Step 2: Competition (grouped by category, dynamic from dim_competition) ─
-    comp_options = _competition_options()
-    if not comp_options:
-        st.warning(
-            "No hay competiciones registradas en la tabla `dim_competition` "
-            "de la base de datos. Inserta las competiciones que quieras "
-            "scrapear en `dim_competition` y recarga el dashboard."
-        )
-        st.stop()
-    labels = [label for label, _ in comp_options]
-    label_to_name = {label: name for label, name in comp_options}
-    chosen_label = st.selectbox("Competición", labels, key="wiz_competition_label")
-    competition = label_to_name[chosen_label]
-    st.session_state["wiz_competition"] = competition
-    comp_conf = get_competition(competition) or {}
-
-    # ── Step 3: Season ────────────────────────────────────────────
     season_opts = _season_options()
     default_season = get_current_season()
     default_idx = season_opts.index(default_season) if default_season in season_opts else len(season_opts) - 1
-    season = st.selectbox("Temporada", season_opts, index=default_idx, key="wiz_season")
-
-    # ── Step 4: Source (auto-filtered) ────────────────────────────
-    available = available_sources_for_competition(comp_conf, competition, season)
-    if not available:
-        st.warning(
-            "La competición seleccionada no tiene fuentes configuradas en "
-            "`competitions.py` o en el reference CSV."
-        )
-        st.stop()
-
-    if "understat" not in available and comp_conf.get("sources", {}).get("understat", {}).get("league"):
-        # Reference CSV may filter understat too; only show the i18n note when
-        # we know understat is "structurally" available but suppressed.
-        if is_international_competition(comp_conf):
-            st.info(
-                "Understat sólo cubre ligas domésticas — se ha eliminado de la "
-                "lista de fuentes para esta competición."
-            )
-        else:
-            st.info(
-                "Understat no tiene datos para esta competición — se ha "
-                "eliminado de la lista de fuentes."
-            )
-
-    source_options = ["all"] + available
-    source = st.selectbox(
-        "Fuente(s) de datos",
-        source_options,
-        index=0,
-        key="wiz_source",
-    )
-
-    # ── Step 5: Match filter ──────────────────────────────────────
-    match_filter_choice = st.radio(
-        "¿Cómo filtrar los partidos descargados?",
-        ["Todos los partidos", "Sólo de un equipo", "Desde una fecha"],
-        key="wiz_match_filter",
-    )
 
     team_slug: Optional[str] = None
     from_date: Optional[str] = None
+    source = "transfermarkt"  # default usado en modo estadios
 
-    if match_filter_choice == "Sólo de un equipo":
-        league_code = comp_conf.get("sources", {}).get("transfermarkt", {}).get("league_code")
-        if not league_code:
+    if stadiums_only:
+        # En modo estadios sólo se pide la temporada; el pipeline procesa
+        # todas las competiciones registradas en `dim_competition` con
+        # `id_transfermarkt`.
+        season = st.selectbox(
+            "Temporada", season_opts, index=default_idx, key="wiz_season"
+        )
+        competition = "Todas (dim_competition)"
+        st.info(
+            "Modo **estadios**: se procesarán **todas** las competiciones de "
+            "`dim_competition` con `id_transfermarkt`. La fuente es "
+            "Transfermarkt y los datos se cargan en `dim_stadium`."
+        )
+    else:
+        # ── Step 2: Competition (grouped by category, dynamic from dim_competition) ─
+        comp_options = _competition_options()
+        if not comp_options:
             st.warning(
-                "Esta competición no tiene Transfermarkt configurado; no se puede "
-                "filtrar por equipo. Se descargarán todos los partidos."
+                "No hay competiciones registradas en la tabla `dim_competition` "
+                "de la base de datos. Inserta las competiciones que quieras "
+                "scrapear en `dim_competition` y recarga el dashboard."
             )
-        else:
-            slugs = _cached_team_slugs(competition, season)
-            if not slugs:
-                st.warning(
-                    "No se obtuvieron equipos desde Transfermarkt. Se descargarán "
-                    "todos los partidos."
+            st.stop()
+        labels = [label for label, _ in comp_options]
+        label_to_name = {label: name for label, name in comp_options}
+        chosen_label = st.selectbox("Competición", labels, key="wiz_competition_label")
+        competition = label_to_name[chosen_label]
+        st.session_state["wiz_competition"] = competition
+        comp_conf = get_competition(competition) or {}
+
+        # ── Step 3: Season ────────────────────────────────────────────
+        season = st.selectbox(
+            "Temporada", season_opts, index=default_idx, key="wiz_season"
+        )
+
+        # ── Step 4: Source (auto-filtered) ────────────────────────────
+        available = available_sources_for_competition(comp_conf, competition, season)
+        if not available:
+            st.warning(
+                "La competición seleccionada no tiene fuentes configuradas en "
+                "`competitions.py` o en el reference CSV."
+            )
+            st.stop()
+
+        if "understat" not in available and comp_conf.get("sources", {}).get("understat", {}).get("league"):
+            # Reference CSV may filter understat too; only show the i18n note when
+            # we know understat is "structurally" available but suppressed.
+            if is_international_competition(comp_conf):
+                st.info(
+                    "Understat sólo cubre ligas domésticas — se ha eliminado de la "
+                    "lista de fuentes para esta competición."
                 )
             else:
-                team_slug = st.selectbox("Equipo", slugs, key="wiz_team_slug")
-    elif match_filter_choice == "Desde una fecha":
-        picked = st.date_input(
-            "Fecha de inicio",
-            value=_dt.date.today(),
-            key="wiz_from_date",
+                st.info(
+                    "Understat no tiene datos para esta competición — se ha "
+                    "eliminado de la lista de fuentes."
+                )
+
+        source_options = ["all"] + available
+        source = st.selectbox(
+            "Fuente(s) de datos",
+            source_options,
+            index=0,
+            key="wiz_source",
         )
-        if isinstance(picked, _dt.date):
-            from_date = picked.isoformat()
+
+        # ── Step 5: Match filter ──────────────────────────────────────
+        match_filter_choice = st.radio(
+            "¿Cómo filtrar los partidos descargados?",
+            ["Todos los partidos", "Sólo de un equipo", "Desde una fecha"],
+            key="wiz_match_filter",
+        )
+
+        if match_filter_choice == "Sólo de un equipo":
+            league_code = comp_conf.get("sources", {}).get("transfermarkt", {}).get("league_code")
+            if not league_code:
+                st.warning(
+                    "Esta competición no tiene Transfermarkt configurado; no se puede "
+                    "filtrar por equipo. Se descargarán todos los partidos."
+                )
+            else:
+                slugs = _cached_team_slugs(competition, season)
+                if not slugs:
+                    st.warning(
+                        "No se obtuvieron equipos desde Transfermarkt. Se descargarán "
+                        "todos los partidos."
+                    )
+                else:
+                    team_slug = st.selectbox("Equipo", slugs, key="wiz_team_slug")
+        elif match_filter_choice == "Desde una fecha":
+            picked = st.date_input(
+                "Fecha de inicio",
+                value=_dt.date.today(),
+                key="wiz_from_date",
+            )
+            if isinstance(picked, _dt.date):
+                from_date = picked.isoformat()
 
     # ── Summary panel ─────────────────────────────────────────────
-    accion = "Descarga completa" if full_scrape else "Actualización incremental"
-    if team_slug:
-        filtro = f"sólo equipo '{team_slug}'"
-    elif from_date:
-        filtro = f"partidos desde {from_date}"
+    if stadiums_only:
+        accion = "Descarga de estadios (Transfermarkt → dim_stadium)"
+        filtro = "n/a"
     else:
-        filtro = "todos los partidos"
+        accion = "Descarga completa" if full_scrape else "Actualización incremental"
+        if team_slug:
+            filtro = f"sólo equipo '{team_slug}'"
+        elif from_date:
+            filtro = f"partidos desde {from_date}"
+        else:
+            filtro = "todos los partidos"
 
     st.markdown("**Resumen de la operación**")
     st.markdown(
@@ -537,15 +620,18 @@ def render() -> None:
     )
 
     if run_clicked:
-        kwargs = {
-            "scrape": full_scrape,
-            "competition": competition,
-            "source": source,
-            "season": season,
-            "from_date": from_date,
-            "update": not full_scrape,
-        }
-        _start_pipeline(kwargs, team_slug, competition, season)
+        if stadiums_only:
+            _start_stadiums_pipeline(season)
+        else:
+            kwargs = {
+                "scrape": full_scrape,
+                "competition": competition,
+                "source": source,
+                "season": season,
+                "from_date": from_date,
+                "update": not full_scrape,
+            }
+            _start_pipeline(kwargs, team_slug, competition, season)
         st.rerun()
 
     # ── Post-run summary (success / error / cancel) ───────────────
@@ -581,15 +667,20 @@ def _render_run_summary() -> None:
     seas = st.session_state.get("wiz_run_season", "?")
     team = st.session_state.get("wiz_run_team_slug")
     src  = st.session_state.get("wiz_run_source", "?")
-    accion = (
-        "Descarga completa"
-        if st.session_state.get("wiz_run_full_scrape")
-        else "Actualización incremental"
-    )
-    if team:
-        filtro = f"sólo equipo '{team}'"
+    stadiums_mode = "stadiums" in (src or "")
+    if stadiums_mode:
+        accion = "Descarga de estadios (Transfermarkt → dim_stadium)"
+        filtro = "n/a"
     else:
-        filtro = "todos los partidos (o filtro de fecha)"
+        accion = (
+            "Descarga completa"
+            if st.session_state.get("wiz_run_full_scrape")
+            else "Actualización incremental"
+        )
+        if team:
+            filtro = f"sólo equipo '{team}'"
+        else:
+            filtro = "todos los partidos (o filtro de fecha)"
     st.markdown("**Resumen de la operación en curso**")
     st.markdown(
         f"- **Acción:** {accion}\n"

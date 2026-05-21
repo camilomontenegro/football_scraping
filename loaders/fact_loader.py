@@ -33,14 +33,21 @@ from sqlalchemy import text
 
 from loaders.common import engine, safe_read_csv as _safe_read_csv
 from utils.canonical_teams import normalize_team_name
+from utils.data_paths import iter_clean_csvs
 
 log = logging.getLogger(__name__)
 
-RAW_SS = Path("data/raw/sofascore")
-RAW_TM = Path("data/raw/transfermarkt")
-RAW_US = Path("data/raw/understat")
-RAW_SB = Path("data/raw/statsbomb")
-RAW_WS = Path("data/raw/whoscored")
+
+# Filtro de competición activo (lo setea cada load_* de hechos).
+_active_comp_filter: list = [None]
+
+
+def _iter_clean(source: str, filename: str) -> list[Path]:
+    """Lista los CSV canónicos `data/clean/[<comp>/]*/<source>/<filename>.csv`."""
+    return iter_clean_csvs(
+        competition=_active_comp_filter[0],
+        source=source, filename=filename,
+    )
 
 
 def _ensure_date(val) -> Optional[str]:
@@ -160,10 +167,10 @@ def _safe_float(val) -> Optional[float]:
 # ── FACT_SHOTS ────────────────────────────────────────────────────────────────
 
 def _load_shots_sofascore(conn) -> int:
-    """Carga tiros de SofaScore desde shots_clean.csv."""
-    files = list(RAW_SS.glob("**/shots_clean.csv"))
+    """Carga tiros de SofaScore desde data/clean/<comp>/<season>/sofascore/shots.csv."""
+    files = _iter_clean("sofascore", "shots")
     if not files:
-        log.info("fact_shots: no hay shots_clean.csv de SofaScore")
+        log.info("fact_shots: no hay shots.csv de SofaScore")
         return 0
 
     all_rows: list[dict] = []
@@ -215,10 +222,10 @@ def _load_shots_sofascore(conn) -> int:
 
 
 def _load_shots_understat(conn) -> int:
-    """Carga tiros desde TODOS los understat_shots_*.csv (cualquier liga)."""
-    files = sorted(RAW_US.glob("understat_shots_*.csv"))
+    """Carga tiros desde data/clean/<comp>/<season>/understat/shots.csv."""
+    files = _iter_clean("understat", "shots")
     if not files:
-        log.info("fact_shots: no hay understat_shots_*.csv")
+        log.info("fact_shots: no hay shots.csv de Understat")
         return 0
 
     dfs = []
@@ -284,21 +291,25 @@ def _load_shots_understat(conn) -> int:
     return count
 
 
-def load_shots(conn) -> int:
+def load_shots(conn, comp_name: str | None = None) -> int:
     """Carga fact_shots desde SofaScore y Understat."""
-    log.info("[START] Cargando fact_shots...")
-    total = _load_shots_sofascore(conn) + _load_shots_understat(conn)
+    log.info("[START] Cargando fact_shots... (comp=%s)", comp_name or "todas")
+    _active_comp_filter[0] = comp_name
+    try:
+        total = _load_shots_sofascore(conn) + _load_shots_understat(conn)
+    finally:
+        _active_comp_filter[0] = None
     log.info("[OK] fact_shots completado — %d tiros insertados", total)
     return total
 
 
 # ── FACT_EVENTS ───────────────────────────────────────────────────────────────
 
-def _load_events_source(conn, source: str, file_pattern: str, files_dir: Path) -> int:
-    """Carga eventos de una fuente genérica desde events_clean.json."""
-    files = list(files_dir.glob(file_pattern.replace(".json", ".csv")))
+def _load_events_source(conn, source: str) -> int:
+    """Carga eventos de una fuente desde data/clean/<comp>/<season>/<source>/events.csv."""
+    files = _iter_clean(source, "events")
     if not files:
-        log.info("fact_events: no hay %s en %s", file_pattern.replace(".json", ".csv"), files_dir)
+        log.info("fact_events: no hay events.csv de %s", source)
         return 0
 
     all_rows: list[dict] = []
@@ -413,39 +424,34 @@ def _load_events_source(conn, source: str, file_pattern: str, files_dir: Path) -
     return count
 
 
-def load_events(conn) -> int:
+def load_events(conn, comp_name: str | None = None) -> int:
     """Carga fact_events desde SofaScore, StatsBomb y WhoScored."""
-    log.info("[START] Cargando fact_events...")
-    total = 0
-    total += _load_events_source(conn, "sofascore", "**/events_clean.json", RAW_SS)
-    total += _load_events_source(conn, "statsbomb",  "**/events_clean.json", RAW_SB)
-    total += _load_events_source(conn, "whoscored",  "whoscored_events_*.csv", RAW_WS)
+    log.info("[START] Cargando fact_events... (comp=%s)", comp_name or "todas")
+    _active_comp_filter[0] = comp_name
+    try:
+        total = 0
+        total += _load_events_source(conn, "sofascore")
+        total += _load_events_source(conn, "statsbomb")
+        total += _load_events_source(conn, "whoscored")
+    finally:
+        _active_comp_filter[0] = None
     log.info("[OK] fact_events completado — %d eventos insertados", total)
     return total
 
 
 # ── FACT_INJURIES ─────────────────────────────────────────────────────────────
 
-def load_injuries(conn) -> int:
-    """Carga fact_injuries desde cualquier CSV de lesiones de Transfermarkt.
-
-    Recoge:
-        data/raw/transfermarkt/**/transfermarkt_*injuries*.csv
-        data/raw/transfermarkt/**/injuries_clean.csv
-        data/raw/transfermarkt/**/*injuries*.csv
+def load_injuries(conn, comp_name: str | None = None) -> int:
+    """Carga fact_injuries desde `data/clean/<comp>/<season>/transfermarkt/injuries.csv`.
 
     El CSV puede usar 'player_id' o 'player_id_tm' como ID del jugador.
     """
-    log.info("[START] Cargando fact_injuries...")
-
-    files: list[Path] = []
-    files += list(RAW_TM.glob("**/transfermarkt_*injuries*.csv"))
-    files += list(RAW_TM.glob("**/injuries_clean.csv"))
-    files += list(RAW_TM.glob("**/*injuries*.csv"))
-    files = list(dict.fromkeys(files))  # dedup preservando orden
-
+    log.info("[START] Cargando fact_injuries... (comp=%s)", comp_name or "todas")
+    _active_comp_filter[0] = comp_name
+    files = _iter_clean("transfermarkt", "injuries")
     if not files:
-        log.warning("fact_injuries: no hay *injuries*.csv en %s", RAW_TM)
+        _active_comp_filter[0] = None
+        log.warning("fact_injuries: no hay injuries.csv canónicos de Transfermarkt")
         log.warning("  → ejecuta el scraper de Transfermarkt para generar lesiones")
         return 0
 
@@ -501,6 +507,7 @@ def load_injuries(conn) -> int:
             skipped += 1
             continue
 
+    _active_comp_filter[0] = None
     log.info("fact_injuries ← Transfermarkt: %d insertadas | %d sin jugador resuelto", count, skipped)
     return count
 

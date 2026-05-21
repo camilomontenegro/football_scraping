@@ -40,8 +40,10 @@ HEADERS_HTML = {
 }
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# OUTPUT_DIR legacy. Las rutas reales se construyen via utils.data_paths.
 OUTPUT_DIR = PROJECT_ROOT / "data" / "raw" / "understat"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+from utils.data_paths import save_clean_csv  # noqa: E402
 
 
 def _parse_understat_date(date_str: str) -> "date | None":
@@ -305,7 +307,6 @@ async def scrape_understat(
 
     league = understat_cfg["league"]
     has_endpoint = understat_cfg.get("has_league_endpoint", True)
-    comp_slug = competition_name.lower().replace(" ", "-") if competition_name else "la-liga"
 
     if has_endpoint:
         print(f"[INFO] '{competition_name}' usa endpoint JSON (/getLeagueData/)")
@@ -377,28 +378,27 @@ async def scrape_understat(
     df_players     = extract_players(df_shots)
     df_teams       = extract_teams(df_matches)
 
-    # Crear directorios si es necesario
-    season_year = seasons[0]
+    # Layout canónico: data/clean/<comp>/<season>/understat/<table>.csv
+    season_year   = seasons[0]
     folder_season = f"{season_year}_{season_year + 1}"
-    season_dir = OUTPUT_DIR / comp_slug / f"season={folder_season}"
-    season_dir.mkdir(parents=True, exist_ok=True)
 
-    matches_path = season_dir / "understat_matches.csv"
-    shots_path   = season_dir / "understat_shots.csv"
-    players_path = season_dir / "understat_players.csv"
-    teams_path   = season_dir / "understat_teams.csv"
-
-    df_matches.to_csv(matches_path, index=False, encoding="utf-8-sig")
+    matches_path = save_clean_csv(competition_name, folder_season, "understat",
+                                  "matches", df_matches)
+    shots_path = None
     if not df_shots_clean.empty:
-        df_shots_clean.to_csv(shots_path, index=False, encoding="utf-8-sig")
+        shots_path = save_clean_csv(competition_name, folder_season, "understat",
+                                    "shots", df_shots_clean)
     if not df_players.empty:
-        df_players.to_csv(players_path, index=False, encoding="utf-8-sig")
+        save_clean_csv(competition_name, folder_season, "understat",
+                       "players", df_players)
     if not df_teams.empty:
-        df_teams.to_csv(teams_path, index=False, encoding="utf-8-sig")
+        save_clean_csv(competition_name, folder_season, "understat",
+                       "teams", df_teams)
 
-    print(f"\n[OK] '{competition_name}' guardado en {season_dir}:")
-    print(f"     Partidos : {len(df_matches):>5}  ->  {matches_path.name}")
-    print(f"     Tiros    : {len(df_shots_clean):>5}  ->  {shots_path.name}")
+    print(f"\n[OK] '{competition_name}' — temporada {folder_season} guardada:")
+    print(f"     Partidos : {len(df_matches):>5}  →  {matches_path}")
+    if shots_path:
+        print(f"     Tiros    : {len(df_shots_clean):>5}  →  {shots_path}")
 
 
 if __name__ == "__main__":

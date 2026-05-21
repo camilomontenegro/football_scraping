@@ -1,13 +1,14 @@
 """
 loaders/match_loader.py
 ========================
-Carga dim_match desde los CSVs producidos por los scrapers.
+Carga dim_match desde los CSVs canónicos en
+`data/clean/<comp>/<season>/<source>/<table>.csv`.
 
 FUENTES (en orden):
-    1. SofaScore matches_clean.csv  → MASTER (id_sofascore)
-    2. Understat understat_matches_*.csv  → enlaza/inserta + id_understat
-    3. StatsBomb matches_clean.csv  → enlaza id_statsbomb por nombre
-    4. WhoScored events CSV  → enlaza/inserta partidos por id_whoscored
+    1. SofaScore  matches.csv → MASTER (id_sofascore)
+    2. Understat  matches.csv → enlaza/inserta + id_understat
+    3. StatsBomb  matches.csv → enlaza id_statsbomb por nombre
+    4. WhoScored  events.csv  → enlaza/inserta partidos por id_whoscored
 
 Convenciones:
     - season SIEMPRE en formato canónico 'YYYY/YYYY' (utils.season_utils.normalize_season)
@@ -26,14 +27,21 @@ from sqlalchemy import text
 
 from loaders.common import engine, safe_read_csv
 from utils.season_utils import normalize_season
+from utils.data_paths import iter_clean_csvs
 
 log = logging.getLogger(__name__)
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RAW_SS = PROJECT_ROOT / "data" / "raw" / "sofascore"
-RAW_US = PROJECT_ROOT / "data" / "raw" / "understat"
-RAW_SB = PROJECT_ROOT / "data" / "raw" / "statsbomb"
-RAW_WS = PROJECT_ROOT / "data" / "raw" / "whoscored"
+
+# Filtro de competición activo (lo setea load_matches para encadenar a sub-pasos).
+_active_comp_filter: list = [None]
+
+
+def _iter_clean(source: str, filename: str) -> list:
+    """Lista todos los CSV canónicos `data/clean/[<comp>/]*/<source>/<filename>.csv`."""
+    return iter_clean_csvs(
+        competition=_active_comp_filter[0],
+        source=source, filename=filename,
+    )
 
 
 def _ensure_date(val) -> Optional[str]:
@@ -187,9 +195,9 @@ def _resolve_team_by_sb_id(conn, sb_id) -> Optional[int]:
 # ── SofaScore ─────────────────────────────────────────────────────────────────
 
 def _load_from_sofascore(conn) -> int:
-    files = list(RAW_SS.glob("**/matches_clean.csv"))
+    files = _iter_clean("sofascore", "matches")
     if not files:
-        log.warning("match_loader: no se encontraron matches_clean.csv en %s", RAW_SS)
+        log.warning("match_loader: no se encontraron matches.csv de SofaScore")
         return 0
 
     all_rows: list[dict] = []
@@ -278,18 +286,16 @@ def _load_from_sofascore(conn) -> int:
 # ── Understat ─────────────────────────────────────────────────────────────────
 
 def _load_from_understat(conn) -> int:
-    """Lee TODOS los understat_matches_*.csv → enlaza/inserta partidos.
+    """Lee TODOS los matches.csv de Understat → enlaza/inserta partidos.
 
     Matching:
       1. Exacto por (match_date, home_id, away_id).
       2. Fallback laxo por (home_id, away_id, season) — útil cuando los partidos
          vinieron de WhoScored sin match_date. Aprovecha para rellenar la fecha.
     """
-    files = sorted(RAW_US.glob("understat_matches_*.csv"))
-    files += sorted(RAW_US.glob("**/understat_matches.csv"))
-    files = list(dict.fromkeys(files))
+    files = _iter_clean("understat", "matches")
     if not files:
-        log.info("match_loader: no hay understat_matches_*.csv")
+        log.info("match_loader: no hay matches.csv de Understat")
         return 0
 
     dfs = []
@@ -298,11 +304,13 @@ def _load_from_understat(conn) -> int:
         if d is None or d.empty:
             continue
         try:
+            # Inferir competition desde la carpeta padre si no viene en el CSV:
+            # data/clean/<comp_slug>/<season>/understat/matches.csv → <comp_slug>
             if "competition" not in d.columns:
-                slug = f.stem.replace("understat_matches_", "").replace("understat_matches", "")
-                d["competition"] = slug.replace("_", " ").title() if slug else "Unknown"
+                comp_slug = f.parents[2].name  # 0=file dir is .../understat, 1=season, 2=comp
+                d["competition"] = comp_slug.replace("_", " ").title() if comp_slug else "Unknown"
             dfs.append(d)
-            log.info("  · %s", f.name)
+            log.info("  · %s", f)
         except Exception as e:
             log.warning("Error leyendo %s: %s", f, e)
     if not dfs:
@@ -406,7 +414,7 @@ def _load_from_understat(conn) -> int:
 # ── StatsBomb ────────────────────────────────────────────────────────────────
 
 def _load_from_statsbomb(conn) -> int:
-    files = list(RAW_SB.glob("**/matches_clean.csv"))
+    files = _iter_clean("statsbomb", "matches")
     if not files:
         return 0
 
@@ -473,21 +481,20 @@ def _load_from_statsbomb(conn) -> int:
 # ── WhoScored ────────────────────────────────────────────────────────────────
 
 def _load_from_whoscored(conn) -> int:
-    """Lee TODOS los whoscored_events_*.csv → enlaza/inserta partidos.
+    """Lee TODOS los events.csv de WhoScored → enlaza/inserta partidos.
 
-    Saca equipos de los eventos y la fecha del CSV de matches.
-    Funciona con cualquier liga.
+    Saca equipos de los eventos y la fecha del matches.csv de cada (comp, season).
     """
-    files = sorted(RAW_WS.glob("whoscored_events_*.csv"))
+    files = _iter_clean("whoscored", "events")
     if not files:
-        log.info("match_loader: no hay whoscored_events_*.csv")
+        log.info("match_loader: no hay events.csv de WhoScored")
         return 0
 
     log.info("Analizando eventos de WhoScored para vincular partidos (%d archivos)...", len(files))
 
-    # Cache whoscored_match_id -> match_date desde whoscored_matches_*.csv
+    # Cache whoscored_match_id -> match_date desde matches.csv de cada (comp, season)
     match_dates: dict[str, str] = {}
-    for f in sorted(RAW_WS.glob("whoscored_matches_*.csv")):
+    for f in _iter_clean("whoscored", "matches"):
         mdf = safe_read_csv(f)
         if mdf is None or mdf.empty:
             continue
@@ -503,12 +510,11 @@ def _load_from_whoscored(conn) -> int:
 
     match_map: dict[str, dict] = {}
     for f in files:
-        slug = f.stem.replace("whoscored_events_", "")
+        # Inferir competition desde el path: data/clean/<comp>/<season>/whoscored/events.csv
+        comp_from_file = f.parents[2].name.replace("_", " ").title()
         df = safe_read_csv(f)
         if df is None or df.empty:
             continue
-
-        comp_from_file = slug.replace("_", " ").title()
         for mid, group in df.groupby("whoscored_match_id"):
             starts = group[group["event_type"] == "Start"]
             unique_teams = starts["whoscored_team_id"].unique().tolist()
@@ -677,18 +683,22 @@ def backfill_competition_id(conn) -> int:
     return total_updated
 
 
-def load_matches(conn) -> int:
-    """Carga dim_match desde todas las fuentes."""
-    log.info("[START] Cargando dim_match...")
-    _load_from_sofascore(conn)
-    _load_from_understat(conn)
-    _load_from_statsbomb(conn)
-    _load_from_whoscored(conn)
+def load_matches(conn, comp_name: str | None = None) -> int:
+    """Carga dim_match desde todas las fuentes.
 
-    # Backfill defensivo por si alguna fuente no resolvió competition_id en su
-    # propia pasada (p.ej. partido enlazado vía Understat antes de existir la
-    # competición en dim_competition).
-    backfill_competition_id(conn)
+    Args:
+        comp_name: si se especifica restringe a `data/clean/<comp_slug>/...`.
+    """
+    log.info("[START] Cargando dim_match... (comp=%s)", comp_name or "todas")
+    _active_comp_filter[0] = comp_name
+    try:
+        _load_from_sofascore(conn)
+        _load_from_understat(conn)
+        _load_from_statsbomb(conn)
+        _load_from_whoscored(conn)
+        backfill_competition_id(conn)
+    finally:
+        _active_comp_filter[0] = None
 
     total = conn.execute(text("SELECT COUNT(*) FROM dim_match")).scalar()
     log.info("[OK] dim_match completado — %d partidos", total)

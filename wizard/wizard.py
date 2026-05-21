@@ -266,7 +266,11 @@ def _flatten_grouped(groups: List[tuple]) -> List[str]:
 def choose_operation() -> str:
     return prompt_choice(
         "¿Qué quieres hacer?",
-        ["Descargar temporada completa", "Actualizar datos con juegos nuevos"],
+        [
+            "Descargar temporada completa",
+            "Actualizar datos con juegos nuevos",
+            "Descargar estadios por temporada",
+        ],
         default="Descargar temporada completa",
         allow_back=True,
         back_label="cancelar y salir",
@@ -462,20 +466,32 @@ def choose_match_filter(comp_conf: Dict[str, Any], season_start: int) -> Dict[st
 # Resumen + confirmación final
 # --------------------------------------------------------------------------- #
 def _print_summary(state: Dict[str, Any]) -> None:
-    op = "Descarga completa" if state["full_scrape"] else "Actualización incremental"
+    if state.get("stadiums_only"):
+        op = "Descarga de estadios (Transfermarkt → dim_stadium)"
+    elif state["full_scrape"]:
+        op = "Descarga completa"
+    else:
+        op = "Actualización incremental"
+
     print("\n" + "=" * 60)
     print("  RESUMEN DE LA OPERACIÓN")
     print("=" * 60)
     print(f"  Acción      : {op}")
     print(f"  Competición : {state['competition']}")
     print(f"  Temporada   : {state['season']}")
-    print(f"  Fuente(s)   : {state['source']}")
-    if state.get("match_filter", {}).get("match_type") == "team":
-        print(f"  Filtro      : sólo equipo '{state['match_filter']['team_slug']}'")
-    elif state.get("match_filter", {}).get("from_date"):
-        print(f"  Filtro      : partidos desde {state['match_filter']['from_date']}")
+
+    # En el sub-flujo de estadios no aplican fuente ni filtro de partidos
+    if not state.get("stadiums_only"):
+        print(f"  Fuente(s)   : {state['source']}")
+        if state.get("match_filter", {}).get("match_type") == "team":
+            print(f"  Filtro      : sólo equipo '{state['match_filter']['team_slug']}'")
+        elif state.get("match_filter", {}).get("from_date"):
+            print(f"  Filtro      : partidos desde {state['match_filter']['from_date']}")
+        else:
+            print( "  Filtro      : todos los partidos")
     else:
-        print( "  Filtro      : todos los partidos")
+        print(f"  Fuente      : Transfermarkt (única para estadios)")
+        print(f"  Destino     : dim_stadium")
     print("=" * 60)
 
 
@@ -567,6 +583,118 @@ def export_matches_for_team(team_slug: str, competition: str, season: str) -> Op
 
 
 # --------------------------------------------------------------------------- #
+# Sub-flujo: descarga de estadios (Transfermarkt)
+# --------------------------------------------------------------------------- #
+def run_stadiums_flow(competition: str, season: str, full_refresh: bool = False) -> None:
+    """
+    Descarga estadios desde Transfermarkt y los carga en `dim_stadium`.
+
+    Args:
+        competition: nombre canónico (ej. "La Liga") tal como está en
+                     `dim_competition`.
+        season:      etiqueta tipo "2024/2025".
+        full_refresh: ignora la caché de 30 días del scraper.
+    """
+    from scrapers.transfermarkt_stadiums_scraper import (
+        scrape_transfermarkt_stadiums,
+        resolve_competition_from_db,
+    )
+    from loaders.stadium_loader import load_stadiums
+
+    print("\n=== DESCARGA DE ESTADIOS (Transfermarkt) ===")
+    print(f"  Competición: {competition}")
+    print(f"  Temporada  : {season}")
+
+    # 1) Resolver league_code: primero contra dim_competition (verdad),
+    #    fallback al dict COMPETITIONS para no bloquear si falta la fila.
+    comp_db = resolve_competition_from_db(competition)
+    if comp_db:
+        league_code = comp_db["id_transfermarkt"]
+    else:
+        comp_conf = get_competition(competition)
+        league_code = (
+            (comp_conf or {}).get("sources", {})
+                              .get("transfermarkt", {})
+                              .get("league_code")
+        )
+    if not league_code:
+        print(f"  [ERROR] No hay league_code de Transfermarkt para '{competition}'.")
+        return
+
+    season_start  = get_season_start_year(season)
+    season_label  = season.replace("/", "_")
+
+    # 2) Scrape
+    print("\n[1/2] Scrapeando estadios desde Transfermarkt...")
+    try:
+        scrape_transfermarkt_stadiums(
+            competition_name=competition,
+            league_code=league_code,
+            season=season_start,
+            season_label=season_label,
+            full_refresh=full_refresh,
+        )
+    except Exception as e:
+        print(f"  [ERROR] Falló el scraper de estadios: {e}")
+        return
+
+    # 3) Load → dim_stadium
+    print("\n[2/2] Cargando dim_stadium...")
+    try:
+        with engine.begin() as conn:
+            # El loader normaliza competition (acepta nombre humano o slug)
+            # y season (acepta '2024/2025' o '2024_2025').
+            n = load_stadiums(
+                conn,
+                competition=competition,
+                season=season_label,
+            )
+        print(f"\n  [OK] {n} estadio(s) upserteados en dim_stadium.")
+    except Exception as e:
+        print(f"  [ERROR] Falló el loader: {e}")
+
+
+def run_all_stadiums_flow(season: str, full_refresh: bool = False) -> None:
+    """
+    Itera todas las competiciones de `dim_competition` con `id_transfermarkt`
+    y ejecuta `run_stadiums_flow` para cada una.
+
+    Equivale al modo `--all-db` del scraper CLI, pero invocable desde el
+    wizard de Streamlit.
+    """
+    from scrapers.transfermarkt_stadiums_scraper import list_competitions_from_db
+
+    comps = list_competitions_from_db()
+    if not comps:
+        print("[ERROR] No hay competiciones con id_transfermarkt en `dim_competition`.")
+        return
+
+    print("\n=== DESCARGA MASIVA DE ESTADIOS (Transfermarkt) ===")
+    print(f"  Temporada    : {season}")
+    print(f"  Competiciones: {len(comps)}")
+
+    ok: list[str] = []
+    failed: list[tuple[str, str]] = []
+
+    for i, c in enumerate(comps, start=1):
+        name = c["canonical_name"]
+        print(f"\n----- [{i}/{len(comps)}] {name} -----")
+        try:
+            run_stadiums_flow(name, season, full_refresh=full_refresh)
+            ok.append(name)
+        except Exception as e:  # noqa: BLE001
+            print(f"  [ERROR] Falló la competición '{name}': {e}")
+            failed.append((name, str(e)))
+
+    print("\n=== RESUMEN DESCARGA MASIVA DE ESTADIOS ===")
+    print(f"  OK     : {len(ok)}/{len(comps)}")
+    if failed:
+        print(f"  Fallos : {len(failed)}")
+        for name, err in failed:
+            print(f"    - {name}: {err}")
+
+
+# --------------------------------------------------------------------------- #
 # Flujo interactivo con navegación entre pasos
 # --------------------------------------------------------------------------- #
 PHASES = ["operation", "competition", "season", "source", "filter", "confirm"]
@@ -588,7 +716,8 @@ def interactive_flow() -> None:
                     print("\n  Saliendo del wizard. Hasta luego!")
                     return
                 state["operation"] = op
-                state["full_scrape"] = op.lower().startswith("descargar")
+                state["full_scrape"] = op.lower().startswith("descargar temporada")
+                state["stadiums_only"] = "estadios" in op.lower()
                 idx += 1
 
             elif phase == "competition":
@@ -610,7 +739,13 @@ def interactive_flow() -> None:
                     continue
                 state["season"] = season
                 state["season_start"] = get_season_start_year(season)
-                idx += 1
+                # Si el usuario eligió "Descargar estadios", saltamos
+                # source/filter y vamos directos a confirmar.
+                if state.get("stadiums_only"):
+                    idx = PHASES.index("confirm")
+                else:
+                    idx += 1
+                continue
 
             elif phase == "source":
                 src = choose_source(state["comp_conf"], state["competition"], state["season"])
@@ -643,6 +778,13 @@ def interactive_flow() -> None:
         return
 
     # ── Ejecución ────────────────────────────────────────────────────
+    # Caso especial: sólo estadios → sub-pipeline dedicado, no usa run_pipeline.
+    if state.get("stadiums_only"):
+        print("\n=== INICIANDO DESCARGA DE ESTADIOS ===")
+        run_stadiums_flow(state["competition"], state["season"])
+        print("\n=== PROCESO FINALIZADO EXITOSAMENTE ===")
+        return
+
     match_filter = state.get("match_filter", {})
     kwargs = {
         "scrape": state["full_scrape"],

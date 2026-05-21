@@ -50,9 +50,10 @@ def _fmt(n) -> str:
 
 
 (tab_explore, tab_teams, tab_gk, tab_players, tab_injuries,
- tab_shot, tab_monitor, tab_wizard) = st.tabs(
+ tab_shot, tab_stadiums, tab_monitor, tab_wizard) = st.tabs(
     ["Exploration", "Teams", "Goalkeepers", "Players",
-     "Injuries", "Shot Intelligence", "Pipeline monitoring", "Wizard"]
+     "Injuries", "Shot Intelligence", "Stadiums",
+     "Pipeline monitoring", "Wizard"]
 )
 
 
@@ -573,7 +574,136 @@ with tab_shot:
 
 
 # ════════════════════════════════════════════════════════════════════
-# TAB 7 — PIPELINE MONITORING
+# TAB 7 — STADIUMS  (dim_stadium · Transfermarkt)
+# ════════════════════════════════════════════════════════════════════
+with tab_stadiums:
+    st.header("Stadiums")
+    st.caption(
+        "Estadios por equipo y temporada — fuente: Transfermarkt. "
+        "Lánzalos desde el wizard: \"Descargar estadios por temporada\"."
+    )
+
+    if not explore._stadium_table_exists():
+        st.warning(
+            "La tabla `dim_stadium` no existe todavía. "
+            "Aplica la migración:\n\n"
+            "    psql -U postgres -d db_football_completa -f db/add_dim_stadium.sql"
+        )
+    else:
+        # ── Filtros ──────────────────────────────────────────────
+        st_seasons   = explore.get_stadium_seasons()
+        st_comps     = explore.get_competitions()
+        st_countries = explore.get_stadium_countries()
+
+        f1, f2, f3, f4 = st.columns([1, 1, 1, 2])
+        with f1:
+            st_season = st.selectbox(
+                "Season",
+                ["All seasons"] + st_seasons,
+                key="st_season",
+                disabled=not st_seasons,
+            )
+        with f2:
+            st_comp = st.selectbox(
+                "Competition",
+                ["All competitions"] + st_comps,
+                key="st_comp",
+                disabled=not st_comps,
+            )
+        with f3:
+            st_country = st.selectbox(
+                "Country",
+                ["All countries"] + st_countries,
+                key="st_country",
+                disabled=not st_countries,
+            )
+        with f4:
+            st_search = st.text_input(
+                "Search (stadium / team / city)",
+                value="", key="st_search",
+            ).strip() or None
+
+        season_q  = None if st_season  == "All seasons"      else st_season
+        comp_q    = None if st_comp    == "All competitions" else st_comp
+        country_q = None if st_country == "All countries"    else st_country
+
+        # ── Tarjetas resumen ─────────────────────────────────────
+        summary = explore.get_stadium_summary(
+            season=season_q, competition=comp_q, country=country_q,
+        )
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Stadiums",        _fmt(summary["n_stadiums"]))
+        m2.metric("Total capacity",  _fmt(summary["total_capacity"]))
+        m3.metric("Avg capacity",    _fmt(summary["avg_capacity"]))
+        m4.metric(
+            f"Largest ({summary['max_stadium']})",
+            _fmt(summary["max_capacity"]),
+        )
+
+        # ── Tabla ────────────────────────────────────────────────
+        df_st = explore.get_stadiums(
+            season=season_q, competition=comp_q,
+            country=country_q, search=st_search,
+        )
+        if df_st.empty:
+            st.info(
+                "No hay estadios para esta combinación de filtros. "
+                "Si acabas de migrar la tabla, lanza desde el wizard "
+                "\"Descargar estadios por temporada\" para poblarla."
+            )
+        else:
+            # Hacer el link de TM clicable
+            display_df = df_st.copy()
+            display_df.columns = [
+                "stadium_id", "Team", "Season", "Stadium", "Capacity",
+                "Seats covered", "Inaugurated", "Refurbished",
+                "Owner", "City", "Country", "Surface", "Transfermarkt URL",
+            ]
+            st.dataframe(
+                display_df.drop(columns=["stadium_id"]),
+                width='stretch',
+                column_config={
+                    "Transfermarkt URL": st.column_config.LinkColumn(
+                        "Transfermarkt", display_text="abrir"
+                    ),
+                    "Capacity": st.column_config.NumberColumn(format="%d"),
+                    "Seats covered": st.column_config.NumberColumn(format="%d"),
+                },
+            )
+
+            # ── Gráfico top-15 por aforo ─────────────────────────
+            top = (
+                df_st.dropna(subset=["capacity"])
+                     .sort_values("capacity", ascending=False)
+                     .head(15)
+            )
+            if not top.empty:
+                st.subheader("Top 15 by capacity")
+                fig_st, ax_st = plt.subplots(figsize=(10, max(4, len(top) * 0.4)))
+                fig_st.patch.set_facecolor("#0e1117")
+                ax_st.set_facecolor("#0e1117")
+                labels = [
+                    f"{r.stadium_name} ({r.team})" for r in top.itertuples()
+                ]
+                ax_st.barh(labels, top["capacity"], color="#9b59b6")
+                ax_st.set_xlabel("Capacity", color="white")
+                ax_st.tick_params(colors="white")
+                for spine in ax_st.spines.values():
+                    spine.set_color("#444")
+                ax_st.invert_yaxis()
+                plt.tight_layout()
+                st.pyplot(fig_st)
+                plt.close(fig_st)
+
+        st.caption(
+            "Source: dim_stadium (Transfermarkt). "
+            "Unicidad por (id_transfermarkt_team, season) — un equipo puede "
+            "tener estadios distintos por temporada (obras, mudanzas)."
+        )
+
+
+# ════════════════════════════════════════════════════════════════════
+# TAB 8 — PIPELINE MONITORING
 # ════════════════════════════════════════════════════════════════════
 with tab_monitor:
     st.header("Pipeline monitoring")
@@ -690,7 +820,7 @@ with tab_monitor:
 
 
 # ════════════════════════════════════════════════════════════════════
-# TAB 8 — WIZARD (writes to the database — read-only exception)
+# TAB 9 — WIZARD (writes to the database — read-only exception)
 # ════════════════════════════════════════════════════════════════════
 with tab_wizard:
     wizard_view.render()

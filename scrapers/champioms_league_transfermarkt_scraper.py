@@ -64,8 +64,15 @@ DELAY_MIN   = 2.0    # pausa mínima entre peticiones (segundos)
 DELAY_MAX   = 4.0    # pausa máxima entre peticiones (segundos)
 MAX_RETRIES = 3
  
-OUTPUT_DIR = os.path.join("data", "raw", "transfermarkt", "champions")
- 
+OUTPUT_DIR = os.path.join("data", "raw", "transfermarkt", "champions")  # legacy
+
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.append(str(_Path(__file__).resolve().parents[1]))
+from utils.data_paths import save_clean_csv as _save_clean_csv  # noqa: E402
+
+COMPETITION_NAME = "Champions League"
+
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -577,28 +584,28 @@ def scrape_champions() -> None:
     """
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    teams_path    = os.path.join(OUTPUT_DIR, "transfermarkt_champions_teams.csv")
-    players_path  = os.path.join(OUTPUT_DIR, "transfermarkt_champions_players.csv")
-    injuries_path = os.path.join(OUTPUT_DIR, "transfermarkt_champions_injuries.csv")
-
-    # detecta temporadas ya procesadas leyendo el CSV de jugadores
+    # Resume: detectar temporadas ya guardadas leyendo cualquier players.csv
+    # canónico existente bajo data/clean/champions_league/.
+    from utils.data_paths import iter_clean_csvs as _iter_clean
     done_seasons: set[int] = set()
-    if os.path.exists(players_path):
-        df_existing = pd.read_csv(players_path, usecols=["season"])
-        done_seasons = set(df_existing["season"].dropna().astype(int).unique())
-        if done_seasons:
-            print(f"  Resume: temporadas ya guardadas → {sorted(done_seasons)}")
-
-    # resume carga los player_id ya procesados del CSV de lesiones
-    # para no volver a descargar lesiones de jugadores ya procesados en ejecuciones anteriores
     processed_player_ids: set[str] = set()
-    if os.path.exists(injuries_path):
-        df_injuries_existing = pd.read_csv(injuries_path, usecols=["player_id"])
-        processed_player_ids = set(df_injuries_existing["player_id"].dropna().astype(str).unique())
-        if processed_player_ids:
-            print(f"  Resume: {len(processed_player_ids)} jugadores con lesiones ya descargadas")
+    for f in _iter_clean(COMPETITION_NAME, source="transfermarkt", filename="players"):
+        try:
+            df_existing = pd.read_csv(f, usecols=["season"])
+            done_seasons.update(df_existing["season"].dropna().astype(int).unique())
+        except Exception:
+            continue
+    for f in _iter_clean(COMPETITION_NAME, source="transfermarkt", filename="injuries"):
+        try:
+            df_inj = pd.read_csv(f, usecols=["player_id"])
+            processed_player_ids.update(df_inj["player_id"].dropna().astype(str).unique())
+        except Exception:
+            continue
+    if done_seasons:
+        print(f"  Resume: temporadas ya guardadas → {sorted(done_seasons)}")
+    if processed_player_ids:
+        print(f"  Resume: {len(processed_player_ids)} jugadores con lesiones ya descargadas")
 
-    # equipos ya vistos para deduplicar df_teams entre temporadas
     seen_team_ids: set[int] = set()
 
     for season in SEASONS:
@@ -642,17 +649,23 @@ def scrape_champions() -> None:
             injuries = get_player_injuries(player["player_slug"], player["player_id"])
             season_injuries.extend(injuries)
 
-        # guardar temporada completa a disco
+        # Guardar temporada en formato canónico
+        # → data/clean/champions_league/<season>/transfermarkt/<table>.csv
         print(f"\n  Guardando temporada {season}/{season + 1}...")
-        _append_to_csv(season_teams,    teams_path)
-        _append_to_csv(season_players,  players_path)
-        _append_to_csv(season_injuries, injuries_path)
+        season_label = f"{season}_{season + 1}"
+        if season_teams:
+            _save_clean_csv(COMPETITION_NAME, season_label, "transfermarkt",
+                            "teams", pd.DataFrame(season_teams))
+        if season_players:
+            _save_clean_csv(COMPETITION_NAME, season_label, "transfermarkt",
+                            "players", pd.DataFrame(season_players))
+        if season_injuries:
+            _save_clean_csv(COMPETITION_NAME, season_label, "transfermarkt",
+                            "injuries", pd.DataFrame(season_injuries))
         print(f"  Temporada {season}/{season + 1} guardada.")
 
     print(f"\n  Proceso finalizado.")
-    print(f"    {teams_path}")
-    print(f"    {players_path}")
-    print(f"    {injuries_path}")
+    print(f"    CSVs en data/clean/champions_league/<season>/transfermarkt/")
 # ────────────────────────────────────────────────────────────────────────────────────────────────
 
 

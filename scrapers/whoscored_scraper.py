@@ -226,7 +226,10 @@ MAX_NEXT_STEPS = 250
 TOGGLE_STALE_LIMIT = 3
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# OUTPUT_DIR legacy. Las rutas reales vienen de utils.data_paths.
 OUTPUT_DIR = str(PROJECT_ROOT / "data" / "raw" / "whoscored")
+
+from utils.data_paths import save_clean_csv, normalize_season as _norm_season  # noqa: E402
 
 
 # -- DRIVER -----------------------------------------------------------
@@ -851,31 +854,72 @@ def scrape_whoscored(season=None, competition: str = "La Liga"):
     df_events  = pd.DataFrame(all_events)
     df_players = pd.DataFrame(all_players)
     df_teams   = pd.DataFrame(all_teams)
-    if not df_players.empty:
-        df_players = df_players.drop_duplicates(subset=['whoscored_player_id'])
-    if not df_teams.empty:
-        df_teams = df_teams.drop_duplicates(subset=['whoscored_team_id'])
 
-    if not df_matches.empty:
-        slug = _slug_for_filename(competition)
-        # Etiquetamos cada DataFrame con la competición para downstream
-        for df in (df_matches, df_events, df_players, df_teams):
-            if not df.empty:
-                df["competition"] = competition
+    # Dedup por (id, season) — NUNCA por id solo: si un jugador o equipo
+    # aparece en varias temporadas, cada una conserva su fila para que el
+    # split per-season no pierda registros.
+    if not df_players.empty and "season" in df_players.columns:
+        df_players = df_players.drop_duplicates(subset=["whoscored_player_id", "season"])
+    elif not df_players.empty:
+        df_players = df_players.drop_duplicates(subset=["whoscored_player_id"])
 
-        matches_path = os.path.join(OUTPUT_DIR, f"whoscored_matches_{slug}.csv")
-        events_path  = os.path.join(OUTPUT_DIR, f"whoscored_events_{slug}.csv")
-        players_path = os.path.join(OUTPUT_DIR, f"whoscored_players_{slug}.csv")
-        teams_path   = os.path.join(OUTPUT_DIR, f"whoscored_teams_{slug}.csv")
-        df_matches.to_csv(matches_path, index=False)
-        df_events.to_csv(events_path,   index=False)
-        df_players.to_csv(players_path, index=False)
-        df_teams.to_csv(teams_path,     index=False)
-        log.info("[OK] CSVs guardados en %s", OUTPUT_DIR)
-        log.info("    matches=%d events=%d players=%d teams=%d",
-                 len(df_matches), len(df_events), len(df_players), len(df_teams))
-    else:
+    if not df_teams.empty and "season" in df_teams.columns:
+        df_teams = df_teams.drop_duplicates(subset=["whoscored_team_id", "season"])
+    elif not df_teams.empty:
+        df_teams = df_teams.drop_duplicates(subset=["whoscored_team_id"])
+
+    if df_matches.empty:
         log.warning("[!] No se obtuvieron datos - no se han escrito CSVs.")
+        return (df_matches, df_events, df_players, df_teams)
+
+    # Etiqueta competition en todas las tablas que tengan filas.
+    for df in (df_matches, df_events, df_players, df_teams):
+        if not df.empty:
+            df["competition"] = competition
+
+    # Layout canónico: split por temporada → data/clean/<comp>/<season>/whoscored/.
+    # Sólo se procesan las temporadas que el usuario pidió en ESTE run
+    # (`seasons_targets` armado más arriba). Esto garantiza que llamadas
+    # sucesivas con --season distintos NUNCA reescriben carpetas ajenas.
+    seasons_to_write: list[str] = []
+    if "season" in df_matches.columns:
+        seasons_to_write = [s for s in seasons_targets
+                            if s in set(df_matches["season"].dropna().unique())]
+    if not seasons_to_write:
+        # Fallback defensivo: usa el arg directamente.
+        seasons_to_write = [season] if season else seasons_targets
+
+    log.info("WhoScored guardará %d temporada(s): %s",
+             len(seasons_to_write), seasons_to_write)
+
+    for s in seasons_to_write:
+        season_label = _norm_season(s) or str(s).replace("/", "_")
+        wrote_any = False
+        for name, df in (
+            ("matches", df_matches), ("events", df_events),
+            ("players", df_players), ("teams", df_teams),
+        ):
+            if df.empty:
+                continue
+            if "season" not in df.columns:
+                log.warning("WhoScored: '%s' sin columna season — se saltea para "
+                            "evitar contaminar %s", name, season_label)
+                continue
+            df_slice = df[df["season"] == s].copy()
+            if df_slice.empty:
+                continue
+            out = save_clean_csv(competition, season_label, "whoscored", name, df_slice)
+            log.info("  · %s: %d filas → %s", name, len(df_slice), out)
+            wrote_any = True
+        if wrote_any:
+            log.info("[OK] WhoScored %s %s — CSVs escritos",
+                     competition, season_label)
+        else:
+            log.warning("[!] WhoScored %s %s — sin filas para esta temporada",
+                        competition, season_label)
+
+    log.info("    Totales: matches=%d events=%d players=%d teams=%d",
+             len(df_matches), len(df_events), len(df_players), len(df_teams))
 
     return (df_matches, df_events, df_players, df_teams)
 

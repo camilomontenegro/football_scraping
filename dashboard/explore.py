@@ -736,3 +736,153 @@ def get_injury_season_trend(team: str | None) -> pd.DataFrame:
         ORDER BY fi.season DESC
     """
     return query_df(sql, {})
+
+
+# ════════════════════════════════════════════════════════════════════
+# STADIUMS — dim_stadium (Transfermarkt)
+# ════════════════════════════════════════════════════════════════════
+
+def _stadium_table_exists() -> bool:
+    """True si la tabla dim_stadium existe (evita crash si aún no migrada)."""
+    eng = get_engine()
+    try:
+        with eng.connect() as conn:
+            row = conn.execute(text(
+                "SELECT to_regclass('public.dim_stadium')"
+            )).fetchone()
+        return row is not None and row[0] is not None
+    except Exception:
+        return False
+
+
+def get_stadium_seasons() -> list[str]:
+    """Temporadas con datos en dim_stadium (descendente)."""
+    if not _stadium_table_exists():
+        return []
+    sql = """
+        SELECT DISTINCT season
+        FROM dim_stadium
+        WHERE season IS NOT NULL
+        ORDER BY season DESC
+    """
+    eng = get_engine()
+    with eng.connect() as conn:
+        return [r[0] for r in conn.execute(text(sql)).fetchall()]
+
+
+def get_stadium_countries() -> list[str]:
+    if not _stadium_table_exists():
+        return []
+    sql = """
+        SELECT DISTINCT country
+        FROM dim_stadium
+        WHERE country IS NOT NULL AND country <> ''
+        ORDER BY country
+    """
+    eng = get_engine()
+    with eng.connect() as conn:
+        return [r[0] for r in conn.execute(text(sql)).fetchall()]
+
+
+def get_stadiums(
+    season: str | None = None,
+    competition: str | None = None,
+    country: str | None = None,
+    search: str | None = None,
+) -> pd.DataFrame:
+    """
+    Devuelve estadios filtrados por temporada / competición / país / búsqueda.
+
+    Join con dim_team para mostrar el nombre canónico del equipo.
+    Si se filtra por competición, se cruza vía dim_match para inferir qué
+    equipos jugaron esa competición (no hay FK directa estadio↔competición).
+    """
+    if not _stadium_table_exists():
+        return pd.DataFrame()
+
+    params: dict = {}
+    where_clauses: list[str] = []
+
+    base_sql = """
+        SELECT
+            s.stadium_id,
+            COALESCE(t.canonical_name, s.team_slug) AS team,
+            s.season,
+            s.stadium_name,
+            s.capacity,
+            s.seats_covered,
+            s.inaugurated_year,
+            s.refurbished_year,
+            s.owner,
+            s.city,
+            s.country,
+            s.surface,
+            s.tm_url
+        FROM dim_stadium s
+        LEFT JOIN dim_team t ON t.canonical_id = s.canonical_team_id
+    """
+
+    if competition:
+        # subquery: equipos canónicos que han jugado esa competición
+        base_sql += """
+            JOIN (
+                SELECT DISTINCT team_id FROM (
+                    SELECT m.home_team_id AS team_id FROM dim_match m
+                      JOIN dim_competition dc ON dc.canonical_id = m.competition_id
+                      WHERE dc.canonical_name = :competition
+                    UNION
+                    SELECT m.away_team_id AS team_id FROM dim_match m
+                      JOIN dim_competition dc ON dc.canonical_id = m.competition_id
+                      WHERE dc.canonical_name = :competition
+                ) x WHERE team_id IS NOT NULL
+            ) ct ON ct.team_id = s.canonical_team_id
+        """
+        params["competition"] = competition
+
+    if season:
+        where_clauses.append("s.season = :season")
+        params["season"] = season
+    if country:
+        where_clauses.append("s.country = :country")
+        params["country"] = country
+    if search:
+        where_clauses.append(
+            "(LOWER(s.stadium_name) LIKE :q OR LOWER(t.canonical_name) LIKE :q "
+            "OR LOWER(s.city) LIKE :q)"
+        )
+        params["q"] = f"%{search.lower()}%"
+
+    if where_clauses:
+        base_sql += " WHERE " + " AND ".join(where_clauses)
+
+    base_sql += " ORDER BY s.capacity DESC NULLS LAST, team ASC"
+
+    return query_df(base_sql, params)
+
+
+def get_stadium_summary(
+    season: str | None = None,
+    competition: str | None = None,
+    country: str | None = None,
+) -> dict:
+    """Tarjetas resumen: nº estadios, aforo total, media, equipo+aforo top."""
+    df = get_stadiums(season=season, competition=competition, country=country)
+    if df.empty:
+        return {
+            "n_stadiums": 0, "total_capacity": 0, "avg_capacity": 0,
+            "max_stadium": "—", "max_capacity": 0,
+        }
+    caps = pd.to_numeric(df["capacity"], errors="coerce").dropna()
+    if caps.empty:
+        return {
+            "n_stadiums": len(df), "total_capacity": 0, "avg_capacity": 0,
+            "max_stadium": "—", "max_capacity": 0,
+        }
+    idx_max = caps.idxmax()
+    return {
+        "n_stadiums":     len(df),
+        "total_capacity": int(caps.sum()),
+        "avg_capacity":   int(caps.mean()),
+        "max_stadium":    str(df.loc[idx_max, "stadium_name"] or "—"),
+        "max_capacity":   int(caps.max()),
+    }

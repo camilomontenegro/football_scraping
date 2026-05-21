@@ -1,17 +1,15 @@
 """
 loaders/team_loader.py
 =======================
-Carga dim_team desde los archivos producidos por los scrapers.
+Carga dim_team desde los CSV producidos por los scrapers en
+`data/clean/<comp>/<season>/<source>/<table>.csv`.
 
 FUENTES (en orden de prioridad):
-    1. SofaScore teams.csv  → nombre canónico + id_sofascore  (MASTER)
-    2. Transfermarkt players_clean.csv → añade country + id_transfermarkt
-    3. Understat teams CSV  → añade id_understat
-    4. StatsBomb teams CSV  → añade id_statsbomb
-
-Jerarquía:
-    - SofaScore establece el canonical_name definitivo de cada equipo.
-    - Las demás fuentes enriquecen la fila con sus IDs externos y country.
+    1. SofaScore teams.csv   → nombre canónico + id_sofascore  (MASTER)
+    2. Transfermarkt players.csv → añade country + id_transfermarkt
+    3. WhoScored teams.csv   → añade id_whoscored
+    4. Understat teams.csv   → añade id_understat
+    5. StatsBomb teams.csv   → añade id_statsbomb
 
 Schema destino (dim_team):
     canonical_id, canonical_name, country,
@@ -20,26 +18,16 @@ Schema destino (dim_team):
 
 from __future__ import annotations
 
-import glob
 import logging
-import os
-from pathlib import Path
 
 import pandas as pd
 from sqlalchemy import text
 
 from loaders.common import engine, safe_read_csv
 from utils.canonical_teams import normalize_team_name
+from utils.data_paths import iter_clean_csvs
 
 log = logging.getLogger(__name__)
-
-# Usar ruta absoluta basada en la carpeta del proyecto
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RAW_SS  = PROJECT_ROOT / "data" / "raw" / "sofascore"
-RAW_TM  = PROJECT_ROOT / "data" / "raw" / "transfermarkt"
-RAW_US  = PROJECT_ROOT / "data" / "raw" / "understat"
-RAW_SB  = PROJECT_ROOT / "data" / "raw" / "statsbomb"
-RAW_WS  = PROJECT_ROOT / "data" / "raw" / "whoscored"
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -106,198 +94,173 @@ def _upsert_team(conn, canonical_name: str, source_id_col: str, source_id) -> in
 
 # ── Carga por fuente ─────────────────────────────────────────────────────────
 
+# Filtro de competición que aplica a TODAS las llamadas a _read_clean dentro
+# de la misma transacción. Se setea desde load_teams(conn, comp_name=...).
+_active_comp_filter: list = [None]
+
+
+def _read_clean(source: str, filename: str) -> list[pd.DataFrame]:
+    """Lee todos los CSV `data/clean/[<comp>/]*/<source>/<filename>.csv`."""
+    dfs: list[pd.DataFrame] = []
+    comp = _active_comp_filter[0]
+    for f in iter_clean_csvs(competition=comp, source=source, filename=filename):
+        df = safe_read_csv(f)
+        if df is None or df.empty:
+            continue
+        dfs.append(df)
+    return dfs
+
+
 def _load_from_sofascore(conn) -> int:
-    """Lee teams.csv de SofaScore → upsert en dim_team como fuente master."""
-    files = list(RAW_SS.glob("**/teams.csv"))
-    if not files:
-        log.warning("team_loader: no se encontraron teams.csv en %s", RAW_SS)
+    """Upsert SofaScore teams.csv → fuente master del canonical_name."""
+    dfs = _read_clean("sofascore", "teams")
+    if not dfs:
+        log.warning("team_loader: no se encontraron teams.csv de SofaScore")
         return 0
 
     count = 0
-    all_rows: list[dict] = []
-    for f in files:
-        try:
-            df = pd.read_csv(f)
-            all_rows.extend(df.to_dict("records"))
-        except Exception as e:
-            log.error("Error reading teams file %s: %s", f, e)
-            continue
-
-    # Deduplicar por id_sofascore
     seen: set[int] = set()
-    for row in all_rows:
-        try:
+    for df in dfs:
+        for row in df.to_dict("records"):
             sid  = row.get("id_sofascore")
             name = row.get("canonical_name")
             if not sid or not name:
                 continue
-            sid = int(sid)
+            try:
+                sid = int(sid)
+            except (TypeError, ValueError):
+                continue
             if sid in seen:
                 continue
             seen.add(sid)
-            _upsert_team(conn, name, "id_sofascore", sid)
-            count += 1
-        except Exception as e:
-            log.error("Error processing team from SofaScore: %s", e)
-            continue
-
+            try:
+                _upsert_team(conn, name, "id_sofascore", sid)
+                count += 1
+            except Exception as e:
+                log.error("Error processing team from SofaScore: %s", e)
     log.info("dim_team ← SofaScore: %d equipos", count)
     return count
 
 
 def _load_from_transfermarkt(conn) -> int:
-    """Lee players_clean.csv de TM → añade country e id_transfermarkt a dim_team."""
-
-    files = list(RAW_TM.glob("**/players_clean.csv"))
-
-    if not files:
-        log.info("team_loader: no hay players_clean.csv de TM")
+    """Añade country e id_transfermarkt a partir de TM `players.csv`."""
+    dfs = _read_clean("transfermarkt", "players")
+    if not dfs:
+        log.info("team_loader: no hay players.csv de TM")
         return 0
 
-    # Construir tabla única de equipos TM (team_slug, team_country)
     team_rows: dict[str, dict] = {}
-    for f in files:
-        try:
-            df = pd.read_csv(f)
-            for _, row in df.iterrows():
-
-                #slug    = row.get("team_slug")
-                name= row.get("team_name")
-                country = row.get("team_country") if "team_country" in df.columns else None
-                
-                #tm_id   = row.get("team_id_tm")
-                tm_id = row.get("team_id")
-                
-                # cambio slug por name
-                if name and name not in team_rows:
-                    team_rows[name] = {"country": country, "team_id_tm": tm_id}
-
-        except Exception as e:
-            log.warning("Error leyendo %s: %s", f, e)
+    for df in dfs:
+        for _, row in df.iterrows():
+            name    = row.get("team_name") or row.get("team_slug")
+            country = row.get("team_country") if "team_country" in df.columns else None
+            tm_id   = row.get("team_id_tm") or row.get("team_id")
+            if name and name not in team_rows:
+                team_rows[name] = {"country": country, "team_id_tm": tm_id}
 
     count = 0
-     # cambio slug por name 
     for name, info in team_rows.items():
-        tm_id = info.get("team_id_tm")
-       
-        cid = _upsert_team(conn, name, "id_transfermarkt", tm_id)
-
-        # Enriquecer con country si es necesario
+        cid = _upsert_team(conn, name, "id_transfermarkt", info.get("team_id_tm"))
         if info.get("country"):
             conn.execute(
-                text("UPDATE dim_team SET country = COALESCE(country, :c) WHERE canonical_id = :cid"),
-                {"c": info["country"], "cid": cid}
+                text("UPDATE dim_team SET country = COALESCE(country, :c) "
+                     "WHERE canonical_id = :cid"),
+                {"c": info["country"], "cid": cid},
             )
         count += 1
-
     log.info("dim_team ← Transfermarkt: %d equipos enriquecidos", count)
     return count
 
 
 def _load_from_understat(conn) -> int:
-    """Lee TODOS los understat_teams_*.csv → añade id_understat a dim_team.
-
-    Soporta dos convenciones de archivo:
-        - antigua : data/raw/understat/understat_teams_<slug>.csv
-        - Osen    : data/raw/understat/<slug>/season=YYYY/understat_teams.csv
-    """
-    files = sorted(RAW_US.glob("understat_teams_*.csv"))
-    files += sorted(RAW_US.glob("**/understat_teams.csv"))
-    files = list(dict.fromkeys(files))  # dedup
-    if not files:
-        log.info("team_loader: no hay understat_teams_*.csv")
+    """Añade id_understat desde `teams.csv` de Understat."""
+    dfs = _read_clean("understat", "teams")
+    if not dfs:
+        log.info("team_loader: no hay teams.csv de Understat")
         return 0
 
     count = 0
-    for f in files:
-        df = safe_read_csv(f)
-        if df is None or df.empty:
-            continue
+    for df in dfs:
         for _, row in df.iterrows():
-            us_id   = row.get("understat_team_id")
-            us_name = row.get("team_name") or row.get("name")
+            us_id   = row.get("understat_team_id") or row.get("id_understat")
+            us_name = row.get("team_name") or row.get("name") or row.get("canonical_name")
             if not us_id or not us_name:
                 continue
             _upsert_team(conn, us_name, "id_understat", us_id)
             count += 1
-        log.info("  · %s", f.name)
-
-    log.info("dim_team ← Understat: %d equipos (%d archivos)", count, len(files))
+    log.info("dim_team ← Understat: %d equipos", count)
     return count
 
 
 def _load_from_statsbomb(conn) -> int:
-    """Lee teams.csv de StatsBomb → añade id_statsbomb a dim_team."""
-    files = list(RAW_SB.glob("**/teams.csv"))
-    if not files:
+    """Añade id_statsbomb desde `teams.csv` de StatsBomb."""
+    dfs = _read_clean("statsbomb", "teams")
+    if not dfs:
         log.info("team_loader: no hay teams.csv de StatsBomb")
         return 0
 
     count = 0
-    for fp in files:
-        df = safe_read_csv(fp)
-        if df is None or df.empty:
-            continue
-
+    for df in dfs:
         for _, row in df.iterrows():
             sb_id   = row.get("id_statsbomb")
-            sb_name = row.get("canonical_name")
+            sb_name = row.get("canonical_name") or row.get("team_name")
             if not sb_id or not sb_name:
                 continue
-
             _upsert_team(conn, sb_name, "id_statsbomb", sb_id)
             count += 1
-
     log.info("dim_team ← StatsBomb: %d equipos", count)
     return count
 
 
 def _load_from_whoscored(conn) -> int:
-    """Lee TODOS los whoscored_teams_*.csv → añade id_whoscored a dim_team."""
-    files = sorted(RAW_WS.glob("whoscored_teams_*.csv"))
-    if not files:
-        log.info("team_loader: no hay whoscored_teams_*.csv")
+    """Añade id_whoscored desde `teams.csv` de WhoScored."""
+    dfs = _read_clean("whoscored", "teams")
+    if not dfs:
+        log.info("team_loader: no hay teams.csv de WhoScored")
         return 0
 
     count = 0
-    for f in files:
-        df = safe_read_csv(f)
-        if df is None or df.empty:
-            continue
+    for df in dfs:
         for _, row in df.iterrows():
-            ws_id   = row.get("whoscored_team_id")
-            ws_name = row.get("team_name") or row.get("name")
+            ws_id   = row.get("whoscored_team_id") or row.get("id_whoscored")
+            ws_name = row.get("team_name") or row.get("name") or row.get("canonical_name")
             if not ws_id or not ws_name:
                 continue
             _upsert_team(conn, ws_name, "id_whoscored", ws_id)
             count += 1
-        log.info("  · %s", f.name)
-
-    log.info("dim_team ← WhoScored: %d equipos (%d archivos)", count, len(files))
+    log.info("dim_team ← WhoScored: %d equipos", count)
     return count
 
 
 # ── Punto de entrada ──────────────────────────────────────────────────────────
 
-def load_teams(conn) -> int:
+def load_teams(conn, comp_name: str | None = None) -> int:
     """Carga y enriquece dim_team desde todas las fuentes.
 
-    Orden:
-        1. SofaScore  → establece canonical_name e id_sofascore  (MASTER)
-        2. Transfermarkt → añade country e id_transfermarkt
-        3. Understat  → añade id_understat
-        4. StatsBomb  → añade id_statsbomb
+    Args:
+        conn: SQLAlchemy connection.
+        comp_name: si se especifica, restringe la búsqueda a
+            `data/clean/<comp_slug>/...`. Por defecto procesa todas las
+            competiciones encontradas en disco.
 
-    Returns:
-        Número total de equipos procesados.
+    Orden:
+        1. SofaScore  → canonical_name e id_sofascore  (MASTER)
+        2. Transfermarkt → country e id_transfermarkt
+        3. WhoScored  → id_whoscored
+        4. Understat  → id_understat
+        5. StatsBomb  → id_statsbomb
     """
-    log.info("[START] Cargando dim_team...")
-    total = 0
-    total += _load_from_sofascore(conn)
-    total += _load_from_transfermarkt(conn)
-    total += _load_from_whoscored(conn)
-    total += _load_from_understat(conn)
-    total += _load_from_statsbomb(conn)
+    log.info("[START] Cargando dim_team... (comp=%s)", comp_name or "todas")
+    _active_comp_filter[0] = comp_name
+    try:
+        total = 0
+        total += _load_from_sofascore(conn)
+        total += _load_from_transfermarkt(conn)
+        total += _load_from_whoscored(conn)
+        total += _load_from_understat(conn)
+        total += _load_from_statsbomb(conn)
+    finally:
+        _active_comp_filter[0] = None
     log.info("[OK] dim_team completado — %d registros procesados", total)
     return total
 

@@ -97,7 +97,13 @@ MONTHS_TO_NAVIGATE = 9
 # False recomendado para poder resolver captchas manualmente
 HEADLESS = False
 
-OUTPUT_DIR = Path(__file__).resolve().parents[1] / "data" / "raw" / "uel" / "whoscored"
+OUTPUT_DIR = Path(__file__).resolve().parents[1] / "data" / "raw" / "uel" / "whoscored"  # legacy
+
+import sys as _sys
+_sys.path.append(str(Path(__file__).resolve().parents[1]))
+from utils.data_paths import raw_dir as _raw_dir, save_clean_csv as _save_clean_csv  # noqa: E402
+
+COMPETITION_NAME = "Europa League"
 
 # ── HELPERS ──────────────────────────────────────────────────────────────────
 
@@ -269,10 +275,10 @@ def scrape_whoscored_season(
     Returns:
         (matches_meta, all_events, all_players, all_teams)
     """
-    season_folder = _season_label_to_folder(season_label)
-    season_dir    = OUTPUT_DIR / season_folder
-    raw_dir       = season_dir / "raw"
+    folder_season = _season_label_to_folder(season_label).replace("season=", "")
+    raw_dir = _raw_dir(COMPETITION_NAME, folder_season, "whoscored")
     raw_dir.mkdir(parents=True, exist_ok=True)
+    season_dir = raw_dir  # alias retro-compatible
 
     # Obtener IDs: precargados o scrapeando fixtures
     known_ids = [str(mid) for mid in SEASONS_DATA.get(season_label, [])]
@@ -288,8 +294,9 @@ def scrape_whoscored_season(
         match_ids = get_season_match_ids(driver, season_label, url)
 
     _save_json(
-        [{"whoscored_match_id": mid, "season": season_label} for mid in match_ids],
-        raw_dir / f"matches_batch_{batch_id}.json"
+        [{"whoscored_match_id": mid, "season": season_label,
+          "batch_id": batch_id} for mid in match_ids],
+        raw_dir / "fixtures.json",
     )
 
     matches_meta: list[dict] = []
@@ -305,7 +312,7 @@ def scrape_whoscored_season(
             log.warning("    Sin datos para partido %s, saltando", mid)
             continue
 
-        _save_json(match_data, raw_dir / f"match_{mid}" / "events_raw.json")
+        _save_json(match_data, raw_dir / "matches" / str(mid) / "events_raw.json")
 
         matches_meta.append(_build_match_meta(match_data))
         all_events.extend(_extract_raw_events(match_data))
@@ -524,16 +531,12 @@ def main():
             df_teams   = extract_teams(all_players_raw)
             df_players = extract_players(all_players_raw)
 
-            # Guardar CSVs
-            season_dir = OUTPUT_DIR / _season_label_to_folder(season_label)
-            raw_dir = season_dir / "raw"
-            season_dir.mkdir(parents=True, exist_ok=True)
-            raw_dir.mkdir(parents=True, exist_ok=True)
-
-            df_matches.to_csv(season_dir / "matches_clean.csv", index=False, encoding="utf-8-sig")
-            df_events.to_csv( season_dir / "events_clean.csv",  index=False, encoding="utf-8-sig")
-            df_teams.to_csv(  season_dir / "teams.csv",         index=False, encoding="utf-8-sig")
-            df_players.to_csv(season_dir / "players.csv",       index=False, encoding="utf-8-sig")
+            # CSVs canónicos en data/clean/<comp>/<season>/whoscored/
+            folder_season = _season_label_to_folder(season_label).replace("season=", "")
+            _save_clean_csv(COMPETITION_NAME, folder_season, "whoscored", "matches", df_matches)
+            _save_clean_csv(COMPETITION_NAME, folder_season, "whoscored", "events",  df_events)
+            _save_clean_csv(COMPETITION_NAME, folder_season, "whoscored", "teams",   df_teams)
+            _save_clean_csv(COMPETITION_NAME, folder_season, "whoscored", "players", df_players)
 
             print(f"  Temporada {season_label}:")
             print(f"    Partidos: {len(df_matches)}")

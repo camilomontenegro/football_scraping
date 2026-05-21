@@ -57,11 +57,16 @@ DELAY_MAX = 6.0
 HEADLESS = False
 
 from pathlib import Path
- 
-# Define la ruta de salida para los CSVs (ajusta según tu estructura de carpetas) PARA CUALQUIER ORDENADOR QUE EJECUTE ESTE CÓDIGO, SE GUARDARÁN LOS CSVs EN data/raw/ucl/whoscored/
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent  # sube 3 niveles: ucl/ → scrapers/ → proyecto/
+
+# Ruta de salida legacy. Los CSVs canónicos se guardan vía utils.data_paths.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_DIR = PROJECT_ROOT / "data" / "raw" / "ucl" / "whoscored"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+import sys as _sys
+_sys.path.append(str(PROJECT_ROOT))
+from utils.data_paths import save_clean_csv as _save_clean_csv, normalize_season as _norm_season  # noqa: E402
+
+COMPETITION_NAME = "Champions League"
 
 
 # DRIVER (función create_driver hace todo el setup)
@@ -367,15 +372,24 @@ def main():
         print("\nâš  No se obtuvieron datos.")
         return
 
-    matches_path = os.path.join(OUTPUT_DIR, "whoscored_matches_ucl.csv")
-    events_path  = os.path.join(OUTPUT_DIR, "whoscored_events_ucl.csv")
-    players_path = os.path.join(OUTPUT_DIR, "whoscored_players_ucl.csv")
-    teams_path   = os.path.join(OUTPUT_DIR, "whoscored_teams_ucl.csv")
+    # Split por temporada → data/clean/champions_league/<season>/whoscored/<table>.csv
+    if "season" in df_matches.columns:
+        seasons_in_data = sorted(df_matches["season"].dropna().unique())
+    else:
+        seasons_in_data = ["2025_2026"]
 
-    df_matches.to_csv(matches_path, index=False)
-    df_events.to_csv( events_path,  index=False)
-    df_players.to_csv(players_path, index=False)
-    df_teams.to_csv(  teams_path,   index=False)
+    for s in seasons_in_data:
+        season_label = _norm_season(s) or str(s).replace("/", "_")
+        for name, df in (
+            ("matches", df_matches), ("events", df_events),
+            ("players", df_players), ("teams",  df_teams),
+        ):
+            if df is None or df.empty:
+                continue
+            slice_df = df[df["season"] == s].copy() if "season" in df.columns else df.copy()
+            if slice_df.empty:
+                continue
+            _save_clean_csv(COMPETITION_NAME, season_label, "whoscored", name, slice_df)
 
     print(f"\nâœ… Scraping finalizado")
     print(f"  Partidos: {len(df_matches)}")
