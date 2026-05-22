@@ -562,8 +562,8 @@ def transform_shots(shots_raw: list[dict]) -> pd.DataFrame:
         })
     df = pd.DataFrame(rows)
     if not df.empty:
-        df["x"]   = pd.to_numeric(df["x"],   errors="coerce").round(4)
-        df["y"]   = pd.to_numeric(df["y"],   errors="coerce").round(4)
+        df["x"]   = ((100 - pd.to_numeric(df["x"], errors="coerce")) * 1.05).round(2)  # 0-100 % → 0-105 m, mirrored to attacking-right
+        df["y"]   = (pd.to_numeric(df["y"], errors="coerce") * 0.68).round(2)  # 0-100 % → 0-68 m
         df["xg"]  = pd.to_numeric(df["xg"],  errors="coerce").round(4)
         df["minute"] = pd.to_numeric(df["minute"], errors="coerce").astype("Int16")
     return df
@@ -598,8 +598,8 @@ def transform_events(events_raw: list[dict]) -> pd.DataFrame:
     df = pd.DataFrame(rows)
     if not df.empty:
         df["minute"] = pd.to_numeric(df["minute"], errors="coerce").astype("Int16")
-        df["x"] = pd.to_numeric(df["x"], errors="coerce").round(4)
-        df["y"] = pd.to_numeric(df["y"], errors="coerce").round(4)
+        df["x"] = ((100 - pd.to_numeric(df["x"], errors="coerce")) * 1.05).round(2)  # 0-100 % → 0-105 m, mirrored to attacking-right
+        df["y"] = (pd.to_numeric(df["y"], errors="coerce") * 0.68).round(2)  # 0-100 % → 0-68 m
     return df
 
 

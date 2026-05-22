@@ -386,7 +386,7 @@ with tab_injuries:
 # ════════════════════════════════════════════════════════════════════
 with tab_shot:
     st.header("Shot Intelligence")
-    st.caption("Understat data only · Pitch coordinates: 105 m × 68 m")
+    st.caption("Understat + SofaScore · Pitch coordinates: 105 m × 68 m · Coordinates normalised to metres")
 
     # ── mplsoccer availability guard ─────────────────────────────
     try:
