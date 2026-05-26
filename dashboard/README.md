@@ -6,7 +6,7 @@ and therefore writes to the database.
 
 ## Run
 
-    cd football_scraping_unified
+    cd football_scraping
     streamlit run dashboard/app.py
 
 Opens at http://localhost:8501.
@@ -38,8 +38,8 @@ writes to the database; the others stay read-only.
 
 ## Notes
 
-- This dashboard is **read-only** except for the Wizard tab. To load data from
-  the CLI, run `python -m wizard.pipeline_runner` from `football_scraping_unified/`.
+- This dashboard is **read-only**. To load data, run `python pipeline_runner.py` from
+  `football_scraping/`. The dashboard never triggers scrapers or staging loaders.
 - SofaScore events have NULL coordinates by design (incident-only source).
 - Source IDs (StatsBomb, Understat, SofaScore) come from constants in
   `pipeline_runner.py`. Adding a new competition requires extending those constants
@@ -49,7 +49,7 @@ writes to the database; the others stay read-only.
 
 ## Troubleshooting
 
-- **DB connection error** — check `.env` at `football_scraping_unified/.env`
+- **DB connection error** — check `.env` at `football_scraping/.env`
 - **Empty tables / "No data found"** — run `python pipeline_runner.py` to load data first
-- **ImportError** — launch from the `football_scraping_unified/` directory, not from inside `dashboard/`
+- **ImportError** — launch from the `football_scraping/` directory, not from inside `dashboard/`
 - **Scanner timeout** — SofaScore may be rate-limiting; retry in a few minutes

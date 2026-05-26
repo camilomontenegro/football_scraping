@@ -63,9 +63,34 @@ def normalize(name: str) -> Optional[str]:
     # Solo letras, dígitos y espacios
     name = re.sub(r"[^a-z0-9 ]", " ", name)
     name = re.sub(r"\s+", " ", name).strip()
-    
-    # ── Diccionario Manual de Alias (Fútbol) ──
+
+    # ── Diccionario de Diminutivos Comunes ──
+    diminutives = {
+        r'\bfran\b': 'francisco',
+        r'\bpaco\b': 'francisco',
+        r'\bdani\b': 'daniel',
+        r'\balex\b': 'alejandro',
+        r'\bleo\b': 'lionel',
+        r'\bnico\b': 'nicolas',
+        r'\bmaxi\b': 'maximiliano',
+        r'\bfede\b': 'federico',
+        r'\bpepe\b': 'jose',
+        r'\bjuanma\b': 'juan manuel',
+        r'\bmanu\b': 'manuel',
+        r'\brafa\b': 'rafael',
+        r'\bgabi\b': 'gabriel',
+        r'\bfer\b': 'fernando',
+        r'\bjavi\b': 'javier',
+        r'\bnacho\b': 'ignacio',
+        r'\bandy\b': 'andrew',
+        r'\brob\b': 'robert',
+    }
+    for dim, full in diminutives.items():
+        name = re.sub(dim, full, name)
+
+    # ── Diccionario Manual de Alias Especiales (Fútbol) ──
     ALIASES = {
+        # Jugadores españoles comunes
         "papakouli diop": "pape diop",
         "joselu": "jose luis mato",
         "koke": "jorge resurreccion",
@@ -75,82 +100,141 @@ def normalize(name: str) -> Optional[str]:
         "rodri": "rodrigo hernandez",
         "vini jr": "vinicius junior",
         "pepe": "kepler laveran",
+        "xavi": "xavier hernandez",
+        "busquets": "sergio busquets",
+        "pique": "gerard pique",
+        "villa": "david villa",
+        "torres": "fernando torres",
+        "ramos": "sergio ramos",
+        "alba": "jordi alba",
+        "suarez": "luis suarez",
+        "benzema": "karim benzema",
+        "ronaldo": "cristiano ronaldo",
+        "messi": "lionel messi",
+        # Jugadores internacionales
+        "gazza": "paul gascoigne",
+        "pele": "pele",
+        "ronaldinho": "ronaldinho gaucho",
+        "neymar": "neymar santos",
+        "cr7": "cristiano ronaldo",
+        "cr 7": "cristiano ronaldo",
     }
     return ALIASES.get(name, name) or None
 
 
 def _similarity_score(a: str, b: str) -> int:
     """Puntúa la similitud entre dos strings normalizados (0-100).
-    
-    Aplica estrategias avanzadas:
-    1. Subconjuntos completos (ej. "lionel messi" vs "lionel andres messi cuccittini")
-    2. Iniciales (ej. "l messi" vs "lionel messi")
-    3. Typos (distancia de Levenshtein vía SequenceMatcher)
+
+    Usa múltiples estrategias:
+    1. Token set ratio (RapidFuzz) - permite orden diferente
+    2. Coincidencia de palabras completas (subconjuntos)
+    3. Análisis estructural (nombre + apellido)
+    4. Jaccard Index
+    5. Levenshtein (typos)
+
+    Versión mejorada que reduce falsos negativos.
     """
     if not a or not b:
         return 0
+
+    try:
+        from rapidfuzz import fuzz
+    except ImportError:
+        # Fallback si no está instalado
+        from difflib import SequenceMatcher
+        return int(SequenceMatcher(None, a, b).ratio() * 100)
+
     words_a = set(a.split())
     words_b = set(b.split())
-    if not words_a or not words_b:
-        return 0
-        
-    intersection = words_a & words_b
-    union        = words_a | words_b
-    
-    # 1. Subconjuntos (Nombres largos vs cortos)
-    if len(intersection) == len(words_a) or len(intersection) == len(words_b):
-        # Si comparten al menos 2 palabras completas, es casi seguro
-        if len(intersection) >= 2:
-            return 95
-        # Si uno de los nombres es de 1 sola palabra y está contenida
-        if len(words_a) == 1 or len(words_b) == 1:
-            return 90
-            
-    # 2. Análisis estructural (Nombre vs Apellido)
-    score = 0
     list_a = a.split()
     list_b = b.split()
-    
+
+    if not words_a or not words_b:
+        return 0
+
+    # ESTRATEGIA 1: Token Set Ratio (permite orden diferente)
+    token_set_score = fuzz.token_set_ratio(a, b)
+
+    # ESTRATEGIA 2: Coincidencia de palabras (subconjuntos)
+    intersection = words_a & words_b
+    union = words_a | words_b
+
+    subset_score = 0
+    if len(intersection) == len(words_a) or len(intersection) == len(words_b):
+        if len(intersection) >= 2:
+            subset_score = 95
+        elif len(words_a) == 1 or len(words_b) == 1:
+            subset_score = 70
+
+    # ESTRATEGIA 3: Análisis estructural (nombre + apellido)
+    structural_score = 0
     if len(list_a) >= 2 and len(list_b) >= 2:
         last_a = list_a[-1]
         last_b = list_b[-1]
         first_a = list_a[0]
         first_b = list_b[0]
-        
-        # El apellido tiene mucho peso
+
         if last_a == last_b:
-            score += 50
+            structural_score += 50
             if first_a == first_b:
-                score += 45 # Exacto (95)
+                structural_score += 45  # Total: 95 (exacto)
+            elif first_a.startswith(first_b) or first_b.startswith(first_a):
+                structural_score += 38  # Total: 88 (similar)
             elif first_a[0] == first_b[0]:
                 if len(first_a) == 1 or len(first_b) == 1:
-                    score += 38 # Inicial compatible (88)
+                    structural_score += 38  # Total: 88 (inicial)
                 else:
-                    score += 15 # Nombres distintos pero misma inicial (65 - Duda)
-            else:
-                score += 0 # Mismo apellido, distinto nombre (50 - Duda/Nuevo)
+                    structural_score += 15  # Total: 65 (duda)
         else:
-            # Apellidos distintos penalizan fuertemente. ¿Comparte el penúltimo?
-            # Ej: Transfermarkt = "Alejandro Pozo Pozo", Sofascore = "Alejandro Pozo"
+            # Comprobar doble apellido (común en español)
             if len(list_a) >= 3 and list_a[-2] == last_b:
-                score += 50
+                structural_score = 75
             elif len(list_b) >= 3 and list_b[-2] == last_a:
-                score += 50
-                
-    # 3. Jaccard Index básico
-    jaccard = int(100 * len(intersection) / len(union))
-    score = max(score, jaccard)
-    
-    # 4. Similitud de secuencias (para typos menores como "mesi" vs "messi")
-    seq_match = 0
-    if jaccard > 30 or a[0] == b[0]:
+                structural_score = 75
+
+    # ESTRATEGIA 4: Jaccard Index
+    jaccard_score = int(100 * len(intersection) / len(union))
+
+    # ESTRATEGIA 5: Levenshtein para typos menores
+    levenshtein_score = 0
+    if jaccard_score > 30 or a[0] == b[0]:
         from difflib import SequenceMatcher
-        seq_match = int(SequenceMatcher(None, a, b).ratio() * 100)
-        # Cortafuegos vital: Si difieren demasiado (ej: "Maximiliano Gomez" vs "Lovera" = 74%)
-        if seq_match < 85:
-            seq_match = 0
-        
-    return max(score, seq_match)
+        seq_ratio = SequenceMatcher(None, a, b).ratio()
+        levenshtein_score = int(seq_ratio * 100)
+        if levenshtein_score < 75:
+            levenshtein_score = 0
+
+    # Combinar todas las estrategias (máximo de todas)
+    result_score = max(
+        token_set_score,
+        subset_score,
+        structural_score,
+        jaccard_score,
+        levenshtein_score,
+    )
+
+    # Cortafuegos FLEXIBLE por Apellido Diferente
+    if len(list_a) >= 2 and len(list_b) >= 2:
+        last_a = list_a[-1]
+        last_b = list_b[-1]
+        apellidos_coinciden = (last_a == last_b)
+
+        if not apellidos_coinciden:
+            # Comprobar doble apellido
+            if len(list_a) >= 3 and list_a[-2] == last_b:
+                apellidos_coinciden = True
+            elif len(list_b) >= 3 and list_b[-2] == last_a:
+                apellidos_coinciden = True
+
+        if not apellidos_coinciden:
+            if result_score >= 80 and len(intersection) >= 2:
+                result_score = min(result_score, 78)
+            elif result_score >= 70 and len(intersection) >= 2:
+                result_score = min(result_score, 65)
+            else:
+                result_score = min(result_score, 50)
+
+    return result_score
 
 
 # ── Resolución de EQUIPOS ────────────────────────────────────────────────────

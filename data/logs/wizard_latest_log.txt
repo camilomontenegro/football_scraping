@@ -1,0 +1,94 @@
+[LOG] Esta ejecucion se guarda en: C:\Users\Ivan\Desktop\football_scraping\data\logs\wizard_latest_log.txt
+
+=== FOOTBALL DATA PIPELINE — WIZARD ===
+
+¿Qué quieres hacer? (default: Descargar temporada completa)
+  1) Descargar temporada completa
+  2) Actualizar datos con juegos nuevos
+  3) Descargar estadios por temporada
+  0) cancelar y salir
+  q) salir del wizard
+Selecciona una opción: 
+Selecciona la competición:
+
+  -- Ligas nacionales --
+  1) La Liga
+  2) Premier League
+  3) Bundesliga
+  4) Serie A
+  5) Ligue 1
+  6) Primeira Liga
+  7) Eredivisie
+  8) Championship
+  9) Segunda División
+
+  -- Torneos continentales --
+  10) Champions League
+  11) Europa League
+  12) Europa Conference League
+  13) European Championship
+  14) UEFA Nations League A
+  15) UEFA Nations League B
+  16) UEFA Nations League C
+  17) UEFA Nations League D
+  18) UEFA Women's EURO
+  19) World Cup Qualification UEFA
+
+  -- Torneos intercontinentales --
+  20) Copa America
+  21) FIFA World Cup
+  22) Africa Cup of Nations
+  23) Asian Cup
+  24) FIFA Club World Cup
+  25) FIFA Women's World Cup
+  26) Int. Friendly
+  27) World Cup Qualification CONMEBOL
+
+  0) volver
+  q) salir
+Selecciona una opción: 
+Selecciona la temporada a procesar: (default: 2025/2026)
+  1) 2020/2021
+  2) 2021/2022
+  3) 2022/2023
+  4) 2023/2024
+  5) 2024/2025
+  6) 2025/2026
+  0) volver al paso anterior
+  q) salir del wizard
+Selecciona una opción: 
+============================================================
+  RESUMEN DE LA OPERACIÓN
+============================================================
+  Acción      : Descarga de estadios (Transfermarkt → dim_stadium)
+  Competición : La Liga
+  Temporada   : 2025/2026
+  Fuente      : Transfermarkt (única para estadios)
+  Destino     : dim_stadium
+============================================================
+
+  S = ejecutar     0 = volver atrás     Q = salir
+¿Lanzar el pipeline? [S/0/q]: 
+=== INICIANDO DESCARGA DE ESTADIOS ===
+
+=== DESCARGA DE ESTADIOS (Transfermarkt) ===
+  Competición: La Liga
+  Temporada  : 2025/2026
+
+[1/2] Scrapeando estadios desde Transfermarkt...
+=======================================================
+  Transfermarkt — Estadios — ES1 2025_2026
+=======================================================
+
+  Equipos procesados: 20/20
+  Omitidos por caché (<30 días): 20
+
+  CSV listo: C:\Users\Ivan\Desktop\football_scraping\data\clean\la_liga\2025_2026\transfermarkt\stadiums.csv
+
+[2/2] Cargando dim_stadium...
+
+  [OK] 20 estadio(s) upserteados en dim_stadium.
+
+=== PROCESO FINALIZADO EXITOSAMENTE ===
+43:31,084 - INFO -   ✓ la_liga\2025_2026\transfermarkt\stadiums.csv — 20 filas procesadas
+2026-05-22 12:43:31,084 - INFO - [OK] dim_stadium completado — 20 upserts

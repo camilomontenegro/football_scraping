@@ -474,10 +474,13 @@ def _print_summary(state: Dict[str, Any]) -> None:
         op = "Actualización incremental"
 
     print("\n" + "=" * 60)
-    print("  RESUMEN DE LA OPERACIÓN")
+    print("  RESUMEN DE LA OPERACION")
     print("=" * 60)
-    print(f"  Acción      : {op}")
-    print(f"  Competición : {state['competition']}")
+    print(f"  Accion      : {op}")
+    if state.get("stadiums_only"):
+        print(f"  Competicion : Todas las ligas del wizard (WORKING_COMPETITIONS)")
+    else:
+        print(f"  Competicion : {state['competition']}")
     print(f"  Temporada   : {state['season']}")
 
     # En el sub-flujo de estadios no aplican fuente ni filtro de partidos
@@ -656,40 +659,91 @@ def run_stadiums_flow(competition: str, season: str, full_refresh: bool = False)
 
 def run_all_stadiums_flow(season: str, full_refresh: bool = False) -> None:
     """
-    Itera todas las competiciones de `dim_competition` con `id_transfermarkt`
-    y ejecuta `run_stadiums_flow` para cada una.
+    Itera las competiciones de clubes del wizard (WORKING_COMPETITIONS) y
+    ejecuta run_stadiums_flow para cada una. Las selecciones nacionales se
+    omiten automaticamente porque /stadion/verein/<team_id> no aplica a
+    federaciones.
 
-    Equivale al modo `--all-db` del scraper CLI, pero invocable desde el
-    wizard de Streamlit.
+    Equivale al modo --all-db del scraper CLI, pero invocable desde el
+    wizard interactivo (CLI o Streamlit). En esta version el usuario NO
+    elige liga: se itera la lista canonica del wizard.
     """
-    from scrapers.transfermarkt_stadiums_scraper import list_competitions_from_db
+    from wizard.competitions import WORKING_COMPETITIONS
+    from scripts.competitions import (
+        COMPETITIONS,
+        get_competition_slug_transfermarkt,
+    )
 
-    comps = list_competitions_from_db()
-    if not comps:
-        print("[ERROR] No hay competiciones con id_transfermarkt en `dim_competition`.")
-        return
+    # Misma lista negra que el scraper --all-db: selecciones nacionales sin
+    # estadio de club no tienen sentido aqui.
+    NATIONAL_TEAM_COMPS = {
+        "FIFA World Cup",
+        "European Championship",
+        "Copa America",
+        "UEFA Women's EURO",
+        "FIFA Women's World Cup",
+        "UEFA Nations League A",
+        "UEFA Nations League B",
+        "UEFA Nations League C",
+        "UEFA Nations League D",
+        "World Cup Qualification UEFA",
+        "World Cup Qualification CONMEBOL",
+        "Int. Friendly",
+        "Africa Cup of Nations",
+        "Asian Cup",
+    }
+
+    # Mantener el orden del wizard (Ligas nacionales → continentales → ...)
+    seen, ordered = set(), []
+    for _bucket, names in WORKING_COMPETITIONS.items():
+        for n in names:
+            if n in seen:
+                continue
+            seen.add(n)
+            ordered.append(n)
+
+    to_process, skipped = [], []
+    for name in ordered:
+        cfg = COMPETITIONS.get(name, {})
+        league_code = (cfg.get("sources", {})
+                          .get("transfermarkt", {})
+                          .get("league_code"))
+        reasons = []
+        if not league_code:
+            reasons.append("sin league_code TM")
+        if not get_competition_slug_transfermarkt(name):
+            reasons.append("sin slug TM")
+        if name in NATIONAL_TEAM_COMPS:
+            reasons.append("seleccion nacional")
+        if reasons:
+            skipped.append((name, "; ".join(reasons)))
+        else:
+            to_process.append(name)
 
     print("\n=== DESCARGA MASIVA DE ESTADIOS (Transfermarkt) ===")
-    print(f"  Temporada    : {season}")
-    print(f"  Competiciones: {len(comps)}")
+    print(f"  Temporada     : {season}")
+    print(f"  Procesando    : {len(to_process)} competiciones")
+    print(f"  Omitidas      : {len(skipped)}")
+    if skipped:
+        print("  Detalle omitidas:")
+        for name, why in skipped:
+            print(f"    - {name}: {why}")
 
     ok: list[str] = []
     failed: list[tuple[str, str]] = []
-
-    for i, c in enumerate(comps, start=1):
-        name = c["canonical_name"]
-        print(f"\n----- [{i}/{len(comps)}] {name} -----")
+    for i, name in enumerate(to_process, start=1):
+        print(f"\n----- [{i}/{len(to_process)}] {name} -----")
         try:
             run_stadiums_flow(name, season, full_refresh=full_refresh)
             ok.append(name)
         except Exception as e:  # noqa: BLE001
-            print(f"  [ERROR] Falló la competición '{name}': {e}")
+            print(f"  [ERROR] Fallo en '{name}': {e}")
             failed.append((name, str(e)))
 
     print("\n=== RESUMEN DESCARGA MASIVA DE ESTADIOS ===")
-    print(f"  OK     : {len(ok)}/{len(comps)}")
+    print(f"  OK    : {len(ok)}/{len(to_process)}")
     if failed:
-        print(f"  Fallos : {len(failed)}")
+        print(f"  Fallos: {len(failed)}")
         for name, err in failed:
             print(f"    - {name}: {err}")
 
@@ -718,9 +772,17 @@ def interactive_flow() -> None:
                 state["operation"] = op
                 state["full_scrape"] = op.lower().startswith("descargar temporada")
                 state["stadiums_only"] = "estadios" in op.lower()
+                # En el flujo de estadios el usuario NO elige liga: se
+                # iteran todas las ligas de WORKING_COMPETITIONS.
+                if state["stadiums_only"]:
+                    state["competition"] = "ALL"
                 idx += 1
 
             elif phase == "competition":
+                # En modo estadios saltamos la eleccion de liga.
+                if state.get("stadiums_only"):
+                    idx += 1
+                    continue
                 comp = choose_competition()
                 if comp == BACK:
                     idx -= 1
@@ -728,7 +790,7 @@ def interactive_flow() -> None:
                 state["competition"] = comp
                 state["comp_conf"] = get_competition(comp)
                 if not state["comp_conf"]:
-                    print(f"  [ERROR] Competición '{comp}' no encontrada.")
+                    print(f"  [ERROR] Competicion '{comp}' no encontrada.")
                     continue
                 idx += 1
 
@@ -777,11 +839,11 @@ def interactive_flow() -> None:
         print("\n  Saliendo del wizard. Hasta luego!")
         return
 
-    # ── Ejecución ────────────────────────────────────────────────────
-    # Caso especial: sólo estadios → sub-pipeline dedicado, no usa run_pipeline.
+    # -- Ejecucion ------------------------------------------------
+    # Caso especial: solo estadios -> iteramos TODAS las ligas del wizard.
     if state.get("stadiums_only"):
-        print("\n=== INICIANDO DESCARGA DE ESTADIOS ===")
-        run_stadiums_flow(state["competition"], state["season"])
+        print("\n=== INICIANDO DESCARGA MASIVA DE ESTADIOS ===")
+        run_all_stadiums_flow(state["season"])
         print("\n=== PROCESO FINALIZADO EXITOSAMENTE ===")
         return
 

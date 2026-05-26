@@ -23,12 +23,13 @@ import pandas as pd
 import streamlit as st
 
 # Make sibling modules (loaders/, pipeline_runner.py, etc.) importable when run
-# as `streamlit run dashboard/app.py` from `football_scraping_unified/`.
+# as `streamlit run dashboard/app.py` from `football_scraping/`.
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from dashboard import analytics, db, explore, scanner, wizard_view
+from dashboard.i18n import t, get_lang, LANGUAGES
 
 st.set_page_config(
     page_title="Football Scraping Dashboard",
@@ -36,13 +37,22 @@ st.set_page_config(
     layout="wide",
 )
 
+# ── Language selector (sidebar) ──────────────────────────
+_lang_label = st.sidebar.selectbox(
+    "🌐 Language / Idioma",
+    list(LANGUAGES.keys()),
+    index=0,
+    key="lang_selector",
+)
+st.session_state["app_language"] = LANGUAGES[_lang_label]
+
 # ─────────────────────────────────────────────
 # DB-unreachable guard (runs once on each rerun)
 # ─────────────────────────────────────────────
 try:
     _DB_SUMMARY = db.get_db_summary()
 except Exception:
-    st.error("Cannot connect to the database. Check your .env file.")
+    st.error(t("db_error"))
     st.stop()
 
 def _fmt(n) -> str:
@@ -51,55 +61,53 @@ def _fmt(n) -> str:
 
 (tab_explore, tab_teams, tab_gk, tab_players, tab_injuries,
  tab_shot, tab_stadiums, tab_monitor, tab_wizard) = st.tabs(
-    ["Exploration", "Teams", "Goalkeepers", "Players",
-     "Injuries", "Shot Intelligence", "Stadiums",
-     "Pipeline monitoring", "Wizard"]
+    [t("tab_exploration"), t("tab_teams"), t("tab_goalkeepers"), t("tab_players"),
+     t("tab_injuries"), t("tab_shot_intelligence"), t("tab_stadiums"),
+     t("tab_pipeline"), t("tab_wizard")]
 )
 
 
 # ════════════════════════════════════════════════════════════════════
 # TAB 1 — EXPLORATION
 # ════════════════════════════════════════════════════════════════════
-def _empty_info(message: str = "No data found for this selection. "
-                                "Check pipeline coverage in the Pipeline monitoring tab."):
-    st.info(message)
+def _empty_info(message: str | None = None):
+    st.info(message or t("no_data"))
 
 
 with tab_explore:
-    st.header("Exploration")
+    st.header(t("exploration"))
 
     competitions = explore.get_competitions()
     c1, c2, c3 = st.columns(3)
     with c1:
-        competition = st.selectbox("Competition", competitions, key="ex_comp")
+        competition = st.selectbox(t("competition"), competitions, key="ex_comp")
     seasons = explore.get_seasons_for_competition(competition)
     with c2:
         season = st.selectbox(
-            "Season", seasons or ["(no seasons in DB)"], key="ex_season",
+            t("season"), seasons or ["(no seasons in DB)"], key="ex_season",
             disabled=not seasons,
         )
     teams = explore.get_teams_for_season(season, competition) if seasons else []
     with c3:
         team_choice = st.selectbox(
-            "Team", ["All teams"] + teams, key="ex_team",
+            t("team"), [t("all_teams")] + teams, key="ex_team",
             disabled=not teams,
         )
-    team = None if team_choice == "All teams" else team_choice
+    team = None if team_choice == t("all_teams") else team_choice
 
     if not seasons:
-        st.info("No seasons in `dim_season` yet. Run `python pipeline_runner.py` "
-                "to populate the database.")
+        st.info(t("no_seasons"))
     else:
         # Metric cards
         summary = explore.get_season_summary(season, team, competition)
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Matches",  _fmt(summary['matches']))
-        m2.metric("Goals",    _fmt(summary['goals']))
-        m3.metric("xG",       f"{summary['xg']:.1f}")
-        m4.metric("Injuries", _fmt(summary['injuries']))
+        m1.metric(t("matches"),  _fmt(summary['matches']))
+        m2.metric(t("goals"),    _fmt(summary['goals']))
+        m3.metric("xG",         f"{summary['xg']:.1f}")
+        m4.metric(t("tab_injuries"), _fmt(summary['injuries']))
 
         t_results, t_players, t_shots, t_events = st.tabs(
-            ["Results", "Player stats", "Shots by source", "Events"]
+            [t("results"), t("player_stats"), t("shots_by_source"), t("events")]
         )
 
         # ── Results ───────────────────────────────────────
@@ -114,9 +122,9 @@ with tab_explore:
                     draws  = int((df["result"] == "D").sum())
                     losses = int((df["result"] == "L").sum())
                     w1, w2, w3 = st.columns(3)
-                    w1.metric("Wins",   wins)
-                    w2.metric("Draws",  draws)
-                    w3.metric("Losses", losses)
+                    w1.metric(t("wins"),   wins)
+                    w2.metric(t("draws"),  draws)
+                    w3.metric(t("losses"), losses)
 
         # ── Player stats ──────────────────────────────────
         with t_players:
@@ -166,24 +174,24 @@ def _tab_selectors(key_prefix: str, all_seasons: bool = False):
     _comps = explore.get_competitions()
     sc1, sc2, sc3 = st.columns(3)
     with sc1:
-        _comp = st.selectbox("Competition", _comps, key=f"{key_prefix}_comp")
+        _comp = st.selectbox(t("competition"), _comps, key=f"{key_prefix}_comp")
     _seasons = explore.get_seasons_for_competition(_comp)
-    season_opts = (["All seasons"] + _seasons) if all_seasons else (_seasons or ["(no seasons)"])
+    season_opts = ([t("all_seasons")] + _seasons) if all_seasons else (_seasons or ["(no seasons)"])
     with sc2:
         _season_sel = st.selectbox(
-            "Season", season_opts,
+            t("season"), season_opts,
             key=f"{key_prefix}_season",
             disabled=not _seasons,
         )
-    _season = None if (_season_sel in ("All seasons", "(no seasons)") or not _seasons) else _season_sel
+    _season = None if (_season_sel in (t("all_seasons"), "(no seasons)") or not _seasons) else _season_sel
     _teams = explore.get_teams_for_season(_season or (_seasons[0] if _seasons else ""), _comp) if _seasons else []
     with sc3:
         _team_sel = st.selectbox(
-            "Team", ["All teams"] + _teams,
+            t("team"), [t("all_teams")] + _teams,
             key=f"{key_prefix}_team",
             disabled=not _teams,
         )
-    _team = None if _team_sel == "All teams" else _team_sel
+    _team = None if _team_sel == t("all_teams") else _team_sel
     return _comp, _season, _team
 
 
@@ -191,11 +199,11 @@ def _tab_selectors(key_prefix: str, all_seasons: bool = False):
 # TAB 2 — TEAMS
 # ════════════════════════════════════════════════════════════════════
 with tab_teams:
-    st.header("Teams")
+    st.header(t("tab_teams"))
     _t_comp, _t_season, _t_team = _tab_selectors("teams")
 
     if _t_season is None:
-        st.info("Select a season to view team standings.")
+        st.info(t("select_season"))
     else:
         df = explore.get_team_standings(_t_season, _t_team, _t_comp)
         if df.empty:
@@ -207,10 +215,10 @@ with tab_teams:
             avg_xg = round(float(df["xg_for"].sum()) / total_matches, 2) if total_matches else 0
 
             m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Teams", len(df))
-            m2.metric("Total goals", _fmt(total_goals))
-            m3.metric("Avg goals/match", f"{avg_goals:.2f}")
-            m4.metric("Avg xG/match", f"{avg_xg:.2f}")
+            m1.metric(t("tab_teams"), len(df))
+            m2.metric(t("total_goals"), _fmt(total_goals))
+            m3.metric(t("avg_goals_match"), f"{avg_goals:.2f}")
+            m4.metric(t("avg_xg_match"), f"{avg_xg:.2f}")
 
             display_df = df.rename(columns={
                 "p": "Played", "w": "Won", "d": "Drawn", "l": "Lost",
@@ -229,11 +237,11 @@ with tab_teams:
 # TAB 3 — GOALKEEPERS
 # ════════════════════════════════════════════════════════════════════
 with tab_gk:
-    st.header("Goalkeepers")
+    st.header(t("goalkeepers"))
     _gk_comp, _gk_season, _gk_team = _tab_selectors("gk")
 
     if _gk_season is None:
-        st.info("Select a season to view goalkeeper statistics.")
+        st.info(t("select_season"))
     else:
         df = explore.get_goalkeeper_stats(_gk_season, _gk_team, _gk_comp)
         if df.empty:
@@ -245,10 +253,10 @@ with tab_gk:
             total_cs = int(df["clean_sheets"].sum())
 
             m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Goalkeepers tracked", gk_count)
-            m2.metric("Total saves", _fmt(total_saves))
-            m3.metric("Avg save %", f"{avg_save_pct:.1f}%")
-            m4.metric("Clean sheets", _fmt(total_cs))
+            m1.metric(t("gk_tracked"), gk_count)
+            m2.metric(t("total_saves"), _fmt(total_saves))
+            m3.metric(t("avg_save_pct"), f"{avg_save_pct:.1f}%")
+            m4.metric(t("clean_sheets"), _fmt(total_cs))
 
             display_df = df.rename(columns={
                 "goalkeeper": "Goalkeeper",
@@ -277,7 +285,7 @@ with tab_gk:
 # TAB 4 — PLAYERS
 # ════════════════════════════════════════════════════════════════════
 with tab_players:
-    st.header("Players")
+    st.header(t("tab_players"))
     _pl_comp, _pl_season, _pl_team = _tab_selectors("players", all_seasons=True)
 
     df = explore.get_player_discipline(_pl_season, _pl_team, _pl_comp)
@@ -285,10 +293,10 @@ with tab_players:
         st.info("No player data found for this selection.")
     else:
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Players tracked", df["player"].nunique())
-        m2.metric("Total goals", _fmt(df['goals'].sum()))
-        m3.metric("Yellow cards", _fmt(df['yellow_cards'].sum()))
-        m4.metric("Red cards", _fmt(df['red_cards'].sum()))
+        m1.metric(t("players_tracked"), df["player"].nunique())
+        m2.metric(t("total_goals"), _fmt(df['goals'].sum()))
+        m3.metric(t("yellow_cards"), _fmt(df['yellow_cards'].sum()))
+        m4.metric(t("red_cards"), _fmt(df['red_cards'].sum()))
 
         display_df = df.copy()
         if _pl_season is not None:
@@ -327,7 +335,7 @@ with tab_players:
 # TAB 5 — INJURIES
 # ════════════════════════════════════════════════════════════════════
 with tab_injuries:
-    st.header("Injuries")
+    st.header(t("tab_injuries"))
     _inj_comp, _inj_season, _inj_team = _tab_selectors("injuries", all_seasons=True)
 
     df = explore.get_injuries_standalone(_inj_season, _inj_team)
@@ -340,10 +348,10 @@ with tab_injuries:
         ongoing = int(df["date_until"].isna().sum())
 
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Total injuries", _fmt(total_inj))
-        m2.metric("Total days absent", _fmt(total_days))
-        m3.metric("Total matches missed", _fmt(total_missed))
-        m4.metric("Ongoing injuries", _fmt(ongoing))
+        m1.metric(t("total_injuries"), _fmt(total_inj))
+        m2.metric(t("total_days_absent"), _fmt(total_days))
+        m3.metric(t("total_matches_missed"), _fmt(total_missed))
+        m4.metric(t("ongoing_injuries"), _fmt(ongoing))
 
         df_render = df.copy()
         df_render["date_until"] = df_render["date_until"].fillna("Ongoing").astype(str)
@@ -351,7 +359,7 @@ with tab_injuries:
 
         breakdown = explore.get_injury_type_breakdown(_inj_season, _inj_team)
         if not breakdown.empty:
-            st.subheader("Top injury types")
+            st.subheader(t("top_injury_types"))
             _inj_sort_asc = st.radio(
                 "Sort order", ["Descending", "Ascending"],
                 horizontal=True, key="inj_type_sort",
@@ -373,7 +381,7 @@ with tab_injuries:
         if _inj_season is None:
             trend = explore.get_injury_season_trend(_inj_team)
             if not trend.empty:
-                st.subheader("Season trend")
+                st.subheader(t("season_trend"))
                 st.dataframe(trend, width='stretch')
 
         st.caption(
@@ -386,8 +394,8 @@ with tab_injuries:
 # TAB 6 — SHOT INTELLIGENCE
 # ════════════════════════════════════════════════════════════════════
 with tab_shot:
-    st.header("Shot Intelligence")
-    st.caption("Understat data only · Pitch coordinates: 105 m × 68 m")
+    st.header(t("shot_intelligence"))
+    st.caption("All sources · Pitch coordinates: 105 m × 68 m · Coordinates normalised to metres")
 
     # ── mplsoccer availability guard ─────────────────────────────
     try:
@@ -442,7 +450,7 @@ with tab_shot:
         st.info("No seasons in the database yet.")
     else:
         # ── Section 1 — Pitch Danger Heatmap ─────────────────────
-        st.subheader("Pitch Danger Heatmap")
+        st.subheader(t("pitch_danger_heatmap"))
 
         hm_df = analytics.get_heatmap_data(si_season, _si_team_id, _si_competition_val)
 
@@ -489,28 +497,31 @@ with tab_shot:
         st.divider()
 
         # ── Section 2 — Player Finishing Quality ──────────────────
-        st.subheader("Player Finishing Quality")
+        st.subheader(t("player_finishing"))
         st.caption("Min. 20 shots to qualify · Goals − xG: positive = overperforming")
 
         pf_df = analytics.get_player_finishing(si_season, _si_team_id, _si_competition_val)
 
         if pf_df.empty:
-            st.info("No players with 20+ Understat shots for this selection.")
+            st.info("No players with 20+ shots for this selection.")
         else:
             _pf_sort_asc = st.radio(
                 "Sort order", ["Descending", "Ascending"],
                 horizontal=True, key="si_finishing_sort",
             ) == "Ascending"
             pf_df = pf_df.sort_values("goals_minus_xg", ascending=_pf_sort_asc)
+            goals_minus_xg = pd.to_numeric(
+                pf_df["goals_minus_xg"], errors="coerce"
+            ).fillna(0)
 
             bar_colors = [
                 "#2ecc71" if v >= 0 else "#e74c3c"
-                for v in pf_df["goals_minus_xg"]
+                for v in goals_minus_xg
             ]
             fig2, ax2 = plt.subplots(figsize=(10, max(4, len(pf_df) * 0.45)))
             fig2.patch.set_facecolor("#0e1117")
             ax2.set_facecolor("#0e1117")
-            ax2.barh(pf_df["player"], pf_df["goals_minus_xg"], color=bar_colors)
+            ax2.barh(pf_df["player"], goals_minus_xg, color=bar_colors)
             ax2.axvline(0, color="white", linewidth=0.8, linestyle="--")
             ax2.set_xlabel("Goals − xG", color="white")
             ax2.tick_params(colors="white")
@@ -530,9 +541,9 @@ with tab_shot:
         st.divider()
 
         # ── Section 3 — Set-piece Specialists ────────────────────
-        st.subheader("Set-piece Specialists")
+        st.subheader(t("setpiece_specialists"))
 
-        sp_df = analytics.get_setpiece_goals(si_season, _si_team_id)
+        sp_df = analytics.get_setpiece_goals(si_season, _si_team_id, competition=_si_competition_val)
 
         if sp_df.empty:
             st.info("No set-piece goal data for this selection.")
@@ -559,13 +570,14 @@ with tab_shot:
 
             if si_player_id is not None:
                 bucket_df = analytics.get_setpiece_goals(
-                    si_season, _si_team_id, player_id=si_player_id
+                    si_season, _si_team_id, player_id=si_player_id,
+                    competition=_si_competition_val,
                 )
                 if not bucket_df.empty:
                     st.bar_chart(bucket_df.set_index("situation_bucket")["goals"])
 
             st.caption(
-                "Source: fact_shots (Understat) · "
+                "Source: fact_shots (all sources) · "
                 "Penalty = situation 'penalty' · "
                 "Free Kick = 'direct freekick' / 'free-kick'"
             )
@@ -574,20 +586,25 @@ with tab_shot:
 
 
 # ════════════════════════════════════════════════════════════════════
-# TAB 7 — STADIUMS  (dim_stadium · Transfermarkt)
+# TAB 7 — PIPELINE MONITORING
+
+# ════════════════════════════════════════════════════════════════════
+# TAB — STADIUMS  (dim_stadium · Transfermarkt · SCD2)
 # ════════════════════════════════════════════════════════════════════
 with tab_stadiums:
-    st.header("Stadiums")
+    st.header(t("stadiums"))
     st.caption(
-        "Estadios por equipo y temporada — fuente: Transfermarkt. "
-        "Lánzalos desde el wizard: \"Descargar estadios por temporada\"."
+        "Estadios por equipo — fuente: Transfermarkt. "
+        "Modelo SCD2: una fila por estado del estadio, con rango de "
+        "temporadas. Lanza la descarga desde la pestaña Wizard."
     )
 
     if not explore._stadium_table_exists():
         st.warning(
             "La tabla `dim_stadium` no existe todavía. "
             "Aplica la migración:\n\n"
-            "    psql -U postgres -d db_football_completa -f db/add_dim_stadium.sql"
+            "    psql -U postgres -d football_db -f db/add_dim_stadium.sql\n\n"
+            "Y luego carga datos desde el wizard (\"Descargar estadios por temporada\")."
         )
     else:
         # ── Filtros ──────────────────────────────────────────────
@@ -632,11 +649,11 @@ with tab_stadiums:
             season=season_q, competition=comp_q, country=country_q,
         )
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Stadiums",        _fmt(summary["n_stadiums"]))
-        m2.metric("Total capacity",  _fmt(summary["total_capacity"]))
-        m3.metric("Avg capacity",    _fmt(summary["avg_capacity"]))
+        m1.metric(t("stadiums"),        _fmt(summary["n_stadiums"]))
+        m2.metric(t("total_capacity"),  _fmt(summary["total_capacity"]))
+        m3.metric(t("avg_capacity"),    _fmt(summary["avg_capacity"]))
         m4.metric(
-            f"Largest ({summary['max_stadium']})",
+            f"{t('largest')} ({summary['max_stadium']})",
             _fmt(summary["max_capacity"]),
         )
 
@@ -647,17 +664,16 @@ with tab_stadiums:
         )
         if df_st.empty:
             st.info(
-                "No hay estadios para esta combinación de filtros. "
-                "Si acabas de migrar la tabla, lanza desde el wizard "
+                "No hay estadios para esta combinación de filtros. Si "
+                "acabas de migrar la tabla, lanza desde el wizard "
                 "\"Descargar estadios por temporada\" para poblarla."
             )
         else:
-            # Hacer el link de TM clicable
             display_df = df_st.copy()
             display_df.columns = [
                 "stadium_id", "Team", "Season", "Stadium", "Capacity",
-                "Seats covered", "Inaugurated", "Refurbished",
-                "Owner", "City", "Country", "Surface", "Transfermarkt URL",
+                "Built", "Owner", "City", "Country", "Surface",
+                "Architect", "Lat", "Lon", "Transfermarkt URL",
             ]
             st.dataframe(
                 display_df.drop(columns=["stadium_id"]),
@@ -667,18 +683,19 @@ with tab_stadiums:
                         "Transfermarkt", display_text="abrir"
                     ),
                     "Capacity": st.column_config.NumberColumn(format="%d"),
-                    "Seats covered": st.column_config.NumberColumn(format="%d"),
+                    "Lat": st.column_config.NumberColumn(format="%.4f"),
+                    "Lon": st.column_config.NumberColumn(format="%.4f"),
                 },
             )
 
-            # ── Gráfico top-15 por aforo ─────────────────────────
+            # ── Grafico top-15 por aforo ─────────────────────────
             top = (
                 df_st.dropna(subset=["capacity"])
                      .sort_values("capacity", ascending=False)
                      .head(15)
             )
             if not top.empty:
-                st.subheader("Top 15 by capacity")
+                st.subheader(t("top_15_capacity"))
                 fig_st, ax_st = plt.subplots(figsize=(10, max(4, len(top) * 0.4)))
                 fig_st.patch.set_facecolor("#0e1117")
                 ax_st.set_facecolor("#0e1117")
@@ -696,30 +713,29 @@ with tab_stadiums:
                 plt.close(fig_st)
 
         st.caption(
-            "Source: dim_stadium (Transfermarkt). "
-            "Unicidad por (id_transfermarkt_team, season) — un equipo puede "
-            "tener estadios distintos por temporada (obras, mudanzas)."
+            "Source: dim_stadium (Transfermarkt, SCD2). Granularidad: una "
+            "fila por estado del estadio. Si la fila tiene "
+            "valid_from_season=valid_to_season, sólo cubre esa temporada; "
+            "si cubre un rango, no hubo cambio en esos años."
         )
 
 
 # ════════════════════════════════════════════════════════════════════
-# TAB 8 — PIPELINE MONITORING
-# ════════════════════════════════════════════════════════════════════
 with tab_monitor:
-    st.header("Pipeline monitoring")
+    st.header(t("pipeline_monitoring"))
 
     # ── Section 1 — DB metric cards ───────────────────────
     p1, p2, p3, p4 = st.columns(4)
-    p1.metric("Players",         _fmt(_DB_SUMMARY['players']))
-    p2.metric("Matches",         _fmt(_DB_SUMMARY['matches']))
-    p3.metric("Shots (with xG)", _fmt(_DB_SUMMARY['shots']))
-    p4.metric("Injuries",        _fmt(_DB_SUMMARY['injuries']))
+    p1.metric(t("tab_players"),    _fmt(_DB_SUMMARY['players']))
+    p2.metric(t("matches"),       _fmt(_DB_SUMMARY['matches']))
+    p3.metric("Shots (xG)",       _fmt(_DB_SUMMARY['shots']))
+    p4.metric(t("tab_injuries"),  _fmt(_DB_SUMMARY['injuries']))
 
     st.divider()
 
     # ── Section 2 — Season scanner ────────────────────────
-    st.subheader("Season scanner")
-    if st.button("Scan all sources", type="primary", key="scan_btn"):
+    st.subheader(t("season_scanner"))
+    if st.button(t("scan_all_sources"), type="primary", key="scan_btn"):
         with st.spinner("Scanning all sources..."):
             st.session_state["scan_results"] = scanner.scan_all()
 
@@ -750,7 +766,7 @@ with tab_monitor:
     st.divider()
 
     # ── Section 3 — Coverage ──────────────────────────────
-    st.subheader("Coverage by source")
+    st.subheader(t("coverage_by_source"))
     cov_competitions = explore.get_competitions()
     cov_seasons = explore.get_seasons_for_competition(cov_competitions[0]) \
         if cov_competitions else []
@@ -791,13 +807,13 @@ with tab_monitor:
     st.divider()
 
     # ── Section 4 — Player review ─────────────────────────
-    st.subheader("Player review queue")
+    st.subheader(t("player_review_queue"))
     pr_stats = db.get_player_review_stats()
     r1, r2, r3, r4 = st.columns(4)
-    r1.metric("Total",           _fmt(pr_stats['total']))
-    r2.metric("Unresolved",      _fmt(pr_stats['unresolved']))
-    r3.metric("Resolved",        _fmt(pr_stats['resolved']))
-    r4.metric("Avg similarity",  f"{pr_stats['avg_score']:.1f}")
+    r1.metric(t("total"),          _fmt(pr_stats['total']))
+    r2.metric(t("unresolved"),     _fmt(pr_stats['unresolved']))
+    r3.metric(t("resolved"),       _fmt(pr_stats['resolved']))
+    r4.metric(t("avg_similarity"), f"{pr_stats['avg_score']:.1f}")
     pr_df = db.get_player_review_queue(50)
     if pr_df.empty:
         st.info("No unresolved entries in `player_review`.")
@@ -811,7 +827,7 @@ with tab_monitor:
     st.divider()
 
     # ── Section 5 — Recent matches ────────────────────────
-    st.subheader("Recent matches")
+    st.subheader(t("recent_matches"))
     rm_df = db.get_recent_matches(20)
     if rm_df.empty:
         st.info("No matches in `dim_match` yet.")
@@ -820,7 +836,7 @@ with tab_monitor:
 
 
 # ════════════════════════════════════════════════════════════════════
-# TAB 9 — WIZARD (writes to the database — read-only exception)
+# TAB 8 — WIZARD (writes to the database — read-only exception)
 # ════════════════════════════════════════════════════════════════════
 with tab_wizard:
     wizard_view.render()

@@ -55,7 +55,10 @@ WORKING_COMPETITIONS: Dict[str, list[str]] = {
     ],
     "Torneos intercontinentales": [
         "FIFA World Cup",
-        "FIFA Club World Cup",
+        # "FIFA Club World Cup": retirado del wizard hasta que tengamos
+        # datos de esta competicion en el resto de fuentes (Sofascore,
+        # WhoScored, Understat, StatsBomb). Si se vuelve a habilitar,
+        # anadirlo aqui de nuevo.
     ],
 }
 
@@ -432,7 +435,9 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
         "country_code": "EU",
         "sources": {
             "transfermarkt": {
-                "league_code": "ECL",
+                # Transfermarkt usa el codigo "UCOL" para la Conference League.
+                # "ECL" provoca 404 en /uefa-europa-conference-league/.../pokalwettbewerb/ECL/...
+                "league_code": "UCOL",
                 "name": "Conference League",
             },
             "sofascore": {

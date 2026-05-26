@@ -243,16 +243,20 @@ def _load_from_sofascore(conn) -> int:
             away_score  = row.get("away_score") if pd.notna(row.get("away_score")) else None
             comp_id     = resolve_comp_id(competition)
 
+            attendance_raw = row.get("attendance")
+            attendance_val = _safe_int(attendance_raw) if pd.notna(attendance_raw) else None
+
             conn.execute(text("""
                 INSERT INTO dim_match
                     (match_date, competition, season,
                      home_team_id, away_team_id,
                      competition_id,
                      home_score, away_score,
+                     attendance,
                      data_source, id_sofascore)
                 VALUES
                     (:date, :comp, :season, :hid, :aid, :cid,
-                     :hsc, :asc, 'sofascore', :sid)
+                     :hsc, :asc, :att, 'sofascore', :sid)
                 ON CONFLICT (id_sofascore) WHERE id_sofascore IS NOT NULL
                 DO UPDATE SET
                     match_date     = EXCLUDED.match_date,
@@ -260,7 +264,8 @@ def _load_from_sofascore(conn) -> int:
                     away_score     = EXCLUDED.away_score,
                     competition    = EXCLUDED.competition,
                     season         = EXCLUDED.season,
-                    competition_id = COALESCE(EXCLUDED.competition_id, dim_match.competition_id)
+                    competition_id = COALESCE(EXCLUDED.competition_id, dim_match.competition_id),
+                    attendance     = COALESCE(EXCLUDED.attendance, dim_match.attendance)
             """), {
                 "date": match_date,
                 "comp": competition,
@@ -270,6 +275,7 @@ def _load_from_sofascore(conn) -> int:
                 "cid":  comp_id,
                 "hsc":  _safe_int(home_score),
                 "asc":  _safe_int(away_score),
+                "att":  attendance_val,
                 "sid":  sid,
             })
             conn.execute(text(f"RELEASE SAVEPOINT {sp_name}"))

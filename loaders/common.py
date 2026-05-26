@@ -22,7 +22,7 @@ load_dotenv(dotenv_path=env_path)
 
 DB_HOST     = os.getenv("DB_HOST", "127.0.0.1").strip()
 DB_PORT_STR = os.getenv("DB_PORT", "5432").strip()
-DB_NAME     = os.getenv("DB_NAME", "db_football_completa").strip()
+DB_NAME     = os.getenv("DB_NAME", "football_db").strip()
 DB_USER     = os.getenv("DB_USER", "postgres").strip()
 DB_PASSWORD = os.getenv("DB_PASSWORD", "").strip()
 

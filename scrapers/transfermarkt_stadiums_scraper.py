@@ -156,39 +156,101 @@ def _to_year(text: Optional[str]) -> Optional[int]:
 
 
 # Mapa label-normalizado → clave de salida.
-# TM puede usar variantes; normalizamos a minúsculas sin acentos
+# TM puede usar variantes; normalizamos a minúsculas sin acentos.
+# Importante: SOLO se aplican dentro de la ficha de estadio
+# (/stadion/verein/...), así que "nombre" se considera nombre del estadio
+# sin riesgo de chocar con páginas de jugadores/clubes.
 _LABEL_MAP = {
+    # ── nombre del estadio (variantes que usa TM en distintos layouts) ──
     "nombre del estadio":      "stadium_name",
     "estadio":                 "stadium_name",
+    "nombre":                  "stadium_name",
+    "denominacion":            "stadium_name",
+    "name des stadions":       "stadium_name",
+    "stadium name":            "stadium_name",
+    # ── aforo / asientos ──
     "aforo total":             "capacity",
     "capacidad total":         "capacity",
     "capacidad":               "capacity",
     "asientos":                "seats_total",
+    "plazas sentadas":         "seats_total",
     "asientos cubiertos":      "seats_covered",
+    "plazas cubiertas":        "seats_covered",
     "asientos vip":            "seats_vip",
+    "plazas vip":              "seats_vip",
+    "vip":                     "seats_vip",
     "palcos":                  "vip_boxes",
+    "palcos vip":              "vip_boxes",
     "plazas de pie":           "seats_standing",
+    "asientos de pie":         "seats_standing",
+    # ── fechas (inauguracion / construccion / reforma) ──
     "inaugurado":              "inaugurated_year",
     "inauguracion":            "inaugurated_year",
+    "ano de inauguracion":     "inaugurated_year",
+    "apertura":                "inaugurated_year",
+    "ano de apertura":         "inaugurated_year",
+    "fecha de inauguracion":   "inaugurated_year",
     "construido":              "built_year",
     "construccion":            "built_year",
+    "ano de construccion":     "built_year",
+    "ano de finalizacion":     "built_year",
+    "finalizacion":            "built_year",
     "reformado":               "refurbished_year",
     "reforma":                 "refurbished_year",
+    "ultima reforma":          "refurbished_year",
+    "renovacion":              "refurbished_year",
+    "ultima renovacion":       "refurbished_year",
+    # ── propiedad / gestion ──
     "propietario":             "owner",
+    "duenos":                  "owner",
+    "duenno":                  "owner",
     "operador":                "operator",
+    "gestor":                  "operator",
+    "gestionado por":          "operator",
+    "explotador":              "operator",
+    # ── ubicacion ──
     "direccion":               "address",
+    "domicilio":               "address",
     "ciudad":                  "city",
+    "localidad":               "city",
     "pais":                    "country",
+    # ── construccion ──
     "coste de construccion":   "construction_cost",
     "coste construccion":      "construction_cost",
+    "coste":                   "construction_cost",
+    "presupuesto":             "construction_cost",
     "superficie":              "surface",
     "cesped":                  "surface",
+    "tipo de cesped":          "surface",
+    "tipo de superficie":      "surface",
     "arquitecto":              "architect",
+    "estudio de arquitectura": "architect",
+    # ── historial, naming rights y extras (v3 — informe) ──
+    "antes":                       "previous_names_raw",
+    "anteriormente":               "previous_names_raw",
+    "nombres anteriores":          "previous_names_raw",
+    "medidas del terreno de juego": "pitch_dimensions",
+    "dimensiones del campo":       "pitch_dimensions",
+    "medidas del campo":           "pitch_dimensions",
+    "derechos del nombre":         "naming_rights",
+    "naming rights":               "naming_rights",
+    "duracion":                    "naming_rights_until",
+    "cesped con calefaccion":      "has_pitch_heating",
+    "calefaccion del cesped":      "has_pitch_heating",
+    "pista de atletismo":          "has_athletics_track",
+    "capacidad internacional":     "capacity_intl",
 }
+
+# Labels que SIEMPRE deben sobrescribir un valor previo (no usar setdefault).
+# stadium_name necesita esto porque el header h1 contiene el nombre del CLUB,
+# no del estadio, y queremos que cualquier valor extraído de la tabla de
+# datos del estadio prevalezca.
+_OVERRIDE_KEYS = {"stadium_name"}
 
 _INT_FIELDS = {"capacity", "seats_total", "seats_covered", "seats_vip",
                "vip_boxes", "seats_standing"}
 _YEAR_FIELDS = {"inaugurated_year", "built_year", "refurbished_year"}
+_BOOL_FIELDS = {"has_pitch_heating", "has_athletics_track"}
 
 
 def _normalize_label(s: str) -> str:
@@ -200,6 +262,148 @@ def _normalize_label(s: str) -> str:
     for k, v in repl.items():
         s = s.replace(k, v)
     return s
+
+
+def _slug_to_loose(s: str) -> str:
+    """Convierte un slug o nombre a su forma comparable (minúsculas, sin
+    acentos, sin separadores). Útil para detectar si el nombre extraído
+    coincide accidentalmente con el del equipo."""
+    if not s:
+        return ""
+    s = _normalize_label(s)
+    return re.sub(r"[^a-z0-9]", "", s)
+
+
+# ── Parsers v3 ───────────────────────────────────────────────────────────────
+
+_RE_PREV_NAME = re.compile(
+    r"^(.+?)\s*\((\d{2}/\d{2}/\d{4})\s*-\s*(\d{2}/\d{2}/\d{4})\)$"
+)
+
+
+def parse_previous_names(raw: str) -> list[dict]:
+    """Parsea el campo 'Antes:' de TM en lista de dicts.
+
+    Formato de entrada (multilínea):
+        Nuevo Mirandilla (25/06/2021 - 03/03/2026)
+        Ramón de Carranza (03/09/1955 - 24/06/2021)
+
+    Devuelve lista de dicts con keys: name, date_from, date_to (DD/MM/YYYY).
+    Si una línea no tiene fechas, date_from y date_to serán None.
+    """
+    if not raw:
+        return []
+    results = []
+    for line in raw.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m = _RE_PREV_NAME.match(line)
+        if m:
+            results.append({
+                "name": m.group(1).strip(),
+                "date_from": m.group(2),
+                "date_to": m.group(3),
+            })
+        else:
+            results.append({"name": line, "date_from": None, "date_to": None})
+    return results
+
+
+def _parse_pitch_dimensions(raw: str) -> tuple[Optional[int], Optional[int]]:
+    """Parsea '104m x 68m' o '104 x 68' → (104, 68) (largo, ancho)."""
+    if not raw:
+        return None, None
+    m = re.match(r"(\d+)\s*m?\s*[xX×]\s*(\d+)\s*m?", raw.strip())
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    return None, None
+
+
+def _extract_stadium_id_from_page(soup) -> Optional[int]:
+    """Extrae el ID numérico del estadio desde el enlace /stadion/N.
+
+    TM enlaza a '/bayarena/startseite/stadion/4' — extraemos el 4.
+    No confundir con /stadion/verein/{id} que es la ficha del club.
+    """
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        if "/stadion/" not in href or "/verein/" in href or "/saison_id/" in href:
+            continue
+        m_id = re.search(r"/stadion/(\d+)", href)
+        if m_id:
+            return int(m_id.group(1))
+    return None
+
+
+def _extract_stadium_name_from_page(soup, team_slug: str) -> Optional[str]:
+    """
+    Intenta extraer el nombre del estadio de la página de TM.
+
+    Orden de preferencia:
+      1. Enlace a la página estándar del estadio: <a href="/<stadium_slug>/startseite/stadion/...">
+         (no confundir con /stadion/verein/ que es la ficha del club).
+      2. Subtítulo / 'club-info' del header de página.
+      3. Título de la pestaña del navegador (<title>BayArena | …</title>).
+
+    NUNCA usar h1.data-header__headline-wrapper porque contiene el nombre
+    del CLUB, no del estadio.
+
+    Si el valor extraído coincide con el nombre del equipo (team_slug),
+    devuelve None para que el caller intente otra fuente.
+    """
+    team_slug_loose = _slug_to_loose(team_slug)
+
+    # 1) Enlace dedicado al estadio (no /verein/, no /saison_id/).
+    #    TM enlaza algo como /bayarena/startseite/stadion/4 con el texto "BayArena".
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        if "/stadion/" not in href:
+            continue
+        if "/verein/" in href or "/saison_id/" in href:
+            continue
+        txt = " ".join(a.stripped_strings)
+        if not txt:
+            continue
+        # Filtra textos demasiado largos (descripciones) o ruido común
+        if len(txt) > 80 or txt.lower().startswith(("estadio", "stadium")):
+            continue
+        if _slug_to_loose(txt) == team_slug_loose:
+            continue
+        return txt.strip()
+
+    # 2) Subtítulo del header de página (club-info / data-header__subtext).
+    for sel in (
+        "p.data-header__club-info",
+        "span.data-header__sub",
+        "span.data-header__subtitle",
+        "h2.data-header__subtitle",
+        "div.dataMain h2",
+        "h2.content-box-headline",
+    ):
+        node = soup.select_one(sel)
+        if not node:
+            continue
+        txt = " ".join(node.stripped_strings)
+        # El subtitle puede traer "BayArena | Capacidad: 30.210"; cortamos.
+        candidate = re.split(r"[|·•]", txt, maxsplit=1)[0].strip()
+        candidate = re.sub(r"^\s*estadio[:\s\-]*", "", candidate,
+                           flags=re.IGNORECASE).strip()
+        if candidate and _slug_to_loose(candidate) != team_slug_loose:
+            return candidate
+
+    # 3) <title> de la página: TM lo formatea como "<Stadium> | <Club> | TM".
+    title = soup.find("title")
+    if title:
+        raw = " ".join(title.stripped_strings)
+        first = re.split(r"[|·•\-]", raw, maxsplit=1)[0].strip()
+        # Limpia prefijos típicos en distintos idiomas.
+        first = re.sub(r"^\s*(estadio|stadium|stadion)[:\s\-]*",
+                       "", first, flags=re.IGNORECASE).strip()
+        if first and _slug_to_loose(first) != team_slug_loose:
+            return first
+
+    return None
 
 
 # ── FETCH ────────────────────────────────────────────────────────────────────
@@ -233,21 +437,14 @@ def get_team_stadium(team_slug: str, team_id: int, season: int) -> dict:
 
     soup = BeautifulSoup(r.text, "html.parser")
 
-    # 1) Nombre del estadio: suele estar en el header de página o en h1
-    #    Header moderno: <h1 class="data-header__headline-wrapper"> con el nombre dentro.
-    #    Fallback: primer h1 visible, o título del bloque.
-    name_node = (
-        soup.select_one("h1.data-header__headline-wrapper")
-        or soup.select_one("div.dataMain h1")
-        or soup.select_one("h1")
-    )
-    if name_node:
-        # Limpia spans internos (números/etiquetas) y se queda con el texto del estadio
-        name_txt = " ".join(name_node.stripped_strings)
-        # Quita prefijos comunes ("Estadio de:", el nombre del club, etc.)
-        name_txt = re.sub(r"^\s*estadio[:\s\-]*", "", name_txt, flags=re.IGNORECASE).strip()
-        if name_txt:
-            record["stadium_name"] = name_txt
+    # 1) Nombre del estadio.
+    #    OJO: en la ficha /stadion/verein/{id} el <h1> de página contiene el
+    #    nombre del CLUB, no del estadio. Por eso NO usamos h1. Intentamos
+    #    primero estrategias dedicadas (enlace al estadio, subtítulo, <title>)
+    #    y dejamos que la tabla de datos sobrescriba si trae un valor más fiable.
+    name_candidate = _extract_stadium_name_from_page(soup, team_slug)
+    if name_candidate:
+        record["stadium_name"] = name_candidate
 
     # 2) Tabla(s) de datos del estadio.
     #    TM usa varias estructuras a lo largo del tiempo:
@@ -272,30 +469,83 @@ def get_team_stadium(team_slug: str, team_id: int, season: int) -> dict:
             if label and value:
                 pairs.append((label, value))
 
-    # 2.b) info-table con spans (estructura nueva tipo perfil)
+    # 2.b) info-table con spans (estructura nueva tipo perfil).
+    #    Para 'Dirección' TM suele renderizar varios spans hermanos en líneas
+    #    (nombre del estadio, calle, ciudad, país). Concatenamos TODOS los
+    #    siblings span hasta el próximo label, separados por coma, para no
+    #    quedarnos sólo con la primera línea (que históricamente provocaba
+    #    que el nombre del estadio acabase como 'address').
     for label_span in soup.select("span.info-table__content--regular"):
-        value_span = label_span.find_next_sibling("span")
-        if not value_span:
-            continue
         label = label_span.get_text(" ", strip=True)
-        value = value_span.get_text(" ", strip=True)
+        if not label:
+            continue
+        value_parts: list[str] = []
+        sib = label_span.find_next_sibling()
+        while sib is not None:
+            sib_classes = sib.get("class") or []
+            # Otro label → cerramos la lista de valores.
+            if sib.name == "span" and "info-table__content--regular" in sib_classes:
+                break
+            if sib.name == "span":
+                txt = sib.get_text(" ", strip=True)
+                if txt:
+                    value_parts.append(txt)
+            sib = sib.find_next_sibling()
+        value = ", ".join(value_parts).strip(", ").strip()
         if label and value:
             pairs.append((label, value))
 
-    # 3) Volcado al record aplicando el mapa
+    # 3) Volcado al record aplicando el mapa.
+    #    - _OVERRIDE_KEYS (p.ej. stadium_name) sobreescriben SIEMPRE el valor
+    #      previo: el heurístico del header puede haber metido algo distinto.
+    #    - El resto usa setdefault para no pisar valores anteriores.
     for raw_label, raw_value in pairs:
         key = _LABEL_MAP.get(_normalize_label(raw_label))
         if not key:
             continue
-        if key in _INT_FIELDS:
-            record.setdefault(key, _to_int(raw_value))
+        if key in _INT_FIELDS or key == "capacity_intl":
+            new_val = _to_int(raw_value)
         elif key in _YEAR_FIELDS:
-            record.setdefault(key, _to_year(raw_value))
+            new_val = _to_year(raw_value)
+        elif key in _BOOL_FIELDS:
+            new_val = raw_value.strip().lower() in (
+                "sí", "si", "ja", "yes", "✓", "true",
+            )
         else:
-            record.setdefault(key, raw_value.strip())
+            new_val = raw_value.strip()
+        if new_val in (None, ""):
+            continue
+        if key in _OVERRIDE_KEYS:
+            record[key] = new_val
+        else:
+            record.setdefault(key, new_val)
 
-    # 4) Ciudad/país a veces vienen embebidas en 'address'
-    if "address" in record and "city" not in record:
+    # 3.b) Post-procesado de campos compuestos.
+    #      pitch_dimensions → pitch_length_m + pitch_width_m
+    if "pitch_dimensions" in record:
+        p_len, p_wid = _parse_pitch_dimensions(record.pop("pitch_dimensions"))
+        record.setdefault("pitch_length_m", p_len)
+        record.setdefault("pitch_width_m", p_wid)
+
+    #      Extraer ID de estadio de TM desde el enlace /stadion/N
+    stadium_tm_id = _extract_stadium_id_from_page(soup)
+    if stadium_tm_id:
+        record["id_transfermarkt_stadium"] = stadium_tm_id
+
+    # 4) Validación: si stadium_name acabó coincidiendo con el team_slug
+    #    (caso típico cuando TM no publica datos y solo había header), lo
+    #    descartamos para que el caller no lo guarde como estadio válido.
+    name = record.get("stadium_name")
+    if name and _slug_to_loose(name) == _slug_to_loose(team_slug):
+        log.warning(
+            "Descartado stadium_name='%s' por coincidir con team_slug='%s' "
+            "(probablemente TM no publicó datos para esta temporada).",
+            name, team_slug,
+        )
+        record.pop("stadium_name", None)
+
+    # 5) Ciudad/país a veces vienen embebidas en 'address'.
+    if record.get("address") and not record.get("city"):
         # Ej: "C/ d'Arístides Maillol, s/n, 08028 Barcelona, España"
         parts = [p.strip() for p in record["address"].split(",") if p.strip()]
         if len(parts) >= 2:
@@ -336,7 +586,16 @@ def scrape_transfermarkt_stadiums(
     batch_id = generate_batch_id()
 
     from scripts.competitions import get_competition_slug_transfermarkt
-    tm_slug = get_competition_slug_transfermarkt(competition_name) or "laliga"
+    tm_slug = get_competition_slug_transfermarkt(competition_name)
+    if not tm_slug:
+        # Antes había un fallback silencioso a 'laliga' que provocaba
+        # peticiones a la página equivocada (p.ej. al procesar Africa Cup
+        # of Nations bajo el slug 'laliga'). Mejor abortar limpiamente.
+        raise ValueError(
+            f"No hay slug de Transfermarkt definido para '{competition_name}'. "
+            "Añádelo a TRANSFERMARKT_COMPETITION_SLUGS en wizard/competitions.py "
+            "o usa --competition con una liga soportada."
+        )
 
     if not teams:
         teams_list = get_league_teams(season, tm_slug, league_code)
@@ -481,6 +740,11 @@ def transform_stadiums(stadiums_raw: list[dict]) -> pd.DataFrame:
         "owner", "operator", "address", "city", "country",
         "construction_cost", "surface", "architect",
         "tm_url",
+        # v3 — nuevos campos del informe
+        "previous_names_raw", "id_transfermarkt_stadium",
+        "pitch_length_m", "pitch_width_m",
+        "naming_rights", "naming_rights_until",
+        "has_pitch_heating", "has_athletics_track", "capacity_intl",
     ]
     rows = [{c: s.get(c) for c in cols} for s in stadiums_raw]
     df = pd.DataFrame(rows, columns=cols)
@@ -492,6 +756,21 @@ def transform_stadiums(stadiums_raw: list[dict]) -> pd.DataFrame:
             df[c] = pd.to_numeric(df[c], errors="coerce").astype("Int64")
         for c in ("inaugurated_year", "built_year", "refurbished_year"):
             df[c] = pd.to_numeric(df[c], errors="coerce").astype("Int16")
+        for c in ("pitch_length_m", "pitch_width_m"):
+            if c in df.columns:
+                df[c] = pd.to_numeric(df[c], errors="coerce").astype("Int16")
+        if "id_transfermarkt_stadium" in df.columns:
+            df["id_transfermarkt_stadium"] = pd.to_numeric(
+                df["id_transfermarkt_stadium"], errors="coerce"
+            ).astype("Int64")
+        if "capacity_intl" in df.columns:
+            df["capacity_intl"] = pd.to_numeric(
+                df["capacity_intl"], errors="coerce"
+            ).astype("Int64")
+        if "naming_rights_until" in df.columns:
+            df["naming_rights_until"] = pd.to_numeric(
+                df["naming_rights_until"], errors="coerce"
+            ).astype("Int16")
         df = df.drop_duplicates(subset=["team_id_tm", "season"])
         df = df.sort_values(["season", "team_id_tm"]).reset_index(drop=True)
 
@@ -597,10 +876,17 @@ def main():
     parser.add_argument("--list-db", action="store_true",
                         help="Lista las competiciones disponibles en dim_competition y sale")
     parser.add_argument("--all-db", action="store_true",
-                        help="Procesa TODAS las competiciones de dim_competition con id_transfermarkt")
+                        help="Procesa EXACTAMENTE las competiciones que ofrece el wizard "
+                             "(WORKING_COMPETITIONS en wizard/competitions.py). Las "
+                             "selecciones nacionales se omiten automáticamente porque "
+                             "no tienen estadios de club.")
+    parser.add_argument("--include-non-working", action="store_true",
+                        help="(deprecated) Mantenido por compatibilidad — ya no tiene "
+                             "efecto, --all-db itera sólo el wizard.")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Solo imprime qué competiciones se procesarían, sin scrapear.")
 
     args = parser.parse_args()
-
     # 1) Modo listado
     if args.list_db:
         comps = list_competitions_from_db()
@@ -608,33 +894,122 @@ def main():
             print("[!] No se encontraron competiciones con id_transfermarkt en dim_competition.")
             return
         print(f"\n  Competiciones disponibles en dim_competition ({len(comps)}):")
-        print("  " + "─" * 60)
+        print("  " + "-" * 60)
         for c in comps:
             print(f"    [{c['id_transfermarkt']:>6}]  {c['canonical_name']:<35} "
                   f"({c.get('country') or '?'})")
         return
 
-    # 2) Modo masivo
+    # 2) Modo masivo: iterar EXACTAMENTE las competiciones del wizard.
     if args.all_db:
-        comps = list_competitions_from_db()
-        if not comps:
-            print("[!] No hay competiciones en dim_competition.")
+        # Fuente de verdad = wizard. Iteramos WORKING_COMPETITIONS y para cada
+        # nombre usamos `league_code` del dict COMPETITIONS (en lugar del que
+        # haya en dim_competition, que puede estar obsoleto — caso ECL→UCOL).
+        from wizard.competitions import WORKING_COMPETITION_NAMES
+        from scripts.competitions import (
+            COMPETITIONS,
+            get_competition_slug_transfermarkt,
+        )
+
+        # Las competiciones de selecciones no tienen estadios de clubes:
+        # /stadion/verein/{team_id} es del CLUB, no de la federación. Las
+        # saltamos automáticamente aunque estén en WORKING_COMPETITIONS.
+        NATIONAL_TEAM_COMPS = {
+            "FIFA World Cup",
+            "European Championship",
+            "Copa America",
+            "UEFA Women's EURO",
+            "FIFA Women's World Cup",
+            "UEFA Nations League A",
+            "UEFA Nations League B",
+            "UEFA Nations League C",
+            "UEFA Nations League D",
+            "World Cup Qualification UEFA",
+            "World Cup Qualification CONMEBOL",
+            "Int. Friendly",
+            "Africa Cup of Nations",
+            "Asian Cup",
+        }
+
+        # Para avisar de desalineaciones entre wizard y dim_competition
+        db_codes = {c["canonical_name"]: c["id_transfermarkt"]
+                    for c in list_competitions_from_db()}
+
+        # Mantener el orden del wizard (Ligas nacionales -> continentales -> ...)
+        seen = set()
+        ordered_names = []
+        from wizard.competitions import WORKING_COMPETITIONS
+        for _bucket, names in WORKING_COMPETITIONS.items():
+            for n in names:
+                if n not in seen:
+                    seen.add(n)
+                    ordered_names.append(n)
+
+        to_process, skipped = [], []
+        for name in ordered_names:
+            reasons = []
+            cfg = COMPETITIONS.get(name, {})
+            league_code = (cfg.get("sources", {})
+                              .get("transfermarkt", {})
+                              .get("league_code"))
+            if not league_code:
+                reasons.append("sin league_code TM en wizard/competitions.py")
+            if not get_competition_slug_transfermarkt(name):
+                reasons.append("sin slug TM en TRANSFERMARKT_COMPETITION_SLUGS")
+            if name in NATIONAL_TEAM_COMPS:
+                reasons.append("seleccion nacional (sin estadios de clubes)")
+
+            if reasons:
+                skipped.append((name, "; ".join(reasons)))
+                continue
+
+            # Aviso si dim_competition tiene un codigo distinto al del wizard
+            db_code = db_codes.get(name)
+            if db_code and db_code != league_code:
+                log.warning(
+                    "league_code de %s difiere: wizard='%s' vs dim_competition='%s'. "
+                    "Uso el del wizard.",
+                    name, league_code, db_code,
+                )
+            to_process.append({"canonical_name": name, "league_code": league_code})
+
+        # Resumen
+        print("\n" + "=" * 70)
+        print(f"  Modo --all-db (wizard): {len(to_process)} competicion(es) a procesar, "
+              f"{len(skipped)} omitida(s)")
+        print("=" * 70)
+        if to_process:
+            print("\n  Se procesaran:")
+            for c in to_process:
+                print(f"    [OK]   {c['canonical_name']:<35} [{c['league_code']}]")
+        if skipped:
+            print("\n  Se omiten:")
+            for name, why in skipped:
+                print(f"    [SKIP] {name:<35}  ({why})")
+
+        if args.dry_run:
+            print("\n[dry-run] No se ejecuta scraping.")
             return
-        for c in comps:
+
+        if not to_process:
+            print("\n[!] Nada que procesar.")
+            return
+
+        for c in to_process:
             for season_year in args.seasons:
-                print(f"\n→ {c['canonical_name']} ({c['id_transfermarkt']}) — {season_year}")
+                print(f"\n-> {c['canonical_name']} ({c['league_code']}) -- {season_year}")
                 try:
                     scrape_transfermarkt_stadiums(
                         competition_name=c["canonical_name"],
-                        league_code=c["id_transfermarkt"],
+                        league_code=c["league_code"],
                         season=season_year,
                         full_refresh=args.full_refresh,
                     )
                 except Exception as e:
-                    log.error("Falló %s %d: %s", c["canonical_name"], season_year, e)
+                    log.error("Fallo %s %d: %s", c["canonical_name"], season_year, e)
         return
 
-    # 3) Modo competición concreta
+    # 3) Modo competicion concreta
     if not args.competition:
         parser.error("Debes pasar --competition, --list-db o --all-db")
 
@@ -642,19 +1017,18 @@ def main():
     if comp_db:
         league_code = comp_db["id_transfermarkt"]
         comp_name   = comp_db["canonical_name"]
-        log.info("Competición resuelta vía dim_competition: %s → %s",
+        log.info("Competicion resuelta via dim_competition: %s -> %s",
                  comp_name, league_code)
     else:
-        # Fallback al diccionario estático
         from scripts.competitions import get_competition
         comp_config = get_competition(args.competition)
         if not comp_config:
-            print(f"Error: Competición '{args.competition}' no encontrada "
+            print(f"Error: Competicion '{args.competition}' no encontrada "
                   f"ni en dim_competition ni en COMPETITIONS.")
             return
         league_code = comp_config["sources"]["transfermarkt"]["league_code"]
         comp_name   = args.competition
-        log.info("Competición resuelta vía COMPETITIONS estático: %s → %s",
+        log.info("Competicion resuelta via COMPETITIONS estatico: %s -> %s",
                  comp_name, league_code)
 
     for season_year in args.seasons:

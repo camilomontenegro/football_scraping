@@ -158,7 +158,14 @@ CREATE TABLE dim_match (
     id_sofascore INTEGER,
     id_understat INTEGER,
     id_statsbomb VARCHAR(50),
-    id_whoscored INTEGER
+    id_whoscored INTEGER,
+    -- Enrichment columns (populated post-load)
+    attendance INTEGER,
+    temperature_c DECIMAL(4,1),
+    humidity_pct SMALLINT,
+    precipitation_mm DECIMAL(5,1),
+    wind_speed_kmh DECIMAL(5,1),
+    weather_code SMALLINT
 );
 
 CREATE UNIQUE INDEX ux_match_sofascore ON dim_match (id_sofascore)
@@ -285,41 +292,62 @@ CREATE INDEX idx_injuries_player ON fact_injuries (player_id);
 -- Granularidad: (team, season). Un equipo puede cambiar de estadio
 -- entre temporadas (obras, mudanza, etc.).
 
+-- SCD2: una fila por ESTADO del estadio, no por temporada. Si la
+-- información no cambia entre 2020 y 2025, hay UNA sola fila con
+-- valid_from_season='2020/2021' y valid_to_season='2024/2025'. Cuando
+-- algún campo cambia (capacity, nombre, reforma…) se cierra la fila
+-- antigua y se abre una nueva.
 CREATE TABLE dim_stadium (
-    stadium_id           SERIAL PRIMARY KEY,
-    canonical_team_id    INTEGER REFERENCES dim_team (canonical_id) ON DELETE CASCADE,
-    id_transfermarkt_team INTEGER,     -- TM team_id, mismo que dim_team.id_transfermarkt
-    team_slug            VARCHAR(150),
-    season               VARCHAR(20),  -- p.ej. "2025/2026" o "2025_2026"
-    stadium_name         VARCHAR(200),
-    capacity             INTEGER,
-    seats_total          INTEGER,
-    seats_covered        INTEGER,
-    seats_vip            INTEGER,
-    vip_boxes            INTEGER,
-    seats_standing       INTEGER,
-    inaugurated_year     SMALLINT,
-    built_year           SMALLINT,
-    refurbished_year     SMALLINT,
-    owner                VARCHAR(200),
-    operator             VARCHAR(200),
-    address              VARCHAR(300),
-    city                 VARCHAR(120),
-    country              VARCHAR(80),
-    construction_cost    VARCHAR(120),
-    surface              VARCHAR(80),
-    architect            VARCHAR(200),
-    tm_url               VARCHAR(400),
-    data_source          VARCHAR(50) DEFAULT 'transfermarkt',
-    created_at           TIMESTAMP DEFAULT NOW(),
-    updated_at           TIMESTAMP DEFAULT NOW()
+    stadium_id            SERIAL PRIMARY KEY,
+    canonical_team_id     INTEGER REFERENCES dim_team (canonical_id) ON DELETE CASCADE,
+    id_transfermarkt_team INTEGER NOT NULL,
+    team_slug             VARCHAR(150),
+
+    -- Rango de temporadas en las que este estado es válido
+    valid_from_season     VARCHAR(20) NOT NULL,
+    valid_to_season       VARCHAR(20) NOT NULL,
+
+    -- Datos del estadio (Transfermarkt + Wikidata enrichment)
+    stadium_name          VARCHAR(200),
+    capacity              INTEGER,
+    capacity_intl         INTEGER,
+    seats_total           INTEGER,
+    built_year            SMALLINT,
+    owner                 VARCHAR(200),
+    operator              VARCHAR(200),
+    address               VARCHAR(300),
+    city                  VARCHAR(120),
+    country               VARCHAR(80),
+    surface               VARCHAR(80),
+    architect             VARCHAR(200),
+    naming_rights         VARCHAR(200),
+    previous_names_raw    TEXT,
+    pitch_length_m        SMALLINT,
+    pitch_width_m         SMALLINT,
+    has_pitch_heating     BOOLEAN,
+    tm_url                VARCHAR(400),
+
+    -- Wikidata enrichment
+    wikidata_qid          VARCHAR(20),
+    latitude              DECIMAL(9,6),
+    longitude             DECIMAL(9,6),
+    image_url             TEXT,
+
+    -- SHA1 hex de los campos comparables, para detectar cambios rápido
+    data_hash             CHAR(40),
+
+    data_source           VARCHAR(50) DEFAULT 'transfermarkt',
+    created_at            TIMESTAMP DEFAULT NOW(),
+    updated_at            TIMESTAMP DEFAULT NOW(),
+
+    CHECK (valid_from_season <= valid_to_season)
 );
 
--- Unicidad: un único registro de estadio por (equipo, temporada).
-CREATE UNIQUE INDEX ux_stadium_team_season
-    ON dim_stadium (id_transfermarkt_team, season)
-    WHERE id_transfermarkt_team IS NOT NULL;
+-- Un equipo no puede tener dos rangos que empiecen en la misma temporada.
+CREATE UNIQUE INDEX ux_stadium_team_validfrom
+    ON dim_stadium (id_transfermarkt_team, valid_from_season);
 
-CREATE INDEX idx_stadium_team       ON dim_stadium (canonical_team_id);
-CREATE INDEX idx_stadium_season     ON dim_stadium (season);
+CREATE INDEX idx_stadium_team      ON dim_stadium (canonical_team_id);
+CREATE INDEX idx_stadium_team_tm   ON dim_stadium (id_transfermarkt_team);
+CREATE INDEX idx_stadium_data_hash ON dim_stadium (id_transfermarkt_team, data_hash);
 CREATE INDEX idx_stadium_name_lower ON dim_stadium (LOWER(stadium_name));

@@ -17,7 +17,17 @@ from sqlalchemy import text
 # Importar loaders
 from loaders.team_loader import _upsert_team, _load_from_sofascore
 from loaders.match_loader import _safe_int
+from loaders.stadium_loader import (
+    _date_to_season,
+    _derive_city_country,
+    _next_season,
+    _previous_season,
+)
 from loaders.common import engine
+from scrapers.transfermarkt_stadiums_scraper import (
+    _parse_pitch_dimensions,
+    parse_previous_names,
+)
 from utils.mdm_engine import resolve_team, resolve_player, normalize
 
 
@@ -85,6 +95,41 @@ class TestDataValidation:
         assert _safe_int("") is None
         assert _safe_int("2.0") == 2
         assert _safe_int(3) == 3
+
+
+@pytest.mark.unit
+class TestStadiumV3Helpers:
+    def test_parse_previous_names_with_dates(self):
+        raw = (
+            "Nuevo Mirandilla (25/06/2021 - 03/03/2026)\n"
+            "Ramon de Carranza (03/09/1955 - 24/06/2021)"
+        )
+        rows = parse_previous_names(raw)
+        assert rows[0]["name"] == "Nuevo Mirandilla"
+        assert rows[0]["date_from"] == "25/06/2021"
+        assert rows[1]["date_to"] == "24/06/2021"
+
+    def test_parse_previous_names_without_dates(self):
+        assert parse_previous_names("Old Stadium") == [
+            {"name": "Old Stadium", "date_from": None, "date_to": None}
+        ]
+
+    def test_parse_pitch_dimensions(self):
+        assert _parse_pitch_dimensions("104m x 68m") == (104, 68)
+        assert _parse_pitch_dimensions("105 x 70") == (105, 70)
+        assert _parse_pitch_dimensions("unknown") == (None, None)
+
+    def test_season_helpers(self):
+        assert _previous_season("2024/2025") == "2023/2024"
+        assert _next_season("2024/2025") == "2025/2026"
+        assert _date_to_season("25/06/2021") == "2020/2021"
+        assert _date_to_season("03/09/1955") == "1955/1956"
+
+    def test_derive_city_country(self):
+        assert _derive_city_country("Calle X, 08028 Barcelona, Spain") == (
+            "Barcelona",
+            "Spain",
+        )
 
 
 # ═════════════════════════════════════════════════════════════════

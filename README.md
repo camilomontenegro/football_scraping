@@ -84,6 +84,28 @@ Salvo la pestaña `Wizard`, el dashboard sólo lee de la base de datos.
 
 ---
 
+## Estadios SCD2
+
+La descarga de estadios de Transfermarkt se carga en `dim_stadium` como
+modelo SCD2: re-scrapear una temporada actualiza o abre versiones según los
+cambios detectados, pero no reconstruye por sí solo todo el historial. Para
+materializar nombres anteriores publicados en el campo `Antes:` y compactar
+versiones contiguas, usa:
+
+```powershell
+python -m scripts.bootstrap_dim_stadium
+python -m scripts.compact_dim_stadium
+```
+
+El enriquecimiento Wikidata es opcional y se ejecuta bajo demanda:
+
+```powershell
+python -m scrapers.wikidata_stadium_enricher --limit 20
+python -m wizard.pipeline_runner --enrich-wikidata
+```
+
+---
+
 ## 🛠 Comandos útiles habituales
 
 ```powershell

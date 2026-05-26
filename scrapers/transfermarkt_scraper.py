@@ -135,6 +135,55 @@ def _save_json(data, path: Path) -> None:
         json.dump(data, f, ensure_ascii=False, indent=2, default=_json_serializer)
 
 
+def search_player_by_name(name: str) -> list[dict]:
+    """Busca jugadores en Transfermarkt por nombre.
+
+    Returns:
+        Lista de dicts con keys: player_name, player_id, player_slug, club, age.
+    """
+    url = f"https://www.transfermarkt.es/schnellsuche/ergebnis/schnellsuche?query={name}&x=0&y=0"
+    r = request_with_retry(url)
+    if not r:
+        return []
+
+    soup = BeautifulSoup(r.text, "html.parser")
+    results = []
+
+    # Find player results table
+    player_table = None
+    for header in soup.find_all("div", class_="table-header"):
+        if "jugador" in header.get_text(strip=True).lower() or "player" in header.get_text(strip=True).lower():
+            player_table = header.find_next("table")
+            break
+
+    if not player_table:
+        return []
+
+    for row in player_table.find_all("tr", class_=["odd", "even"]):
+        try:
+            name_cell = row.find("td", class_="hauptlink")
+            if not name_cell:
+                continue
+            link = name_cell.find("a")
+            if not link:
+                continue
+
+            href = link.get("href", "")
+            parts = href.split("/")
+            player_slug = parts[1] if len(parts) > 1 else ""
+            player_id = parts[-1] if parts else ""
+
+            results.append({
+                "player_name": link.get_text(strip=True),
+                "player_id": player_id,
+                "player_slug": player_slug,
+            })
+        except Exception:
+            continue
+
+    return results
+
+
 # ── FETCH ────────────────────────────────────────────────────────────────────
 
 def get_league_teams(season: int, competition_slug: str, league_code: str) -> list[dict]:
