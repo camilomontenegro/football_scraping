@@ -365,7 +365,8 @@ def reprocess_reviews(auto_only=False, source_filter=None, accept_threshold=85, 
         """), params_source).scalar() or 0
 
         rows = conn.execute(text(f"""
-            SELECT id, source_name, source_system, source_id, similarity_score, suggested_canonical_id
+            SELECT id, source_name, source_system, source_id, similarity_score, suggested_canonical_id,
+                   source_team_name, source_team_id
             FROM player_review
             WHERE resolved = FALSE {where_source}
             ORDER BY similarity_score DESC NULLS LAST, id
@@ -402,7 +403,10 @@ def reprocess_reviews(auto_only=False, source_filter=None, accept_threshold=85, 
     auto_created = 0
     left_pending = 0
 
-    for idx, (rev_id, source_name, source_system, source_id, db_score, db_suggested) in enumerate(rows, start=1):
+    for idx, row_data in enumerate(rows, start=1):
+        rev_id, source_name, source_system, source_id, db_score, db_suggested = row_data[:6]
+        source_team_name = row_data[6] if len(row_data) > 6 else None
+        source_team_id   = row_data[7] if len(row_data) > 7 else None
         id_col = SOURCE_ID_FIELDS.get(source_system, {}).get("player")
         if not id_col:
             continue
@@ -575,7 +579,10 @@ def reprocess_reviews(auto_only=False, source_filter=None, accept_threshold=85, 
         # ── FIN CONFLICTO ──
 
         # MEJORA 2: Mostrar top-3 candidatos
+        team_info = f"  Equipo:  {source_team_name}" if source_team_name else ""
         print(f"  Fuente:  {source_name}  ({source_system})")
+        if team_info:
+            print(team_info)
         if top_candidates:
             print(f"  Candidatos en BD:")
             for rank, (sc, cid, cname) in enumerate(top_candidates, start=1):

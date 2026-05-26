@@ -472,12 +472,15 @@ def _load_from_statsbomb(conn) -> int:
 
             if existing:
                 comp_id = resolve_comp_id(raw_comp) if raw_comp else None
+                att_raw = row.get("attendance")
+                att_val = _safe_int(att_raw) if pd.notna(att_raw) else None
                 conn.execute(text("""
                     UPDATE dim_match
                     SET id_statsbomb   = COALESCE(id_statsbomb, :sid),
-                        competition_id = COALESCE(competition_id, :cid)
+                        competition_id = COALESCE(competition_id, :cid),
+                        attendance     = COALESCE(dim_match.attendance, :att)
                     WHERE match_id = :mid
-                """), {"sid": str(sb_mid), "cid": comp_id, "mid": existing[0]})
+                """), {"sid": str(sb_mid), "cid": comp_id, "att": att_val, "mid": existing[0]})
                 linked += 1
 
     log.info("dim_match ← StatsBomb: %d partidos enlazados", linked)
@@ -498,21 +501,32 @@ def _load_from_whoscored(conn) -> int:
 
     log.info("Analizando eventos de WhoScored para vincular partidos (%d archivos)...", len(files))
 
-    # Cache whoscored_match_id -> match_date desde matches.csv de cada (comp, season)
+    # Cache whoscored_match_id -> {match_date, attendance} desde matches.csv
     match_dates: dict[str, str] = {}
+    match_attendance: dict[str, int] = {}
     for f in _iter_clean("whoscored", "matches"):
         mdf = safe_read_csv(f)
         if mdf is None or mdf.empty:
             continue
-        if "match_date" not in mdf.columns or "whoscored_match_id" not in mdf.columns:
+        if "whoscored_match_id" not in mdf.columns:
             continue
         for _, mr in mdf.iterrows():
             mid_v = mr.get("whoscored_match_id")
+            if not pd.notna(mid_v):
+                continue
+            mid_str = str(mid_v)
             mdate = mr.get("match_date")
-            if pd.notna(mid_v) and pd.notna(mdate) and str(mdate).strip():
-                match_dates[str(mid_v)] = str(mdate)[:10]
+            if pd.notna(mdate) and str(mdate).strip():
+                match_dates[mid_str] = str(mdate)[:10]
+            att = mr.get("attendance")
+            if pd.notna(att):
+                att_int = _safe_int(att)
+                if att_int:
+                    match_attendance[mid_str] = att_int
     if match_dates:
         log.info("  fechas cargadas: %d partidos con match_date conocida", len(match_dates))
+    if match_attendance:
+        log.info("  attendance cargado: %d partidos con asistencia", len(match_attendance))
 
     match_map: dict[str, dict] = {}
     for f in files:
@@ -563,6 +577,7 @@ def _load_from_whoscored(conn) -> int:
             continue
 
         m_date = match_dates.get(str(ws_mid))
+        m_att  = match_attendance.get(str(ws_mid))
         ws_mid_int = int(ws_mid)
         comp_id = resolve_comp_id(info.get("competition"))
 
@@ -579,12 +594,12 @@ def _load_from_whoscored(conn) -> int:
                     WHERE match_id = :mid AND match_date IS NULL
                 """), {"d": m_date, "mid": assigned_id})
                 updated_dates += 1
-            if comp_id is not None:
-                conn.execute(text("""
-                    UPDATE dim_match
-                    SET competition_id = COALESCE(competition_id, :cid)
-                    WHERE match_id = :mid
-                """), {"cid": comp_id, "mid": assigned_id})
+            conn.execute(text("""
+                UPDATE dim_match
+                SET competition_id = COALESCE(competition_id, :cid),
+                    attendance     = COALESCE(dim_match.attendance, :att)
+                WHERE match_id = :mid
+            """), {"cid": comp_id, "att": m_att, "mid": assigned_id})
             linked += 1
             continue
 
@@ -604,9 +619,10 @@ def _load_from_whoscored(conn) -> int:
             conn.execute(text("""
                 UPDATE dim_match
                 SET id_whoscored   = COALESCE(id_whoscored, :sid),
-                    competition_id = COALESCE(competition_id, :cid)
+                    competition_id = COALESCE(competition_id, :cid),
+                    attendance     = COALESCE(dim_match.attendance, :att)
                 WHERE match_id = :mid
-            """), {"sid": ws_mid_int, "cid": comp_id, "mid": ex_id})
+            """), {"sid": ws_mid_int, "cid": comp_id, "att": m_att, "mid": ex_id})
             linked += 1
             if m_date and not ex_date:
                 conn.execute(text("""
@@ -619,11 +635,11 @@ def _load_from_whoscored(conn) -> int:
                 INSERT INTO dim_match
                     (match_date, competition, season,
                      home_team_id, away_team_id,
-                     competition_id,
+                     competition_id, attendance,
                      data_source, id_whoscored)
                 VALUES
                     (:date, :comp, :season, :hid, :aid, :cid,
-                     'whoscored', :sid)
+                     :att, 'whoscored', :sid)
                 ON CONFLICT (id_whoscored) WHERE id_whoscored IS NOT NULL DO NOTHING
             """), {
                 "date":   m_date,
@@ -632,6 +648,7 @@ def _load_from_whoscored(conn) -> int:
                 "hid":    hid,
                 "aid":    aid,
                 "cid":    comp_id,
+                "att":    m_att,
                 "sid":    ws_mid_int,
             })
             inserted += 1
@@ -641,6 +658,89 @@ def _load_from_whoscored(conn) -> int:
         linked, inserted, updated_dates, skipped_no_team,
     )
     return linked + inserted
+
+
+# ── Transfermarkt attendance backfill ─────────────────────────────────────────
+
+def _backfill_attendance_from_transfermarkt(conn) -> int:
+    """Backfill dim_match.attendance from Transfermarkt attendance CSVs.
+
+    Matches by (home_team_name, away_team_name, season) using fuzzy team name
+    resolution. Only fills attendance where it's currently NULL.
+    """
+    files = _iter_clean("transfermarkt", "attendance")
+    if not files:
+        return 0
+
+    from utils.canonical_teams import normalize_team_name
+
+    updated = 0
+    for f in files:
+        df = safe_read_csv(f)
+        if df is None or df.empty:
+            continue
+
+        for _, row in df.iterrows():
+            att_raw = row.get("attendance")
+            if not pd.notna(att_raw):
+                continue
+            att_val = _safe_int(att_raw)
+            if not att_val or att_val < 100:
+                continue
+
+            h_name = row.get("home_team")
+            a_name = row.get("away_team")
+            if not h_name or not a_name:
+                continue
+
+            h_norm = normalize_team_name(str(h_name)).lower()
+            a_norm = normalize_team_name(str(a_name)).lower()
+
+            h_row = conn.execute(text(
+                "SELECT canonical_id FROM dim_team WHERE LOWER(canonical_name) = :n"
+            ), {"n": h_norm}).fetchone()
+            a_row = conn.execute(text(
+                "SELECT canonical_id FROM dim_team WHERE LOWER(canonical_name) = :n"
+            ), {"n": a_norm}).fetchone()
+            if not h_row or not a_row:
+                continue
+
+            match_date = _ensure_date(row.get("match_date"))
+            norm_season = normalize_season(row.get("season"))
+
+            # Match by date + teams (most precise)
+            existing = None
+            if match_date:
+                existing = conn.execute(text("""
+                    SELECT match_id FROM dim_match
+                    WHERE match_date = :date
+                      AND home_team_id = :hid
+                      AND away_team_id = :aid
+                      AND attendance IS NULL
+                    LIMIT 1
+                """), {"date": match_date, "hid": h_row[0], "aid": a_row[0]}).fetchone()
+
+            # Fallback by teams + season
+            if not existing and norm_season:
+                existing = conn.execute(text("""
+                    SELECT match_id FROM dim_match
+                    WHERE home_team_id = :hid
+                      AND away_team_id = :aid
+                      AND season = :season
+                      AND attendance IS NULL
+                    LIMIT 1
+                """), {"hid": h_row[0], "aid": a_row[0], "season": norm_season}).fetchone()
+
+            if existing:
+                conn.execute(text("""
+                    UPDATE dim_match SET attendance = :att
+                    WHERE match_id = :mid AND attendance IS NULL
+                """), {"att": att_val, "mid": existing[0]})
+                updated += 1
+
+    if updated:
+        log.info("dim_match ← Transfermarkt attendance: %d partidos actualizados", updated)
+    return updated
 
 
 # ── Punto de entrada ──────────────────────────────────────────────────────────
@@ -702,6 +802,7 @@ def load_matches(conn, comp_name: str | None = None) -> int:
         _load_from_understat(conn)
         _load_from_statsbomb(conn)
         _load_from_whoscored(conn)
+        _backfill_attendance_from_transfermarkt(conn)
         backfill_competition_id(conn)
     finally:
         _active_comp_filter[0] = None

@@ -687,21 +687,24 @@ def extract_teams(matches: list[dict]) -> pd.DataFrame:
 
 
 def extract_players(shots_df: pd.DataFrame, events_df: pd.DataFrame) -> pd.DataFrame:
-    """Extrae jugadores Ãºnicos de tiros y eventos -> columnas de dim_player.
+    """Extrae jugadores únicos de tiros y eventos -> columnas de dim_player.
 
-    Columnas: id_sofascore, canonical_name
+    Columnas: id_sofascore, canonical_name, team_id_ss
     """
     frames = []
     for df in (shots_df, events_df):
         if not df.empty and "player_id_ss" in df.columns:
-            frames.append(
-                df[["player_id_ss", "player_name"]]
-                .rename(columns={"player_id_ss": "id_sofascore", "player_name": "canonical_name"})
-            )
+            cols = ["player_id_ss", "player_name"]
+            renames = {"player_id_ss": "id_sofascore", "player_name": "canonical_name"}
+            if "team_id_ss" in df.columns:
+                cols.append("team_id_ss")
+            frames.append(df[cols].rename(columns=renames))
     if not frames:
         return pd.DataFrame(columns=["id_sofascore", "canonical_name"])
+    combined = pd.concat(frames)
+    # Keep first occurrence (preserves team_id_ss from the first appearance)
     return (
-        pd.concat(frames)
+        combined
         .drop_duplicates(subset=["id_sofascore"])
         .dropna(subset=["id_sofascore"])
         .sort_values("id_sofascore")

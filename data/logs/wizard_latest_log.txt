@@ -26,23 +26,6 @@ Selecciona la competición:
   10) Champions League
   11) Europa League
   12) Europa Conference League
-  13) European Championship
-  14) UEFA Nations League A
-  15) UEFA Nations League B
-  16) UEFA Nations League C
-  17) UEFA Nations League D
-  18) UEFA Women's EURO
-  19) World Cup Qualification UEFA
-
-  -- Torneos intercontinentales --
-  20) Copa America
-  21) FIFA World Cup
-  22) Africa Cup of Nations
-  23) Asian Cup
-  24) FIFA Club World Cup
-  25) FIFA Women's World Cup
-  26) Int. Friendly
-  27) World Cup Qualification CONMEBOL
 
   0) volver
   q) salir
@@ -57,38 +40,71 @@ Selecciona la temporada a procesar: (default: 2025/2026)
   0) volver al paso anterior
   q) salir del wizard
 Selecciona una opción: 
+Selecciona la fuente(s) de datos a usar: (default: all)
+  1) all
+  2) transfermarkt
+  3) sofascore
+  4) understat
+  5) statsbomb
+  6) whoscored
+  0) volver al paso anterior
+  q) salir del wizard
+Selecciona una opción: 
+¿Cómo filtrar los partidos descargados? (default: Todos los partidos)
+  1) Todos los partidos
+  2) Sólo de un equipo
+  3) Desde una fecha
+  0) volver al paso anterior
+  q) salir del wizard
+Selecciona una opción: 
+Selecciona el equipo:
+  1) real-madrid
+  2) fc-barcelona
+  3) atletico-madrid
+  4) athletic-bilbao
+  5) fc-villarreal
+  6) real-sociedad-san-sebastian
+  7) real-betis-sevilla
+  8) celta-vigo
+  9) fc-valencia
+  10) fc-girona
+  11) fc-sevilla
+  12) espanyol-barcelona
+  13) rayo-vallecano
+  14) ca-osasuna
+  15) rcd-mallorca
+  16) ud-levante
+  17) fc-elche
+  18) fc-getafe
+  19) deportivo-alaves
+  20) real-oviedo
+  0) volver al paso anterior
+  q) salir del wizard
+Selecciona una opción: 
 ============================================================
-  RESUMEN DE LA OPERACIÓN
+  RESUMEN DE LA OPERACION
 ============================================================
-  Acción      : Descarga de estadios (Transfermarkt → dim_stadium)
-  Competición : La Liga
+  Accion      : Descarga completa
+  Competicion : La Liga
   Temporada   : 2025/2026
-  Fuente      : Transfermarkt (única para estadios)
-  Destino     : dim_stadium
+  Fuente(s)   : transfermarkt
+  Filtro      : sólo equipo 'espanyol-barcelona'
 ============================================================
 
   S = ejecutar     0 = volver atrás     Q = salir
 ¿Lanzar el pipeline? [S/0/q]: 
-=== INICIANDO DESCARGA DE ESTADIOS ===
-
-=== DESCARGA DE ESTADIOS (Transfermarkt) ===
-  Competición: La Liga
-  Temporada  : 2025/2026
-
-[1/2] Scrapeando estadios desde Transfermarkt...
+=== INICIANDO EL PROCESO ===
 =======================================================
-  Transfermarkt — Estadios — ES1 2025_2026
+  Transfermarkt scraper — ES1 2025/2026
 =======================================================
 
-  Equipos procesados: 20/20
-  Omitidos por caché (<30 días): 20
-
-  CSV listo: C:\Users\Ivan\Desktop\football_scraping\data\clean\la_liga\2025_2026\transfermarkt\stadiums.csv
-
-[2/2] Cargando dim_stadium...
-
-  [OK] 20 estadio(s) upserteados en dim_stadium.
-
-=== PROCESO FINALIZADO EXITOSAMENTE ===
-43:31,084 - INFO -   ✓ la_liga\2025_2026\transfermarkt\stadiums.csv — 20 filas procesadas
-2026-05-22 12:43:31,084 - INFO - [OK] dim_stadium completado — 20 upserts
+[INFO] Equipo: real-madrid (id=418)
+==============================================================
+2026-05-26 17:15:58,966 - INFO -    Competición: La Liga
+2026-05-26 17:15:58,966 - INFO -    Temporada: 2025/2026
+2026-05-26 17:15:58,966 - INFO -    Fuente:    transfermarkt
+2026-05-26 17:15:58,966 - INFO - ── FASE 1: SCRAPING ─────────────────────────────────
+2026-05-26 17:15:58,966 - INFO - [INFO] full_refresh=True — se ignorará la caché local.
+2026-05-26 17:15:58,966 - INFO - [START] Scraping Transfermarkt...
+2026-05-26 17:15:58,967 - INFO - Lesiones: solo temporada TM 25/26
+2026-05-26 17:15:59,393 - INFO - Auto-descubiertos 20 equipos para ES1 2025

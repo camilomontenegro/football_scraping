@@ -136,6 +136,11 @@ def _link_source_phase(conn, source: str, id_col: str, name_col: str,
         log.info("player_loader %s: no hay players.csv de %s", fase_label, source)
         return 0, 0
 
+    # Column names for team context vary by source
+    _TEAM_NAME_COLS = ("team_name", "team", "team_slug")
+    _TEAM_ID_COLS   = ("team_id", "team_id_ss", "team_id_tm",
+                       "whoscored_team_id", "team_id_sb")
+
     linked = queued = 0
     seen: set = set()
     for df in dfs:
@@ -151,8 +156,26 @@ def _link_source_phase(conn, source: str, id_col: str, name_col: str,
             if ext_id_norm in seen:
                 continue
             seen.add(ext_id_norm)
+
+            # Extract team context for player_review disambiguation
+            t_name = None
+            for col in _TEAM_NAME_COLS:
+                v = row.get(col)
+                if v is not None and str(v).strip():
+                    t_name = str(v).strip()
+                    break
+            t_id = None
+            for col in _TEAM_ID_COLS:
+                v = row.get(col)
+                if v is not None and str(v).strip():
+                    t_id = str(v).strip()
+                    break
+
             try:
-                cid = resolve_player(conn, ext_name, source, source_id=ext_id_norm)
+                cid = resolve_player(
+                    conn, ext_name, source, source_id=ext_id_norm,
+                    team_name=t_name, team_id=t_id,
+                )
             except Exception as e:
                 log.warning("resolve_player(%s, %s): %s", source, ext_name, e)
                 cid = None

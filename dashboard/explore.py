@@ -860,7 +860,10 @@ def get_stadiums(
             s.architect,
             s.latitude,
             s.longitude,
-            s.tm_url
+            s.tm_url,
+            s.image_url,
+            s.wikipedia_url,
+            s.wikidata_qid
         FROM dim_stadium s
         LEFT JOIN dim_team t ON t.canonical_id = s.canonical_team_id
     """

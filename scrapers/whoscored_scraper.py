@@ -550,6 +550,61 @@ def _extract_match_date(match_data: dict) -> str | None:
     return None
 
 
+def _extract_attendance(html: str) -> int | None:
+    """Extract attendance from WhoScored match page HTML.
+
+    Tries multiple strategies:
+      1. JSON data in JavaScript variables (matchHeader, require.config)
+      2. HTML elements (match info section, dl/dd pairs)
+      3. Regex fallback on raw page text
+    """
+    if not html:
+        return None
+
+    # Strategy 1: JSON in JavaScript — "attendance":12345 or "attendance": 12345
+    m = re.search(r'"attendance"\s*:\s*(\d+)', html)
+    if m:
+        val = int(m.group(1))
+        if val > 0:
+            return val
+
+    # Strategy 2: Parse HTML elements
+    soup = BeautifulSoup(html, 'html.parser')
+
+    # Look for <dt>/<dd> pairs (common WhoScored match info layout)
+    for dt in soup.find_all('dt'):
+        label = dt.get_text(strip=True).lower()
+        if 'attendance' in label or 'asistencia' in label or 'espectadores' in label:
+            dd = dt.find_next_sibling('dd')
+            if dd:
+                raw = dd.get_text(strip=True).replace(',', '').replace('.', '').replace(' ', '')
+                digits = re.search(r'\d+', raw)
+                if digits:
+                    return int(digits.group())
+
+    # Look for spans/divs with attendance-related class names
+    for el in soup.find_all(['span', 'div'], class_=re.compile(r'attend|capacity', re.I)):
+        raw = el.get_text(strip=True).replace(',', '').replace('.', '').replace(' ', '')
+        digits = re.search(r'\d+', raw)
+        if digits:
+            val = int(digits.group())
+            if val > 100:  # filter out noise
+                return val
+
+    # Strategy 3: Text-based regex on page
+    text = soup.get_text()
+    pattern = re.search(
+        r'(?:Attendance|Asistencia|Espectadores)\s*[:\-]?\s*([\d,.\s]+)',
+        text, re.IGNORECASE,
+    )
+    if pattern:
+        raw = pattern.group(1).replace(',', '').replace('.', '').replace(' ', '')
+        if raw.isdigit() and int(raw) > 100:
+            return int(raw)
+
+    return None
+
+
 def _looks_blocked(html: str) -> bool:
     indicators = [
         "cf-browser-verification",
@@ -593,6 +648,8 @@ def get_match_data(driver: webdriver.Chrome, match_id: str, season_name: str) ->
             data['season'] = season_name
             # Extraer fecha del partido en formato YYYY-MM-DD para downstream
             data['match_date'] = _extract_match_date(data)
+            # Extraer asistencia del HTML de la página
+            data['attendance'] = _extract_attendance(html)
             return data
         except Exception as e:
             wait = MATCH_RETRY_BACKOFF[min(attempt - 1, len(MATCH_RETRY_BACKOFF) - 1)]
@@ -831,6 +888,11 @@ def scrape_whoscored(season=None, competition: str = "La Liga"):
                 m_date = match_data.get('match_date')
                 if m_date:
                     match['match_date'] = m_date
+
+                # Propagar asistencia al match dict del CSV
+                m_att = match_data.get('attendance')
+                if m_att:
+                    match['attendance'] = m_att
 
                 all_events.extend(extract_events(match_data))
                 all_players.extend(extract_players_from_match(match_data))

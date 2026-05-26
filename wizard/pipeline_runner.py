@@ -567,6 +567,7 @@ def run_scraping(
                 season=season_start,
                 from_date=from_date,
                 season_label=season,
+                full_refresh=full_refresh,
             )
         except TypeError:
             scrape_transfermarkt(league_code=league_code, season=season_start)

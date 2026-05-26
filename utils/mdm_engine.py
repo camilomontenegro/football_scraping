@@ -348,6 +348,8 @@ def resolve_player(
     source: str,
     source_id: Optional[int] = None,
     similarity_threshold: int = 85,
+    team_name: Optional[str] = None,
+    team_id: Optional[str] = None,
 ) -> Optional[int]:
     """Resuelve un nombre de jugador a un canonical_id de dim_player.
 
@@ -363,6 +365,8 @@ def resolve_player(
         source:               Fuente de datos ('sofascore', 'transfermarkt', etc.).
         source_id:            ID del jugador en la fuente (si se conoce).
         similarity_threshold: Mínimo de similitud (0-100) para match fuzzy.
+        team_name:            Nombre del equipo (para contexto en player_review).
+        team_id:              ID del equipo en la fuente (para contexto en player_review).
 
     Returns:
         canonical_id de dim_player si se resuelve con certeza, None en caso contrario.
@@ -428,6 +432,8 @@ def resolve_player(
         source_id  = str(source_id) if source_id else None,
         suggested_id = best_id,
         score      = best_score,
+        team_name  = team_name,
+        team_id    = str(team_id) if team_id else None,
     )
     return None
 
@@ -439,6 +445,8 @@ def _queue_player_review(
     source_id: Optional[str],
     suggested_id: Optional[int],
     score: int,
+    team_name: Optional[str] = None,
+    team_id: Optional[str] = None,
 ) -> None:
     """Inserta un registro en player_review para desambiguación manual.
 
@@ -450,8 +458,10 @@ def _queue_player_review(
             text("""
                 INSERT INTO player_review
                     (source_name, source_system, source_id,
-                     suggested_canonical_id, similarity_score, resolved)
-                SELECT :name, :sys, :sid, :sugg, :score, FALSE
+                     suggested_canonical_id, similarity_score, resolved,
+                     source_team_id, source_team_name)
+                SELECT :name, :sys, :sid, :sugg, :score, FALSE,
+                       :tid, :tname
                 WHERE NOT EXISTS (
                     SELECT 1 FROM player_review
                     WHERE source_system = :sys AND source_id = :sid
@@ -463,11 +473,13 @@ def _queue_player_review(
                 "sid":   source_id,
                 "sugg":  suggested_id,
                 "score": score,
+                "tid":   team_id,
+                "tname": team_name,
             },
         )
         log.debug(
-            "player_review: '%s' (%s id=%s) → suggested=%s score=%d",
-            source_name, source, source_id, suggested_id, score,
+            "player_review: '%s' (%s id=%s, team=%s) → suggested=%s score=%d",
+            source_name, source, source_id, team_name, suggested_id, score,
         )
     except Exception as e:
         log.warning("Error insertando player_review para '%s': %s", source_name, e)

@@ -101,6 +101,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "search_stadium":        {"es": "Buscar (estadio / equipo / ciudad)",
                               "en": "Search (stadium / team / city)"},
     "top_15_capacity":       {"es": "Top 15 por aforo",      "en": "Top 15 by capacity"},
+    "stadium_select_hint":   {"es": "Haz clic en una fila de la tabla para ver la ficha del estadio.",
+                              "en": "Click a table row to open the stadium detail panel."},
+    "stadium_detail":        {"es": "Ficha del estadio",     "en": "Stadium detail"},
+    "stadium_no_photo":      {"es": "Sin foto en Wikidata. Ejecuta el enricher de estadios para intentar obtenerla.",
+                              "en": "No Wikidata photo yet. Run the stadium enricher to fetch one."},
+    "stadium_wikipedia":     {"es": "Wikipedia",             "en": "Wikipedia"},
+    "stadium_wikidata":      {"es": "Wikidata",              "en": "Wikidata"},
+    "stadium_map_fallback":  {"es": "Ubicación (sin foto disponible)", "en": "Location (no photo available)"},
 
     # ── Pipeline monitoring tab ─────────────────────────────
     "pipeline_monitoring":   {"es": "Monitorización del pipeline", "en": "Pipeline monitoring"},

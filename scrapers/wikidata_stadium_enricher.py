@@ -40,8 +40,20 @@ WIKIDATA_API = "https://www.wikidata.org/w/api.php"
 USER_AGENT = "football-scraping-wizard/1.0 (local data enrichment; contact: local)"
 
 _last_wikidata_request = 0.0
-_MIN_REQUEST_INTERVAL = 2.0
+_MIN_REQUEST_INTERVAL = 2.5
 _429_BACKOFF_SECONDS = 15.0
+_STADIUM_HINTS = ("stadium", "estadio", "stade", "stadion", "arena", "ground", "venue")
+_BAD_HINTS = (
+    "disambiguation", "human", "person", "president", "player", "manager",
+    "referee", "coach", "politician",
+)
+_STADIUM_INSTANCE_QIDS = {
+    "Q483110",   # association football stadium
+    "Q1154710",  # multi-purpose stadium
+    "Q2339034",  # indoor arena
+    "Q1076486",  # sports venue
+    "Q811979",   # architectural structure
+}
 _timezone_finder = TimezoneFinder() if TimezoneFinder else None
 _SESSION = requests.Session()
 _SESSION.headers.update({"User-Agent": USER_AGENT})
@@ -115,26 +127,105 @@ def _api_get(params: dict) -> dict:
     return payload
 
 
-def _search_entity_id(name: str, language: str = "en") -> Optional[str]:
+def _search_hits(name: str, language: str = "en", limit: int = 8) -> list[dict]:
     if not name or not name.strip():
-        return None
+        return []
     try:
         data = _api_get({
             "action": "wbsearchentities",
             "search": name.strip(),
             "language": language,
-            "limit": 5,
+            "limit": limit,
             "type": "item",
         })
     except (Timeout, RequestException, RuntimeError) as exc:
         log.warning("Wikidata search failed for %r (%s): %s", name, language, exc)
-        return None
+        return []
+    return data.get("search") or []
 
-    for hit in data.get("search", []):
+
+def _search_entity_id(name: str, language: str = "en") -> Optional[str]:
+    for hit in _search_hits(name, language=language, limit=5):
         qid = hit.get("id")
         if qid and qid.startswith("Q"):
             return qid
     return None
+
+
+def _score_search_hit(hit: dict) -> int:
+    desc = (hit.get("description") or "").lower()
+    label = (hit.get("label") or "").lower()
+    score = 0
+    if any(hint in desc for hint in _STADIUM_HINTS):
+        score += 12
+    if "football" in desc or "soccer" in desc:
+        score += 4
+    if any(hint in desc for hint in _BAD_HINTS):
+        score -= 25
+    if "wikimedia disambiguation" in desc:
+        score -= 30
+    if "stadio" in label or "estadio" in label or "stade" in label:
+        score += 6
+    return score
+
+
+def _instance_of_qids(entity: dict) -> set[str]:
+    claims = entity.get("claims") or {}
+    values = claims.get("P31") or []
+    qids: set[str] = set()
+    for claim in values:
+        value = claim.get("mainsnak", {}).get("datavalue", {}).get("value") or {}
+        qid = value.get("id")
+        if qid:
+            qids.add(qid)
+    return qids
+
+
+def _entity_is_stadium_like(entity: dict) -> bool:
+    instances = _instance_of_qids(entity)
+    if instances & _STADIUM_INSTANCE_QIDS:
+        return True
+    labels = " ".join(
+        (entity.get("labels") or {}).get(lang, {}).get("value", "")
+        for lang in ("en", "es", "it")
+    ).lower()
+    return any(hint in labels for hint in ("stadio", "estadio", "stade", "stadium", "arena"))
+
+
+def _build_search_queries(stadium_name: str, team: str = "") -> list[str]:
+    name = (stadium_name or "").strip()
+    club = (team or "").strip()
+    queries: list[str] = []
+    seen: set[str] = set()
+
+    def add(query: str) -> None:
+        q = " ".join(query.split())
+        if q and q.lower() not in seen:
+            seen.add(q.lower())
+            queries.append(q)
+
+    if club:
+        add(f"{club} stadium")
+        add(f"{club} home stadium")
+    if name:
+        add(name)
+        if "stadio" not in name.lower() and "estadio" not in name.lower():
+            add(f"Stadio {name}")
+            add(f"Estadio {name}")
+        if "stadium" not in name.lower():
+            add(f"{name} stadium")
+    return queries
+
+
+def _club_search_names(club_name: str) -> list[str]:
+    name = (club_name or "").strip()
+    if not name:
+        return []
+    names = [name]
+    for suffix in (" CF", " FC", " SC", " SSC", " AC", " AS", " US", " UD"):
+        if name.endswith(suffix):
+            names.append(name[: -len(suffix)].strip())
+    return list(dict.fromkeys(names))
 
 
 def _claim_value(claims: dict, prop: str) -> Optional[str]:
@@ -246,56 +337,99 @@ def _row_from_entity(qid: str, entity: dict, related: Optional[dict[str, dict]] 
     }
 
 
-def query_wikidata_by_stadium_name(name: str) -> dict:
-    for lang in ("en", "es"):
-        qid = _search_entity_id(name, language=lang)
-        if not qid:
-            continue
-        entity = _fetch_entity(qid)
-        if not entity:
-            continue
-        claims = entity.get("claims") or {}
-        related_ids = [
-            str(x) for x in (
-                _claim_value(claims, "P84"),
-                _claim_value(claims, "P137"),
-            ) if x
-        ]
-        related = _fetch_entities([qid, *related_ids])
-        entity = related.get(qid, entity)
-        return _row_from_entity(qid, entity, related)
-    return {}
-
-
-def query_wikidata_by_club(club_name: str) -> dict:
-    qid = _search_entity_id(club_name, language="en") or _search_entity_id(club_name, language="es")
-    if not qid:
+def query_wikidata_by_qid(qid: str) -> dict:
+    if not qid or not str(qid).startswith("Q"):
         return {}
-
-    entity = _fetch_entity(qid)
+    entity = _fetch_entity(str(qid))
     if not entity:
         return {}
-
-    venue_id = _claim_value(entity.get("claims") or {}, "P115")
-    if not venue_id:
-        return {}
-
-    venue_id = str(venue_id)
-    claims_preview = _fetch_entity(venue_id)
-    if not claims_preview:
-        return {}
-    claims = claims_preview.get("claims") or {}
+    claims = entity.get("claims") or {}
     related_ids = [
         str(x) for x in (
             _claim_value(claims, "P84"),
             _claim_value(claims, "P137"),
         ) if x
     ]
-    related = _fetch_entities([venue_id, *related_ids])
-    venue = related.get(venue_id)
-    if not venue:
-        return {}
-    return _row_from_entity(venue_id, venue, related)
+    related = _fetch_entities([str(qid), *related_ids])
+    entity = related.get(str(qid), entity)
+    return _row_from_entity(str(qid), entity, related)
+
+
+def query_wikidata_by_stadium_name(name: str, team: str = "") -> dict:
+    best_row: dict = {}
+    best_score = -999
+
+    for query in _build_search_queries(name, team):
+        seen_qids: set[str] = set()
+        for lang in ("en", "es", "it"):
+            for hit in _search_hits(query, language=lang, limit=8):
+                qid = hit.get("id")
+                if not qid or qid in seen_qids:
+                    continue
+                seen_qids.add(qid)
+
+                entity = _fetch_entity(qid)
+                if not entity:
+                    continue
+
+                row = _row_from_entity(qid, entity)
+                score = _score_search_hit(hit)
+                if row.get("latitude") is not None and row.get("longitude") is not None:
+                    score += 50
+                if _entity_is_stadium_like(entity):
+                    score += 8
+
+                if score > best_score:
+                    best_score = score
+                    best_row = row
+
+                if (
+                    row.get("latitude") is not None
+                    and row.get("longitude") is not None
+                    and score >= 50
+                ):
+                    return row
+
+    return best_row
+
+
+def query_wikidata_by_club(club_name: str) -> dict:
+    for club in _club_search_names(club_name):
+        qid = (
+            _search_entity_id(club, language="en")
+            or _search_entity_id(club, language="es")
+            or _search_entity_id(club, language="it")
+        )
+        if not qid:
+            continue
+
+        entity = _fetch_entity(qid)
+        if not entity:
+            continue
+
+        venue_id = _claim_value(entity.get("claims") or {}, "P115")
+        if not venue_id:
+            continue
+
+        venue_id = str(venue_id)
+        claims_preview = _fetch_entity(venue_id)
+        if not claims_preview:
+            continue
+        claims = claims_preview.get("claims") or {}
+        related_ids = [
+            str(x) for x in (
+                _claim_value(claims, "P84"),
+                _claim_value(claims, "P137"),
+            ) if x
+        ]
+        related = _fetch_entities([venue_id, *related_ids])
+        venue = related.get(venue_id)
+        if not venue:
+            continue
+        row = _row_from_entity(venue_id, venue, related)
+        if row.get("latitude") is not None and row.get("longitude") is not None:
+            return row
+    return {}
 
 
 def _derive_timezone(lat: Optional[float], lon: Optional[float]) -> Optional[str]:
@@ -324,20 +458,53 @@ def _derive_altitude(lat: Optional[float], lon: Optional[float]) -> Optional[int
         return None
 
 
-def enrich_stadium(stadium_row: dict, cache: Optional[dict[str, Any]] = None) -> dict:
+def resolve_stadium_coords(
+    stadium_name: str,
+    team: str = "",
+    existing_qid: Optional[str] = None,
+) -> dict:
+    """Resolve stadium coordinates using club venue, search, and existing QID."""
+    if existing_qid:
+        row = query_wikidata_by_qid(existing_qid)
+        if row.get("latitude") is not None and row.get("longitude") is not None:
+            return row
+        if row.get("wikidata_qid") and not row.get("latitude"):
+            log.info(
+                "Stored QID %s has no coordinates (%r) — re-searching",
+                existing_qid, stadium_name,
+            )
+
+    if team:
+        row = query_wikidata_by_club(team)
+        if row.get("latitude") is not None and row.get("longitude") is not None:
+            return row
+
+    row = query_wikidata_by_stadium_name(stadium_name, team=team)
+    if row.get("latitude") is not None and row.get("longitude") is not None:
+        return row
+
+    return row
+
+
+def enrich_stadium(
+    stadium_row: dict,
+    cache: Optional[dict[str, Any]] = None,
+    require_coords: bool = False,
+) -> dict:
     cache = cache if cache is not None else _load_cache()
     name = stadium_row.get("stadium_name") or ""
     team = stadium_row.get("team") or stadium_row.get("team_slug") or ""
-    cache_key = f"{name}|{team}".lower()
+    existing_qid = stadium_row.get("wikidata_qid")
+    cache_key = f"{name}|{team}|{existing_qid or ''}".lower()
 
     cached = _cache_get(cache, cache_key)
     if cached is not None:
-        return cached
+        has_coords = cached.get("latitude") is not None and cached.get("longitude") is not None
+        if not require_coords or has_coords:
+            return cached
 
     try:
-        data = query_wikidata_by_stadium_name(name)
-        if not data:
-            data = query_wikidata_by_club(team)
+        data = resolve_stadium_coords(name, team=team, existing_qid=existing_qid)
     except Exception as exc:
         log.warning(
             "Wikidata enrichment failed for stadium=%r team=%r: %s",
@@ -351,8 +518,121 @@ def enrich_stadium(stadium_row: dict, cache: Optional[dict[str, Any]] = None) ->
         data["altitude_m"] = _derive_altitude(lat, lon)
 
     data = {k: v for k, v in data.items() if v not in (None, "")}
-    _cache_set(cache, cache_key, data)
+    if data:
+        _cache_set(cache, cache_key, data)
     return data
+
+
+MISSING_COORDS_SQL = """
+    SELECT s.stadium_id, s.stadium_name, s.team_slug, s.wikidata_qid,
+           COALESCE(t.canonical_name, s.team_slug) AS team,
+           COUNT(m.match_id) AS blocked_matches
+    FROM dim_stadium s
+    LEFT JOIN dim_team t ON t.canonical_id = s.canonical_team_id
+    JOIN dim_match m ON m.home_team_id = s.canonical_team_id
+    WHERE m.match_date IS NOT NULL
+      AND m.temperature_c IS NULL
+      AND (s.latitude IS NULL OR s.longitude IS NULL)
+    GROUP BY s.stadium_id, s.stadium_name, s.team_slug, s.wikidata_qid,
+             t.canonical_name, s.team_slug
+    ORDER BY blocked_matches DESC, s.stadium_name NULLS LAST
+"""
+
+
+def enrich_stadiums_missing_coords(
+    conn_or_engine=engine,
+    dry_run: bool = False,
+    limit: Optional[int] = None,
+    weather_gaps_only: bool = True,
+) -> int:
+    """Enrich stadiums missing lat/lon, prioritising weather-blocked venues."""
+    sql = MISSING_COORDS_SQL if weather_gaps_only else """
+        SELECT s.stadium_id, s.stadium_name, s.team_slug, s.wikidata_qid,
+               COALESCE(t.canonical_name, s.team_slug) AS team,
+               0 AS blocked_matches
+        FROM dim_stadium s
+        LEFT JOIN dim_team t ON t.canonical_id = s.canonical_team_id
+        WHERE COALESCE(s.is_current, TRUE) = TRUE
+          AND (s.latitude IS NULL OR s.longitude IS NULL)
+        ORDER BY s.stadium_name NULLS LAST
+    """
+    if limit:
+        sql += " LIMIT :limit"
+
+    cache = _load_cache()
+    connectable = conn_or_engine
+    context = (
+        connectable.begin()
+        if hasattr(connectable, "begin") and not hasattr(connectable, "execute")
+        else None
+    )
+
+    if context is not None:
+        with context as conn:
+            updates = _enrich_coords_with_connection(conn, sql, cache, dry_run, limit)
+    else:
+        updates = _enrich_coords_with_connection(connectable, sql, cache, dry_run, limit)
+
+    _save_cache(cache)
+    return updates
+
+
+def _enrich_coords_with_connection(
+    conn, sql: str, cache: dict[str, Any], dry_run: bool, limit: Optional[int],
+) -> int:
+    rows = conn.execute(text(sql), {"limit": limit} if limit else {}).mappings().fetchall()
+    total = len(rows)
+    updates = 0
+    coords_found = 0
+
+    for idx, row in enumerate(rows, start=1):
+        log.info(
+            "Coords [%d/%d] stadium_id=%s team=%r name=%r blocked=%s qid=%s",
+            idx, total, row["stadium_id"], row.get("team"),
+            row.get("stadium_name"), row.get("blocked_matches"), row.get("wikidata_qid"),
+        )
+        try:
+            data = enrich_stadium(dict(row), cache=cache, require_coords=True)
+        except Exception as exc:
+            log.warning("Skipping stadium_id=%s: %s", row["stadium_id"], exc)
+            continue
+
+        if not data.get("latitude") or not data.get("longitude"):
+            log.warning("  no coordinates found")
+            continue
+
+        coords_found += 1
+        update_cols = [
+            c for c in (
+                "latitude", "longitude", "timezone", "altitude_m",
+                "image_url", "wikipedia_url", "wikidata_qid",
+                "architect", "operator",
+            )
+            if data.get(c) not in (None, "")
+        ]
+        if not update_cols:
+            continue
+
+        updates += 1
+        if dry_run:
+            log.info(
+                "  dry-run lat=%.4f lon=%.4f qid=%s fields=%s",
+                data["latitude"], data["longitude"], data.get("wikidata_qid"), update_cols,
+            )
+            continue
+
+        conn.execute(text(f"""
+            UPDATE dim_stadium
+            SET {", ".join(f"{col} = :{col}" for col in update_cols)},
+                updated_at = NOW()
+            WHERE stadium_id = :stadium_id
+        """), {**data, "stadium_id": row["stadium_id"]})
+
+    log.info(
+        "Coordinate enrichment complete: %d/%d stadiums updated (%d with coords found).",
+        updates, total, coords_found,
+    )
+    return updates
 
 
 def enrich_all_stadiums(conn_or_engine=engine, dry_run: bool = False,
@@ -399,7 +679,7 @@ def _enrich_with_connection(conn, sql: str, cache: dict[str, Any],
             idx, total, row["stadium_id"], row.get("stadium_name"),
         )
         try:
-            data = enrich_stadium(dict(row), cache=cache)
+            data = enrich_stadium(dict(row), cache=cache, require_coords=False)
         except Exception as exc:
             log.warning(
                 "Skipping stadium_id=%s after enrichment error: %s",
@@ -436,9 +716,21 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Enrich dim_stadium from Wikidata.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument(
+        "--missing-coords",
+        action="store_true",
+        help="Only stadiums missing lat/lon that block weather enrichment.",
+    )
     args = parser.parse_args()
-    total = enrich_all_stadiums(engine, dry_run=args.dry_run, limit=args.limit)
-    print(f"Stadiums enriched: {total}" + (" (dry-run)" if args.dry_run else ""))
+
+    if args.missing_coords:
+        total = enrich_stadiums_missing_coords(
+            engine, dry_run=args.dry_run, limit=args.limit, weather_gaps_only=True,
+        )
+        print(f"Stadium coords repaired: {total}" + (" (dry-run)" if args.dry_run else ""))
+    else:
+        total = enrich_all_stadiums(engine, dry_run=args.dry_run, limit=args.limit)
+        print(f"Stadiums enriched: {total}" + (" (dry-run)" if args.dry_run else ""))
     return 0
 
 

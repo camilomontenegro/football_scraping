@@ -12,10 +12,13 @@ Estructura:
     6. MAIN            — scrape → transform → guardar en disco
 
 Rutas estándar (`utils.data_paths`):
-    data/raw/<comp>/<season>/transfermarkt/players/<team>.json    ← plantilla cruda
+    data/raw/<comp>/<season>/transfermarkt/players/<team>.json    ← plantilla de la temporada
     data/raw/<comp>/<season>/transfermarkt/injuries/<team>.json   ← lesiones crudas
     data/clean/<comp>/<season>/transfermarkt/players.csv          ← dim_player
     data/clean/<comp>/<season>/transfermarkt/injuries.csv         ← fact_injuries
+
+Lesiones: se recorre kader + leistungsdaten (toda la plantilla de la temporada).
+Las URLs de lesiones usan el ID canónico del jugador, no el slug de la tabla.
 
 Caché global:
     data/.cache/transfermarkt_players_last_scraped.json
@@ -27,6 +30,7 @@ los únicos que escriben en la DB.
 
 from __future__ import annotations
 
+import json
 import logging
 import random
 import re
@@ -44,6 +48,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from utils.data_paths import (
+    raw_dir,
     save_raw_json,
     save_clean_csv,
     load_cache as _load_cache_file,
@@ -251,7 +256,7 @@ def get_player_profile(player_slug: str, player_id: str) -> dict:
 
 
 def get_squad(team_slug: str, team_id: int, season: int) -> list[dict]:
-    """Descarga la plantilla de un equipo para una temporada."""
+    """Descarga la plantilla actual (kader) de un equipo para una temporada."""
     url = (
         f"https://www.transfermarkt.es/{team_slug}/kader"
         f"/verein/{team_id}/saison_id/{season}"
@@ -309,14 +314,193 @@ def get_squad(team_slug: str, team_id: int, season: int) -> list[dict]:
     return players
 
 
+def _player_from_link(link) -> Optional[dict]:
+    """Extrae id/slug/nombre desde un enlace de perfil de Transfermarkt."""
+    if not link:
+        return None
+    href = link.get("href", "")
+    player_id = extract_player_id(href)
+    if not player_id:
+        return None
+    return {
+        "player_id":   player_id,
+        "player_slug": extract_player_slug(href),
+        "player_name": link.get("title") or link.get_text(strip=True),
+    }
+
+
+def _players_from_table(table) -> list[dict]:
+    """Parsea filas de una tabla TM con enlaces a /profil/spieler/."""
+    if not table:
+        return []
+    players: list[dict] = []
+    seen: set[str] = set()
+    for row in table.find_all("tr", class_=["odd", "even"]):
+        link = row.find("a", href=lambda h: h and "/profil/spieler/" in h)
+        p = _player_from_link(link)
+        if not p or p["player_id"] in seen:
+            continue
+        seen.add(p["player_id"])
+        players.append(p)
+    return players
+
+
+def resolve_player_from_id(player_id: str) -> dict:
+    """Obtiene slug y nombre canónicos desde el perfil TM (evita slug/id inconsistentes)."""
+    url = f"https://www.transfermarkt.es/-/profil/spieler/{player_id}"
+    r = request_with_retry(url)
+    if not r:
+        return {"player_id": player_id, "player_slug": None, "player_name": None}
+
+    soup = BeautifulSoup(r.text, "html.parser")
+    canonical = ""
+    link = soup.find("link", rel="canonical")
+    if link and link.get("href"):
+        canonical = link["href"]
+    elif soup.find("meta", property="og:url"):
+        canonical = soup.find("meta", property="og:url")["content"]
+
+    slug = extract_player_slug(canonical) if canonical else None
+    name_el = soup.find("h1")
+    return {
+        "player_id":   str(player_id),
+        "player_slug": slug,
+        "player_name": name_el.get_text(strip=True) if name_el else None,
+    }
+
+
+def get_season_roster(team_slug: str, team_id: int, season: int) -> list[dict]:
+    """Jugadores que aparecen en las estadísticas de la temporada (incluye bajas)."""
+    url = (
+        f"https://www.transfermarkt.es/{team_slug}/leistungsdaten/verein/{team_id}"
+        f"/plus/1?saison_id={season}"
+    )
+    r = request_with_retry(url)
+    if not r:
+        return []
+    soup = BeautifulSoup(r.text, "html.parser")
+    return _players_from_table(soup.find("table", class_="items"))
+
+
+def get_season_transfer_players(team_slug: str, team_id: int, season: int) -> list[dict]:
+    """Jugadores con fichaje o salida en la temporada (altas + bajas).
+
+    Nota: TM a veces enlaza perfiles homónimos incorrectos; siempre validar con
+    `resolve_player_from_id()` antes de usar estos registros.
+    """
+    url = (
+        f"https://www.transfermarkt.es/{team_slug}/transfers/verein/{team_id}"
+        f"/saison_id={season}"
+    )
+    r = request_with_retry(url)
+    if not r:
+        return []
+    soup = BeautifulSoup(r.text, "html.parser")
+    players: list[dict] = []
+    seen: set[str] = set()
+    for table in soup.find_all("table", class_="items"):
+        for p in _players_from_table(table):
+            if p["player_id"] in seen:
+                continue
+            seen.add(p["player_id"])
+            players.append(p)
+    return players
+
+
+def _merge_season_players(
+    team_slug: str,
+    team_id: int,
+    team_country: Optional[str],
+    *groups: list[dict],
+) -> list[dict]:
+    """Une listas de jugadores deduplicando por id; prioriza el registro más completo."""
+    merged: dict[str, dict] = {}
+    for group in groups:
+        for p in group:
+            pid = str(p["player_id"])
+            if pid not in merged:
+                merged[pid] = dict(p)
+                continue
+            for key, val in p.items():
+                if val and not merged[pid].get(key):
+                    merged[pid][key] = val
+
+    result: list[dict] = []
+    for p in merged.values():
+        if not p.get("player_slug") or not p.get("player_name"):
+            resolved = resolve_player_from_id(str(p["player_id"]))
+            p.setdefault("player_slug", resolved.get("player_slug"))
+            p.setdefault("player_name", resolved.get("player_name"))
+        p.setdefault("team_slug", team_slug)
+        p.setdefault("team_id_tm", team_id)
+        p.setdefault("team_country", team_country)
+        result.append(p)
+    return result
+
+
+def _players_for_injury_scrape(
+    team_slug: str,
+    team_id: int,
+    season: int,
+    kader_players: list[dict],
+) -> list[dict]:
+    """Plantilla completa de la temporada: kader + leistungsdaten (sin fichajes)."""
+    team_country = kader_players[0].get("team_country") if kader_players else None
+    season_roster = get_season_roster(team_slug, team_id, season)
+    return _merge_season_players(
+        team_slug, team_id, team_country,
+        kader_players, season_roster,
+    )
+
+
+def tm_season_label(season_start: int) -> str:
+    """Año de inicio (2025) → etiqueta de temporada en Transfermarkt ('25/26')."""
+    return f"{season_start % 100:02d}/{(season_start + 1) % 100:02d}"
+
+
+def _filter_injuries_for_season(injuries: list[dict], tm_season: str) -> list[dict]:
+    """Transfermarkt devuelve historial completo; nos quedamos solo con la temporada pedida."""
+    return [inj for inj in injuries if (inj.get("season") or "").strip() == tm_season]
+
+
+def _load_cached_player_injuries(
+    competition_name: str,
+    season_label: str,
+    team_slug: str,
+    player_id: str,
+) -> list[dict]:
+    """Reutiliza lesiones ya guardadas en raw JSON cuando la caché evita re-scrape."""
+    path = raw_dir(competition_name, season_label, "transfermarkt", "injuries") / f"{team_slug}.json"
+    if not path.exists():
+        return []
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return []
+    return [
+        inj for inj in data.get("injuries", [])
+        if str(inj.get("player_id_tm")) == str(player_id)
+    ]
+
+
 def get_player_injuries(player_slug: str, player_id: str) -> list[dict]:
     """Historial de lesiones de un jugador."""
-    url = f"https://www.transfermarkt.es/{player_slug}/verletzungen/spieler/{player_id}"
+    # URL por ID: evita lesiones de otro jugador cuando slug e id no coinciden.
+    url = f"https://www.transfermarkt.es/-/verletzungen/spieler/{player_id}"
     r = request_with_retry(url)
     if not r:
         return []
 
     soup = BeautifulSoup(r.text, "html.parser")
+    canonical = soup.find("link", rel="canonical")
+    if canonical and canonical.get("href"):
+        resolved_slug = extract_player_slug(canonical["href"])
+        if resolved_slug and player_slug and resolved_slug != player_slug:
+            log.debug(
+                "Slug corregido para lesiones: %s → %s (id=%s)",
+                player_slug, resolved_slug, player_id,
+            )
     table = soup.find("table", class_="items")
     if not table:
         return []
@@ -370,6 +554,9 @@ def scrape_transfermarkt(
     if competition_name is None:
         competition_name = "La Liga"
 
+    tm_injury_season = tm_season_label(season)
+    log.info("Lesiones: solo temporada TM %s", tm_injury_season)
+
     from utils.batch import generate_batch_id
     batch_id = generate_batch_id()
 
@@ -397,19 +584,29 @@ def scrape_transfermarkt(
         print(f"\n[INFO] Equipo: {team_slug} (id={team_id})")
 
         players = None
+        kader_players: list[dict] = []
         for attempt in range(MAX_RETRIES):
             try:
-                players = get_squad(team_slug, team_id, season)
-                if players:
+                kader_players = get_squad(team_slug, team_id, season)
+                if kader_players:
                     break
             except Exception as e:
                 log.warning("%s intento %d: %s", team_slug, attempt + 1, e)
             time.sleep(2 * (attempt + 1))
 
-        if not players:
+        if not kader_players:
             log.error("%s sin datos de plantilla", team_slug)
             failed.append(team_slug)
             continue
+
+        team_country = kader_players[0].get("team_country")
+        players = _players_for_injury_scrape(team_slug, team_id, season, kader_players)
+        extra_players = len(players) - len(kader_players)
+        if extra_players:
+            log.info(
+                "%s: %d kader + %d leistungsdaten = %d jugadores para lesiones",
+                team_slug, len(kader_players), extra_players, len(players),
+            )
 
         for p in players:
             p["season"]   = season
@@ -425,6 +622,17 @@ def scrape_transfermarkt(
                         last_scraped, "%Y-%m-%d").date()).days
                     if days_since < 7:
                         skipped_players += 1
+                        injuries = _load_cached_player_injuries(
+                            competition_name, season_label, team_slug, player_id_str,
+                        )
+                        injuries = _filter_injuries_for_season(injuries, tm_injury_season)
+                        for inj in injuries:
+                            row = dict(inj)
+                            row["player_id_tm"] = p["player_id"]
+                            row["player_name"]  = p["player_name"]
+                            row["team_slug"]    = team_slug
+                            row["batch_id"]     = batch_id
+                            team_injuries.append(row)
                         continue
                 except Exception:
                     pass
@@ -432,6 +640,7 @@ def scrape_transfermarkt(
             try:
                 injuries = get_player_injuries(p["player_slug"], p["player_id"])
                 cache[player_id_str] = today_str
+                injuries = _filter_injuries_for_season(injuries, tm_injury_season)
                 if from_date_obj:
                     filtered: list[dict] = []
                     for inj in injuries:
@@ -480,7 +689,11 @@ def scrape_transfermarkt(
         all_players.extend(players)
         all_injuries.extend(team_injuries)
 
-        print(f"  [OK] {len(players)} jugadores | {len(team_injuries)} lesiones")
+        print(
+            f"  [OK] {len(players)} jugadores "
+            f"({len(kader_players)} kader + {extra_players} temporada) "
+            f"| {len(team_injuries)} lesiones"
+        )
         save_cache(cache)
 
     print(f"\n  Equipos procesados: {len(teams) - len(failed)}/{len(teams)}")
@@ -543,6 +756,172 @@ def transform_injuries(injuries_raw: list[dict]) -> pd.DataFrame:
         df["days_absent"]    = pd.to_numeric(df["days_absent"], errors="coerce").astype("Int32")
         df["matches_missed"] = pd.to_numeric(df["matches_missed"], errors="coerce").astype("Int16")
     return df.reset_index(drop=True)
+
+
+# ── ATTENDANCE SCRAPER ────────────────────────────────────────────────────────
+
+def _parse_attendance(raw: str) -> Optional[int]:
+    """Parse attendance string like '81.044 Zuschauer' or '45,012' into int."""
+    if not raw:
+        return None
+    digits = re.sub(r"[^\d]", "", raw)
+    if digits:
+        val = int(digits)
+        return val if val > 0 else None
+    return None
+
+
+def scrape_transfermarkt_attendance(
+    competition_name: str = "La Liga",
+    league_code: str = LEAGUE_CODE,
+    season: int = 2024,
+    max_matchdays: int = 50,
+) -> list[dict]:
+    """Scrape attendance per match from Transfermarkt Spieltag pages.
+
+    Iterates through matchday pages for a competition/season and extracts
+    home_team, away_team, date, score, and attendance for each match.
+
+    Args:
+        competition_name: Name as in competitions.py (e.g. "La Liga")
+        league_code: Transfermarkt league code (e.g. "ES1")
+        season: Start year of the season (e.g. 2024 for 2024/25)
+        max_matchdays: Maximum matchdays to iterate (safety limit)
+
+    Returns:
+        List of dicts with keys: home_team, away_team, match_date,
+        home_score, away_score, attendance, matchday, competition, season
+    """
+    from scripts.competitions import get_competition_slug_transfermarkt
+
+    slug = get_competition_slug_transfermarkt(competition_name)
+    if not slug:
+        log.error("No se encontró slug de Transfermarkt para '%s'", competition_name)
+        return []
+
+    season_label = f"{season}_{season + 1}"
+    all_matches: list[dict] = []
+    empty_streak = 0
+
+    log.info("Scraping attendance de %s %d/%d desde Transfermarkt...",
+             competition_name, season, season + 1)
+
+    for matchday in range(1, max_matchdays + 1):
+        url = (
+            f"https://www.transfermarkt.es/{slug}"
+            f"/spieltag/wettbewerb/{league_code}"
+            f"/saison_id/{season}/spieltag/{matchday}"
+        )
+        r = request_with_retry(url)
+        if not r:
+            empty_streak += 1
+            if empty_streak >= 3:
+                log.info("  3 jornadas sin respuesta — fin.")
+                break
+            continue
+
+        soup = BeautifulSoup(r.text, "html.parser")
+
+        # Each match box is inside a div with class "ergebnis-link" or a
+        # table with class "result-set" depending on the page layout.
+        # The modern layout has rows inside a "large-8 columns" section.
+        match_boxes = soup.find_all("div", class_="box")
+        matchday_count = 0
+
+        for box in match_boxes:
+            # Each match result row has teams, score, and attendance.
+            # Look for match result table rows inside boxes.
+            rows = box.find_all("tr")
+            for row in rows:
+                try:
+                    # Find team name links
+                    team_links = row.find_all("a", class_="vereinprofil_tooltip")
+                    if len(team_links) < 2:
+                        continue
+
+                    home_team = team_links[0].get("title") or team_links[0].get_text(strip=True)
+                    away_team = team_links[1].get("title") or team_links[1].get_text(strip=True)
+                    if not home_team or not away_team:
+                        continue
+
+                    # Find score
+                    score_link = row.find("a", class_="ergebnis-link")
+                    home_score = away_score = None
+                    if score_link:
+                        score_text = score_link.get_text(strip=True)
+                        sm = re.match(r"(\d+)\s*:\s*(\d+)", score_text)
+                        if sm:
+                            home_score = int(sm.group(1))
+                            away_score = int(sm.group(2))
+
+                    # Find attendance — look for Zuschauer icon or attendance td
+                    attendance = None
+                    tds = row.find_all("td")
+                    for td in tds:
+                        td_text = td.get_text(strip=True)
+                        # Attendance cells contain numbers with dots (e.g. "81.044")
+                        # and may have text like "Zuschauer" nearby
+                        if re.match(r'^[\d.]+$', td_text) and len(td_text) >= 3:
+                            candidate = _parse_attendance(td_text)
+                            if candidate and candidate > 100:
+                                attendance = candidate
+
+                    # Find date — typically in a preceding row or td
+                    match_date = None
+                    date_td = row.find("td", class_="zentriert")
+                    if date_td:
+                        date_text = date_td.get_text(strip=True)
+                        dm = re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})", date_text)
+                        if dm:
+                            match_date = f"{dm.group(3)}-{dm.group(2):>02}-{dm.group(1):>02}"
+                        else:
+                            dm = re.search(r"(\d{1,2})\.(\d{1,2})\.(\d{2,4})", date_text)
+                            if dm:
+                                y = dm.group(3)
+                                if len(y) == 2:
+                                    y = "20" + y
+                                match_date = f"{y}-{dm.group(2):>02}-{dm.group(1):>02}"
+
+                    all_matches.append({
+                        "home_team":    home_team,
+                        "away_team":    away_team,
+                        "match_date":   match_date,
+                        "home_score":   home_score,
+                        "away_score":   away_score,
+                        "attendance":   attendance,
+                        "matchday":     matchday,
+                        "competition":  competition_name,
+                        "season":       season_label,
+                    })
+                    matchday_count += 1
+
+                except Exception:
+                    continue
+
+        if matchday_count == 0:
+            empty_streak += 1
+            if empty_streak >= 3:
+                log.info("  3 jornadas vacías seguidas (jornada %d) — fin.", matchday)
+                break
+        else:
+            empty_streak = 0
+            log.info("  Jornada %d: %d partidos", matchday, matchday_count)
+
+        time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
+
+    # Filter to only matches with attendance data
+    with_attendance = [m for m in all_matches if m["attendance"] is not None]
+    log.info("Transfermarkt attendance: %d partidos totales, %d con asistencia.",
+             len(all_matches), len(with_attendance))
+
+    # Save as CSV
+    if all_matches:
+        df = pd.DataFrame(all_matches)
+        csv_path = save_clean_csv(competition_name, season_label, "transfermarkt",
+                                  "attendance", df)
+        log.info("  CSV guardado: %s", csv_path)
+
+    return all_matches
 
 
 # ── MAIN ─────────────────────────────────────────────────────────────────────

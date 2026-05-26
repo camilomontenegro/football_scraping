@@ -99,7 +99,9 @@ CREATE TABLE player_review (
     resolved BOOLEAN DEFAULT FALSE,
     canonical_id_assigned INTEGER REFERENCES dim_player (canonical_id),
     created_at TIMESTAMP DEFAULT NOW(),
-    reviewed_at TIMESTAMP
+    reviewed_at TIMESTAMP,
+    source_team_id VARCHAR(50),
+    source_team_name VARCHAR(150)
 );
 
 CREATE INDEX IF NOT EXISTS idx_player_review_source ON player_review (source_system, source_id);

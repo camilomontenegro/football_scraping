@@ -294,6 +294,14 @@ def transform_matches(matches_df: pd.DataFrame) -> pd.DataFrame:
         comp_info   = row.get("competition", {})
         season_info = row.get("season", {})
 
+        # StatsBomb may include attendance as an optional field
+        attendance = row.get("attendance")
+        if attendance is not None:
+            try:
+                attendance = int(attendance)
+            except (ValueError, TypeError):
+                attendance = None
+
         rows.append({
             "id_statsbomb":    str(row.get("match_id")),
             "match_date":      str(row.get("match_date", "")),
@@ -305,6 +313,7 @@ def transform_matches(matches_df: pd.DataFrame) -> pd.DataFrame:
             "away_team_name":  away_name,
             "home_score":      row.get("home_score"),
             "away_score":      row.get("away_score"),
+            "attendance":      attendance,
             "data_source":     "statsbomb",
         })
 
