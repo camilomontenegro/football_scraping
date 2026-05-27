@@ -154,6 +154,8 @@ def get_player_review_stats() -> dict:
 def get_player_review_queue(limit: int = 50) -> pd.DataFrame:
     return query_df("""
         SELECT pr.id, pr.source_name, pr.source_system,
+               pr.competition, pr.season,
+               pr.source_team_name, pr.source_team_id,
                p.canonical_name AS suggested_player_name,
                pr.similarity_score
         FROM player_review pr

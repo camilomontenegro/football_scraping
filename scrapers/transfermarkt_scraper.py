@@ -298,9 +298,10 @@ def get_squad(team_slug: str, team_id: int, season: int) -> list[dict]:
                 nationality_table = nat_img.get("title")
 
         profile = get_player_profile(player_slug, player_id)
+        display_name = (link.get("title") or link.text or "").strip()
         players.append({
             "player_id":    player_id,
-            "player_name":  link.text.strip(),
+            "player_name":  display_name,
             "player_slug":  player_slug,
             "position":     position,
             "nationality":  profile["nationality"] or nationality_table,
@@ -431,6 +432,15 @@ def _merge_season_players(
             resolved = resolve_player_from_id(str(p["player_id"]))
             p.setdefault("player_slug", resolved.get("player_slug"))
             p.setdefault("player_name", resolved.get("player_name"))
+        if not p.get("birth_date") or not p.get("nationality"):
+            slug = p.get("player_slug")
+            pid = p.get("player_id")
+            if slug and pid:
+                profile = get_player_profile(slug, pid)
+                if not p.get("birth_date"):
+                    p["birth_date"] = profile.get("birth_date")
+                if not p.get("nationality"):
+                    p["nationality"] = profile.get("nationality")
         p.setdefault("team_slug", team_slug)
         p.setdefault("team_id_tm", team_id)
         p.setdefault("team_country", team_country)
@@ -566,7 +576,10 @@ def scrape_transfermarkt(
     if not teams:
         teams_list = get_league_teams(season, tm_slug, league_code)
         teams = {t["team_slug"]: t["team_id"] for t in teams_list}
+        team_names = {t["team_slug"]: t["team_name"] for t in teams_list}
         log.info("Auto-descubiertos %d equipos para %s %d", len(teams), league_code, season)
+    else:
+        team_names = {}
 
     print("=" * 55)
     print(f"  Transfermarkt scraper — {league_code} {season_label}")
@@ -609,8 +622,10 @@ def scrape_transfermarkt(
             )
 
         for p in players:
-            p["season"]   = season
-            p["batch_id"] = batch_id
+            p["season"]      = season
+            p["competition"] = competition_name
+            p["team_name"]   = team_names.get(team_slug) or team_slug.replace("-", " ").title()
+            p["batch_id"]    = batch_id
 
         team_injuries: list[dict] = []
         for p in players:
@@ -720,16 +735,19 @@ def scrape_transfermarkt(
 # ── TRANSFORM ────────────────────────────────────────────────────────────────
 
 def transform_players(players_raw: list[dict]) -> pd.DataFrame:
-    """Adapta a las columnas de `dim_player`."""
+    """Adapta a las columnas de `dim_player` + metadatos de procedencia."""
     rows = [{
         "id_transfermarkt": p.get("player_id"),
         "canonical_name":   p.get("player_name"),
         "nationality":      p.get("nationality"),
         "birth_date":       p.get("birth_date"),
         "position":         p.get("position"),
+        "competition":      p.get("competition"),
+        "team_name":        p.get("team_name") or p.get("team_slug"),
         "team_slug":        p.get("team_slug"),
         "team_id_tm":       p.get("team_id_tm"),
         "season":           p.get("season"),
+        "source":           "transfermarkt",
     } for p in players_raw]
     df = pd.DataFrame(rows)
     if not df.empty:

@@ -273,7 +273,13 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # OUTPUT_DIR legacy. Las rutas reales vienen de utils.data_paths.
 OUTPUT_DIR = str(PROJECT_ROOT / "data" / "raw" / "whoscored")
 
-from utils.data_paths import save_clean_csv, normalize_season as _norm_season  # noqa: E402
+from utils.data_paths import save_clean_csv, normalize_season as _norm_season, raw_dir as _raw_dir  # noqa: E402
+
+
+def _save_json(data, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2, default=str)
 
 
 # -- DRIVER -----------------------------------------------------------
@@ -748,19 +754,24 @@ def extract_events(match_data: dict) -> list[dict]:
     return result
 
 
-def extract_players_from_match(match_data: dict) -> list[dict]:
+def extract_players_from_match(match_data: dict, competition: str | None = None) -> list[dict]:
     season = match_data.get('season')
     res = []
     for side in ('home', 'away'):
         team = match_data.get(side) or {}
         team_id = team.get('teamId')
+        team_name = team.get('name')
         for p in team.get('players', []) or []:
+            name = p.get('name')
             res.append({
                 'whoscored_player_id': p.get('playerId'),
-                'name':                p.get('name'),
+                'name':                name,
+                'player_name':         name,
                 'whoscored_team_id':   team_id,
+                'team_name':           team_name,
                 'position':            p.get('position'),
                 'shirt_no':            p.get('shirtNo'),
+                'competition':         competition,
                 'season':              season,
                 'source':              'whoscored',
             })
@@ -937,6 +948,18 @@ def scrape_whoscored(season=None, competition: str = "La Liga"):
             "\n[DISCOVERY] Total único: %d partidos en %d stage(s)",
             len(all_matches), len(seasons_to_run),
         )
+
+        # ── Guardar raw JSON: listado de partidos por temporada ──
+        from collections import defaultdict
+        _matches_by_season: dict[str, list] = defaultdict(list)
+        for _m in all_matches:
+            _matches_by_season[_m["season"]].append(_m)
+        for _s, _s_matches in _matches_by_season.items():
+            _sl = _norm_season(_s) or str(_s).replace("/", "_")
+            _srd = _raw_dir(competition, _sl, "whoscored")
+            _srd.mkdir(parents=True, exist_ok=True)
+            _save_json(_s_matches, _srd / "matches.json")
+
         if not all_matches:
             log.warning("[!] No se encontraron partidos.")
             return (pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
@@ -975,6 +998,12 @@ def scrape_whoscored(season=None, competition: str = "La Liga"):
 
             fail_streak = 0
 
+            # ── Guardar raw JSON del partido ──
+            _sl = _norm_season(season_name) or str(season_name).replace("/", "_")
+            _mrd = _raw_dir(competition, _sl, "whoscored") / "matches" / str(mid)
+            _mrd.mkdir(parents=True, exist_ok=True)
+            _save_json(match_data, _mrd / "match_data.json")
+
             m_date = match_data.get("match_date")
             if m_date:
                 match["match_date"] = m_date
@@ -984,7 +1013,7 @@ def scrape_whoscored(season=None, competition: str = "La Liga"):
                 match["attendance"] = m_att
 
             all_events.extend(extract_events(match_data))
-            all_players.extend(extract_players_from_match(match_data))
+            all_players.extend(extract_players_from_match(match_data, competition=competition))
             all_teams.extend(extract_teams_from_match(match_data))
             if i % 10 == 0:
                 log.info(

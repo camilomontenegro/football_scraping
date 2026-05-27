@@ -445,3 +445,22 @@ def iter_clean_csvs(
     name = f"{filename}.csv" if filename else "*.csv"
     pattern = f"{comp}/{season_label}/{src}/{name}"
     return list(CLEAN_ROOT.glob(pattern))
+
+
+def parse_clean_csv_meta(path: Path) -> dict[str, str]:
+    """Extrae comp_slug, season y source desde una ruta bajo data/clean/."""
+    try:
+        rel = path.relative_to(CLEAN_ROOT)
+    except ValueError:
+        return {}
+    parts = rel.parts
+    if len(parts) < 3:
+        return {}
+    comp_slug, season_label, source = parts[0], parts[1], parts[2]
+    season_display = season_label.replace("_", "/")
+    return {
+        "comp_slug": comp_slug,
+        "season": season_label,
+        "season_display": season_display,
+        "source": source,
+    }

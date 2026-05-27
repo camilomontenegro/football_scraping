@@ -63,7 +63,44 @@ Selecciona una opción:
 ============================================================
   Accion      : Descarga completa
   Competicion : Champions League
-  Temporada   : 2024/2025
+  Temporada   : 2022/2023
+  Fuente(s)   : all
+  Filtro      : todos los partidos
+============================================================
+
+  S = ejecutar     0 = volver atrás     Q = salir
+¿Lanzar el pipeline? [S/0/q]: 
+¿Cómo filtrar los partidos descargados? (default: Todos los partidos)
+  1) Todos los partidos
+  2) Sólo de un equipo
+  3) Desde una fecha
+  0) volver al paso anterior
+  q) salir del wizard
+Selecciona una opción: 
+[i] Understat sólo cubre ligas domésticas — se ha eliminado de la lista de fuentes para esta competición.
+
+Selecciona la fuente(s) de datos a usar: (default: all)
+  1) all
+  2) transfermarkt
+  3) sofascore
+  4) statsbomb
+  5) whoscored
+  0) volver al paso anterior
+  q) salir del wizard
+Selecciona una opción: 
+¿Cómo filtrar los partidos descargados? (default: Todos los partidos)
+  1) Todos los partidos
+  2) Sólo de un equipo
+  3) Desde una fecha
+  0) volver al paso anterior
+  q) salir del wizard
+Selecciona una opción: 
+============================================================
+  RESUMEN DE LA OPERACION
+============================================================
+  Accion      : Descarga completa
+  Competicion : Champions League
+  Temporada   : 2022/2023
   Fuente(s)   : whoscored
   Filtro      : todos los partidos
 ============================================================
@@ -71,80 +108,18 @@ Selecciona una opción:
   S = ejecutar     0 = volver atrás     Q = salir
 ¿Lanzar el pipeline? [S/0/q]: 
 === INICIANDO EL PROCESO ===
-2026-05-27 17:29:19,063 - INFO - =================================================================
-2026-05-27 17:29:19,063 - INFO -    FOOTBALL DATA PIPELINE
-2026-05-27 17:29:19,063 - INFO - =================================================================
-2026-05-27 17:29:19,064 - INFO -    Competición: Champions League
-2026-05-27 17:29:19,064 - INFO -    Temporada: 2024/2025
-2026-05-27 17:29:19,064 - INFO -    Fuente:    whoscored
-2026-05-27 17:29:19,064 - INFO - ── FASE 1: SCRAPING ─────────────────────────────────
-2026-05-27 17:29:19,064 - INFO - [INFO] full_refresh=True — se ignorará la caché local.
-2026-05-27 17:29:19,064 - INFO - [START] Scraping WhoScored...
-2026-05-27 17:29:19,065 - INFO - WhoScored [Champions League]: descargando SOLO la temporada 2024/25
-2026-05-27 17:29:19,065 - INFO -   Champions League 2024/25: 2 stages (fase de grupos + eliminatorias)
-2026-05-27 17:29:19,065 - INFO - ====== WebDriver manager ======
-2026-05-27 17:29:19,450 - INFO - Driver [C:\Users\Ivan\.wdm\drivers\chromedriver\win64\148.0.7778.178\chromedriver-win64/chromedriver.exe] found in cache by browser version
-2026-05-27 17:29:20,643 - INFO - Iniciando navegador...
-2026-05-27 17:29:27,138 - INFO -   Cookies aceptadas
-2026-05-27 17:29:29,139 - INFO - 
-[DISCOVERY] 2024/25 (stage 23663)
-2026-05-27 17:29:29,139 - INFO -   Obteniendo partidos (2024/25 (stage 23663))...
-2026-05-27 17:29:52,306 - INFO -   Datepicker -> año mas antiguo: 2024
-2026-05-27 17:29:55,090 - INFO -   Datepicker -> primer mes con partidos: sept
-2026-05-27 17:29:55,090 - INFO -   Posicionado al inicio de temporada via datepicker
-2026-05-27 17:29:58,556 - INFO -   - Inicio ('sep 2024'): 18 partidos visibles (acumulado=18)
-2026-05-27 17:30:02,101 - INFO -   - Sem +1 ('oct 2024'): 36 nuevos (acumulado=54)
-2026-05-27 17:30:05,011 - INFO -   - Sem +2 ('nov 2024'): 36 nuevos (acumulado=90)
-2026-05-27 17:30:08,148 - INFO -   - Sem +3 ('dic 2024'): 18 nuevos (acumulado=108)
-2026-05-27 17:30:11,473 - INFO -   - Sem +4 ('ene 2025'): 36 nuevos (acumulado=144)
-2026-05-27 17:30:14,535 - INFO -   - Sem +5: rango sin cambios (streak=1/3)
-2026-05-27 17:30:18,046 - INFO -   - Sem +6: rango sin cambios (streak=2/3)
-2026-05-27 17:30:20,771 - INFO -   - Sem +7: rango sin cambios (streak=3/3)
-2026-05-27 17:30:20,771 - INFO -   - 3 intentos sin avanzar -> fin de temporada
-2026-05-27 17:30:20,772 - INFO -   TOTAL 144 partidos en 2024/25 (stage 23663)
-2026-05-27 17:30:20,772 - INFO -   2024/25 (stage 23663): 144 partidos (144 nuevos, total acumulado=144)
-2026-05-27 17:30:20,772 - INFO - 
-[DISCOVERY] 2024/25 (stage 24083)
-2026-05-27 17:30:20,773 - INFO -   Obteniendo partidos (2024/25 (stage 24083))...
-2026-05-27 17:30:43,993 - INFO -   Datepicker -> año mas antiguo: 2025
-2026-05-27 17:30:46,756 - INFO -   Datepicker -> primer mes con partidos: feb
-2026-05-27 17:30:46,756 - INFO -   Posicionado al inicio de temporada via datepicker
-2026-05-27 17:30:49,456 - INFO -   - Inicio ('feb 2025'): 16 partidos visibles (acumulado=16)
-2026-05-27 17:30:51,837 - INFO -   - Sem +1 ('mar 2025'): 16 nuevos (acumulado=32)
-2026-05-27 17:30:54,816 - INFO -   - Sem +2 ('abr 2025'): 10 nuevos (acumulado=42)
-2026-05-27 17:30:57,600 - INFO -   - Sem +3 ('may 2025'): 3 nuevos (acumulado=45)
-2026-05-27 17:30:59,848 - INFO -   - Sem +4: rango sin cambios (streak=1/3)
-2026-05-27 17:31:03,273 - INFO -   - Sem +5: rango sin cambios (streak=2/3)
-2026-05-27 17:31:06,005 - INFO -   - Sem +6: rango sin cambios (streak=3/3)
-2026-05-27 17:31:06,006 - INFO -   - 3 intentos sin avanzar -> fin de temporada
-2026-05-27 17:31:06,006 - INFO -   TOTAL 45 partidos en 2024/25 (stage 24083)
-2026-05-27 17:31:06,006 - INFO -   2024/25 (stage 24083): 45 partidos (45 nuevos, total acumulado=189)
-2026-05-27 17:31:06,006 - INFO - 
-[DISCOVERY] Total único: 189 partidos en 2 stage(s)
-2026-05-27 17:31:06,006 - INFO -   [1/189] Partido 1866097
-2026-05-27 17:31:26,309 - INFO -   [2/189] Partido 1866098
-2026-05-27 17:31:43,570 - INFO -   [3/189] Partido 1866099
-2026-05-27 17:32:00,641 - INFO -   [4/189] Partido 1866100
-2026-05-27 17:32:17,224 - INFO -   [5/189] Partido 1866101
-2026-05-27 17:32:34,900 - INFO -   [6/189] Partido 1866102
-2026-05-27 17:32:53,590 - INFO -   [7/189] Partido 1866103
-2026-05-27 17:33:12,759 - INFO -   [8/189] Partido 1866104
-2026-05-27 17:33:28,918 - INFO -   [9/189] Partido 1866105
-2026-05-27 17:33:44,592 - INFO -   [10/189] Partido 1866106
-2026-05-27 17:34:02,243 - INFO -   -> 10/189 partidos | eventos: 15197
-2026-05-27 17:34:02,244 - INFO -   [11/189] Partido 1866107
-2026-05-27 17:34:19,484 - INFO -   [12/189] Partido 1866108
-2026-05-27 17:34:37,644 - INFO -   [13/189] Partido 1866109
-2026-05-27 17:34:56,425 - INFO -   [14/189] Partido 1866110
-2026-05-27 17:35:13,217 - INFO -   [15/189] Partido 1866111
-2026-05-27 17:35:34,424 - INFO -   [16/189] Partido 1866112
-2026-05-27 17:35:55,670 - INFO -   [17/189] Partido 1866113
-2026-05-27 17:36:14,615 - INFO -   [18/189] Partido 1866114
-2026-05-27 17:36:33,093 - INFO -   [19/189] Partido 1866115
-2026-05-27 17:36:51,014 - INFO -   [20/189] Partido 1866116
-2026-05-27 17:37:07,870 - INFO -   -> 20/189 partidos | eventos: 31469
-2026-05-27 17:37:07,870 - INFO -   [21/189] Partido 1866117
-2026-05-27 17:37:29,275 - INFO -   [22/189] Partido 1866118
-2026-05-27 17:37:44,907 - INFO -   [23/189] Partido 1866119
-2026-05-27 17:38:04,201 - INFO -   [24/189] Partido 1866120
-2026-05-27 17:38:22,286 - INFO -   [25/189] Partido 1866121
+2026-05-27 21:17:05,875 - INFO - =================================================================
+2026-05-27 21:17:05,876 - INFO -    FOOTBALL DATA PIPELINE
+2026-05-27 21:17:05,876 - INFO - =================================================================
+2026-05-27 21:17:05,876 - INFO -    Competición: Champions League
+2026-05-27 21:17:05,876 - INFO -    Temporada: 2022/2023
+2026-05-27 21:17:05,876 - INFO -    Fuente:    whoscored
+2026-05-27 21:17:05,876 - INFO - ── FASE 1: SCRAPING ─────────────────────────────────
+2026-05-27 21:17:05,877 - INFO - [INFO] full_refresh=True — se ignorará la caché local.
+2026-05-27 21:17:05,877 - INFO - [START] Scraping WhoScored...
+2026-05-27 21:17:05,877 - INFO - WhoScored [Champions League]: descargando SOLO la temporada 2022/23
+2026-05-27 21:17:05,877 - INFO -   Champions League 2022/23: 9 stages (fase de grupos + eliminatorias)
+2026-05-27 21:17:05,877 - INFO - ====== WebDriver manager ======
+2026-05-27 21:17:06,278 - INFO - Driver [C:\Users\Ivan\.wdm\drivers\chromedriver\win64\148.0.7778.178\chromedriver-win64/chromedriver.exe] found in cache by browser version
+2026-05-27 21:17:07,542 - INFO - Iniciando navegador...
+2026-05-27 21:17:12,248 - WARNING - Retrying (Retry(total=2, connect=None, read=None, redirect=None, status=None)) after connection broken by 'ConnectionResetError(10054, 'Se ha forzado la interrupción de una conexión existente por el host remoto', None, 10054, None)': /session/e46250a52edf84685b95d0a75e49a8ac
