@@ -66,46 +66,90 @@ log = logging.getLogger(__name__)
 #      Si la season en URL es un único año (e.g. "2026") añade
 #      `whoscored.season_format = "single"`.
 #   2) Añade la entrada (competition, season) -> {season_id, stages} abajo.
+#      Regenerar: python scripts/discover_whoscored_stages.py
 WHOSCORED_STAGES: dict[tuple[str, str], dict] = {
-    # ── La Liga ──────────────────────────────────────────────────────
-    ("La Liga", "2020/21"): {"season_id":  8321, "stages": [18851]},
-    ("La Liga", "2021/22"): {"season_id":  8681, "stages": [19895]},
-    ("La Liga", "2022/23"): {"season_id":  9149, "stages": [21073]},
-    ("La Liga", "2023/24"): {"season_id":  9682, "stages": [22176]},
+    # -- La Liga --
+    ("La Liga", "2020/21"): {"season_id": 8321, "stages": [18851]},
+    ("La Liga", "2021/22"): {"season_id": 8681, "stages": [19895]},
+    ("La Liga", "2022/23"): {"season_id": 9149, "stages": [21073]},
+    ("La Liga", "2023/24"): {"season_id": 9682, "stages": [22176]},
     ("La Liga", "2024/25"): {"season_id": 10317, "stages": [23401]},
     ("La Liga", "2025/26"): {"season_id": 10803, "stages": [24622]},
-
-    # ── Bundesliga ───────────────────────────────────────────────────
+    # -- Premier League --
+    ("Premier League", "2020/21"): {"season_id": 8228, "stages": [18685]},
+    ("Premier League", "2021/22"): {"season_id": 8618, "stages": [19793]},
+    ("Premier League", "2022/23"): {"season_id": 9075, "stages": [20934]},
+    ("Premier League", "2023/24"): {"season_id": 9618, "stages": [22076]},
+    ("Premier League", "2024/25"): {"season_id": 10316, "stages": [23400]},
+    ("Premier League", "2025/26"): {"season_id": 10743, "stages": [24533]},
+    # -- Bundesliga --
+    ("Bundesliga", "2020/21"): {"season_id": 8279, "stages": [18762]},
+    ("Bundesliga", "2021/22"): {"season_id": 8667, "stages": [19862]},
+    ("Bundesliga", "2022/23"): {"season_id": 9120, "stages": [21026]},
+    ("Bundesliga", "2023/24"): {"season_id": 9649, "stages": [22128]},
+    ("Bundesliga", "2024/25"): {"season_id": 10365, "stages": [23471]},
     ("Bundesliga", "2025/26"): {"season_id": 10720, "stages": [24478]},
-
-    # ── FIFA World Cup ────────────────────────────────────────────────
-    # Mundial 2026: 12 grupos (A-L) + Final Stage (eliminatorias).
-    # Stage IDs extraídos del HTML oficial de WhoScored 2026.
-    ("FIFA World Cup", "2026"): {
-        "season_id": 10498,
-        "stages": [
-            23753,  # Grp. A
-            23754,  # Grp. B
-            23755,  # Grp. C
-            23756,  # Grp. D
-            23757,  # Grp. E
-            23758,  # Grp. F
-            23759,  # Grp. G
-            23760,  # Grp. H
-            23761,  # Grp. I
-            23762,  # Grp. J
-            23763,  # Grp. K
-            23764,  # Grp. L
-            23752,  # Final Stage
-        ],
-    },
-    ("FIFA World Cup", "2022"): {"season_id": 8213, "stages": []},
-    ("FIFA World Cup", "2018"): {"season_id": 5967, "stages": []},
-    ("FIFA World Cup", "2014"): {"season_id": 3768, "stages": []},
-    # Para temporadas con `stages: []` el scraper construye igualmente
-    # las URLs candidatas pero sin saber stage_id. Hay que rellenarlas
-    # cuando se inspeccione el selector de stages de cada año.
+    # -- Serie A --
+    ("Serie A", "2020/21"): {"season_id": 8330, "stages": [18873]},
+    ("Serie A", "2021/22"): {"season_id": 8735, "stages": [19982]},
+    ("Serie A", "2022/23"): {"season_id": 9159, "stages": [21087]},
+    ("Serie A", "2023/24"): {"season_id": 9659, "stages": [22143]},
+    ("Serie A", "2024/25"): {"season_id": 10375, "stages": [23490]},
+    ("Serie A", "2025/26"): {"season_id": 10732, "stages": [24500]},
+    # -- Ligue 1 --
+    ("Ligue 1", "2020/21"): {"season_id": 8185, "stages": [18594]},
+    ("Ligue 1", "2021/22"): {"season_id": 8671, "stages": [19866]},
+    ("Ligue 1", "2022/23"): {"season_id": 9129, "stages": [21037]},
+    ("Ligue 1", "2023/24"): {"season_id": 9635, "stages": [22105]},
+    ("Ligue 1", "2024/25"): {"season_id": 10329, "stages": [23414]},
+    ("Ligue 1", "2025/26"): {"season_id": 10792, "stages": [24609]},
+    # -- Primeira Liga --
+    ("Primeira Liga", "2020/21"): {"season_id": 8315, "stages": [18842]},
+    ("Primeira Liga", "2021/22"): {"season_id": 8714, "stages": [19947]},
+    ("Primeira Liga", "2022/23"): {"season_id": 9191, "stages": [21149]},
+    ("Primeira Liga", "2023/24"): {"season_id": 9730, "stages": [22254]},
+    ("Primeira Liga", "2024/25"): {"season_id": 10378, "stages": [23494]},
+    ("Primeira Liga", "2025/26"): {"season_id": 10774, "stages": [24568]},
+    # -- Eredivisie --
+    ("Eredivisie", "2020/21"): {"season_id": 8187, "stages": [18596]},
+    ("Eredivisie", "2021/22"): {"season_id": 8625, "stages": [19802]},
+    ("Eredivisie", "2022/23"): {"season_id": 9112, "stages": [21021]},
+    ("Eredivisie", "2023/24"): {"season_id": 9705, "stages": [22225]},
+    ("Eredivisie", "2024/25"): {"season_id": 10321, "stages": [23405]},
+    ("Eredivisie", "2025/26"): {"season_id": 10752, "stages": [24542]},
+    # -- Champions League --
+    ("Champions League", "2020/21"): {"season_id": 8177, "stages": [18972, 18973, 18974, 18975, 18976, 18977, 18978, 18979, 19130]},
+    ("Champions League", "2021/22"): {"season_id": 8623, "stages": [20088, 20089, 20090, 20091, 20092, 20093, 20094, 20095, 20265]},
+    ("Champions League", "2022/23"): {"season_id": 9086, "stages": [20961, 20962, 20963, 20964, 20965, 20966, 20967, 20968, 20969]},
+    ("Champions League", "2023/24"): {"season_id": 9664, "stages": [22489, 22490, 22491, 22492, 22493, 22494, 22495, 22496, 22686]},
+    ("Champions League", "2024/25"): {"season_id": 10456, "stages": [23663, 24083]},
+    ("Champions League", "2025/26"): {"season_id": 10903, "stages": [24796, 24797]},
+    # -- Europa League --
+    ("Europa League", "2020/21"): {"season_id": 8178, "stages": [18981, 18982, 18983, 18984, 18985, 18986, 18987, 18988, 18989, 18990, 18991, 18992, 19164]},
+    ("Europa League", "2021/22"): {"season_id": 8741, "stages": [20106, 20107, 20108, 20109, 20110, 20111, 20112, 20113, 20266]},
+    ("Europa League", "2022/23"): {"season_id": 9087, "stages": [20971, 20972, 20973, 20974, 20975, 20976, 20977, 20978, 20979]},
+    ("Europa League", "2023/24"): {"season_id": 9778, "stages": [22510, 22511, 22512, 22513, 22514, 22515, 22516, 22517, 22687]},
+    ("Europa League", "2024/25"): {"season_id": 10458, "stages": [23665, 24084]},
+    ("Europa League", "2025/26"): {"season_id": 10904, "stages": [24798, 24799]},
+    # -- Europa Conference League --
+    ("Europa Conference League", "2021/22"): {"season_id": 8696, "stages": [20105, 20114, 20115, 20116, 20117, 20118, 20119, 20120, 20267]},
+    ("Europa Conference League", "2022/23"): {"season_id": 9109, "stages": [21010, 21011, 21012, 21013, 21014, 21015, 21016, 21017, 21018]},
+    ("Europa Conference League", "2023/24"): {"season_id": 9672, "stages": [22502, 22503, 22504, 22505, 22506, 22507, 22508, 22509, 22688]},
+    ("Europa Conference League", "2024/25"): {"season_id": 10462, "stages": [23668, 24006]},
+    ("Europa Conference League", "2025/26"): {"season_id": 10905, "stages": [24800, 24801]},
+    # -- FIFA World Cup --
+    ("FIFA World Cup", "2014"): {"season_id": 3768, "stages": [7557, 7558, 7559, 7560, 7561, 7562, 7563, 7564, 7565, 7566, 7567, 7568, 7569]},
+    ("FIFA World Cup", "2018"): {"season_id": 5967, "stages": [12751, 12752, 12753, 12754, 12755, 12756, 12757, 12758, 12759, 12760, 12761, 12762, 12763]},
+    ("FIFA World Cup", "2022"): {"season_id": 8213, "stages": [18649, 18650, 18651, 18652, 18653, 18654, 18655, 18656, 18657]},
+    ("FIFA World Cup", "2026"): {"season_id": 10498, "stages": [23752, 23753, 23754, 23755, 23756, 23757, 23758, 23759, 23760, 23761, 23762, 23763, 23764]},
+    # -- European Championship --
+    ("European Championship", "2020"): {"season_id": 7329, "stages": [16297, 16298, 16299, 16300, 16301, 16302, 16306]},
+    ("European Championship", "2024"): {"season_id": 9299, "stages": [21399, 21400, 21401, 21402, 21403, 21404, 21415, 23157]},
+    # -- Copa America --
+    ("Copa America", "2021"): {"season_id": 8171, "stages": [18130, 18131, 18164]},
+    ("Copa America", "2024"): {"season_id": 9910, "stages": [22767, 22768, 22769, 22770, 22868, 23386]},
 }
+
 
 
 def _format_season_url_part(season: str, season_format: str = "range") -> str:
@@ -441,8 +485,14 @@ return [...new Set(ids)];
 '''
 
 
-def get_season_matches(driver: webdriver.Chrome, season_name: str, url: str) -> list[dict]:
-    log.info("  Obteniendo partidos de temporada %s...", season_name)
+def get_season_matches(
+    driver: webdriver.Chrome,
+    season_name: str,
+    url: str,
+    stage_label: str | None = None,
+) -> list[dict]:
+    label = stage_label or season_name
+    log.info("  Obteniendo partidos (%s)...", label)
     try:
         driver.get(url)
         time.sleep(10)
@@ -490,7 +540,7 @@ def get_season_matches(driver: webdriver.Chrome, season_name: str, url: str) -> 
                      step + 1, new_toggle, len(new_ids), len(all_ids))
 
         if not all_ids:
-            log.warning("  0 partidos en %s", season_name)
+            log.warning("  0 partidos en %s", label)
             try:
                 os.makedirs(OUTPUT_DIR, exist_ok=True)
                 driver.save_screenshot(
@@ -503,7 +553,7 @@ def get_season_matches(driver: webdriver.Chrome, season_name: str, url: str) -> 
 
         matches = [{'whoscored_match_id': mid, 'season': season_name}
                    for mid in sorted(all_ids)]
-        log.info("  TOTAL %d partidos encontrados para %s", len(matches), season_name)
+        log.info("  TOTAL %d partidos en %s", len(matches), label)
         return matches
 
     except Exception as e:
@@ -773,7 +823,21 @@ def _competition_season_format(competition_name: str) -> str:
     )
 
 
+def whoscored_season_available(competition_name: str, season: str) -> bool:
+    """True si (competition, season) tiene season_id, stages y slug en config."""
+    season_format = _competition_season_format(competition_name)
+    target = _normalize_season(season, season_format)
+    if target not in get_seasons_for_competition(competition_name):
+        return False
+    return bool(build_season_urls(competition_name, target))
+
+
 # -- ORQUESTADOR ------------------------------------------------------
+
+def _stage_label_from_url(url: str) -> str:
+    m = re.search(r"/stages/(\d+)/", url, re.I)
+    return f"stage {m.group(1)}" if m else "stage ?"
+
 
 def scrape_whoscored(season=None, competition: str = "La Liga"):
     """Descarga partidos de la liga indicada.
@@ -837,10 +901,10 @@ def scrape_whoscored(season=None, competition: str = "La Liga"):
         log.error("No hay URLs válidas para ejecutar.")
         return (pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
 
-    all_matches = []
-    all_events  = []
-    all_players = []
-    all_teams   = []
+    all_matches: list[dict] = []
+    all_events: list[dict] = []
+    all_players: list[dict] = []
+    all_teams: list[dict] = []
 
     driver = create_driver()
     try:
@@ -849,59 +913,86 @@ def scrape_whoscored(season=None, competition: str = "La Liga"):
         time.sleep(5)
         accept_cookies(driver)
 
+        # Fase 1: descubrir partidos en TODAS las stages antes de descargar eventos.
+        matches_by_id: dict[str, dict] = {}
         for season_name, url in seasons_to_run:
-            log.info("\n[SEASON] %s", season_name)
-            matches = get_season_matches(driver, season_name, url)
-            if not matches:
+            stage_label = f"{season_name} ({_stage_label_from_url(url)})"
+            log.info("\n[DISCOVERY] %s", stage_label)
+            stage_matches = get_season_matches(
+                driver, season_name, url, stage_label=stage_label,
+            )
+            new_ids = 0
+            for row in stage_matches:
+                mid = str(row["whoscored_match_id"])
+                if mid not in matches_by_id:
+                    matches_by_id[mid] = row
+                    new_ids += 1
+            log.info(
+                "  %s: %d partidos (%d nuevos, total acumulado=%d)",
+                stage_label, len(stage_matches), new_ids, len(matches_by_id),
+            )
+
+        all_matches = list(matches_by_id.values())
+        log.info(
+            "\n[DISCOVERY] Total único: %d partidos en %d stage(s)",
+            len(all_matches), len(seasons_to_run),
+        )
+        if not all_matches:
+            log.warning("[!] No se encontraron partidos.")
+            return (pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
+
+        # Fase 2: descargar eventos de cada partido (todas las stages).
+        fail_streak = 0
+        for i, match in enumerate(all_matches, 1):
+            if i > 1 and (i - 1) % DRIVER_RESTART_EVERY == 0:
+                log.info(
+                    "[ANTI-BOT] %d partidos procesados — reinicio preventivo del driver",
+                    i - 1,
+                )
+                driver = restart_driver(driver)
+
+            season_name = match["season"]
+            mid = match["whoscored_match_id"]
+            log.info("  [%d/%d] Partido %s", i, len(all_matches), mid)
+            match_data = get_match_data(driver, mid, season_name)
+
+            if not match_data or "events" not in match_data:
+                fail_streak += 1
+                log.warning("  Fallo acumulado: %d/%d", fail_streak, FAIL_STREAK_LIMIT)
+                if fail_streak >= FAIL_STREAK_LIMIT:
+                    log.warning(
+                        "[ANTI-BOT] %d fallos seguidos — sospecha de bloqueo.",
+                        fail_streak,
+                    )
+                    log.warning(
+                        "[ANTI-BOT] Pausa de %ds + reinicio de driver...",
+                        LONG_PAUSE_SECONDS,
+                    )
+                    time.sleep(LONG_PAUSE_SECONDS)
+                    driver = restart_driver(driver)
+                    fail_streak = 0
                 continue
-            all_matches.extend(matches)
 
             fail_streak = 0
-            for i, match in enumerate(matches, 1):
-                # Reinicio periodico del driver para limpiar fingerprint
-                if i > 1 and (i - 1) % DRIVER_RESTART_EVERY == 0:
-                    log.info("[ANTI-BOT] %d partidos procesados — reinicio preventivo del driver",
-                             i - 1)
-                    driver = restart_driver(driver)
 
-                mid = match['whoscored_match_id']
-                log.info("  [%d/%d] Partido %s", i, len(matches), mid)
-                match_data = get_match_data(driver, mid, season_name)
+            m_date = match_data.get("match_date")
+            if m_date:
+                match["match_date"] = m_date
 
-                if not match_data or 'events' not in match_data:
-                    fail_streak += 1
-                    log.warning("  Fallo acumulado: %d/%d", fail_streak, FAIL_STREAK_LIMIT)
-                    if fail_streak >= FAIL_STREAK_LIMIT:
-                        log.warning("[ANTI-BOT] %d fallos seguidos — sospecha de bloqueo.",
-                                    fail_streak)
-                        log.warning("[ANTI-BOT] Pausa de %ds + reinicio de driver...",
-                                    LONG_PAUSE_SECONDS)
-                        time.sleep(LONG_PAUSE_SECONDS)
-                        driver = restart_driver(driver)
-                        fail_streak = 0
-                    continue
+            m_att = match_data.get("attendance")
+            if m_att:
+                match["attendance"] = m_att
 
-                # Reset del contador al obtener un partido bueno
-                fail_streak = 0
+            all_events.extend(extract_events(match_data))
+            all_players.extend(extract_players_from_match(match_data))
+            all_teams.extend(extract_teams_from_match(match_data))
+            if i % 10 == 0:
+                log.info(
+                    "  -> %d/%d partidos | eventos: %d",
+                    i, len(all_matches), len(all_events),
+                )
 
-                # Propagar la fecha del partido al match dict del CSV
-                m_date = match_data.get('match_date')
-                if m_date:
-                    match['match_date'] = m_date
-
-                # Propagar asistencia al match dict del CSV
-                m_att = match_data.get('attendance')
-                if m_att:
-                    match['attendance'] = m_att
-
-                all_events.extend(extract_events(match_data))
-                all_players.extend(extract_players_from_match(match_data))
-                all_teams.extend(extract_teams_from_match(match_data))
-                if i % 10 == 0:
-                    log.info("  -> %d/%d partidos | eventos: %d",
-                             i, len(matches), len(all_events))
-
-            log.info("  Temporada %s completa", season_name)
+        log.info("  Descarga completa: %d partidos", len(all_matches))
 
     except Exception as e:
         log.error("Error fatal: %s", e)

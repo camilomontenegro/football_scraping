@@ -434,8 +434,13 @@ def available_sources_for_competition(
         available.append("statsbomb")
 
     ws = sources_map.get("whoscored", {})
-    if ws.get("tournament_id") is not None and _reference_has_source(competition, season, "whoscored"):
-        available.append("whoscored")
+    if (
+        ws.get("tournament_id") is not None
+        and _reference_has_source(competition, season, "whoscored")
+    ):
+        from scrapers.whoscored_scraper import whoscored_season_available
+        if whoscored_season_available(competition, season):
+            available.append("whoscored")
 
     return available
 
