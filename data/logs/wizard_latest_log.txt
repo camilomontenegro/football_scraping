@@ -1,4 +1,4 @@
-[LOG] Esta ejecucion se guarda en: C:\Users\Ivan\Desktop\football_scraping\data\logs\wizard_latest_log.txt
+[LOG] Esta ejecucion se guarda en: C:\Users\ivanm\Desktop\football_scraping\data\logs\wizard_latest_log.txt
 
 === FOOTBALL DATA PIPELINE — WIZARD ===
 
@@ -57,54 +57,714 @@ Selecciona una opción:
   0) volver al paso anterior
   q) salir del wizard
 Selecciona una opción: 
-Selecciona el equipo:
-  1) real-madrid
-  2) fc-barcelona
-  3) atletico-madrid
-  4) athletic-bilbao
-  5) fc-villarreal
-  6) real-sociedad-san-sebastian
-  7) real-betis-sevilla
-  8) celta-vigo
-  9) fc-valencia
-  10) fc-girona
-  11) fc-sevilla
-  12) espanyol-barcelona
-  13) rayo-vallecano
-  14) ca-osasuna
-  15) rcd-mallorca
-  16) ud-levante
-  17) fc-elche
-  18) fc-getafe
-  19) deportivo-alaves
-  20) real-oviedo
-  0) volver al paso anterior
-  q) salir del wizard
-Selecciona una opción: 
 ============================================================
   RESUMEN DE LA OPERACION
 ============================================================
   Accion      : Descarga completa
   Competicion : La Liga
   Temporada   : 2025/2026
-  Fuente(s)   : transfermarkt
-  Filtro      : sólo equipo 'espanyol-barcelona'
+  Fuente(s)   : all
+  Filtro      : todos los partidos
 ============================================================
 
   S = ejecutar     0 = volver atrás     Q = salir
 ¿Lanzar el pipeline? [S/0/q]: 
 === INICIANDO EL PROCESO ===
+[INFO] 'La Liga' usa endpoint JSON (/getLeagueData/)
+
+[SEASON] La Liga — 2025/2026
+  -> 20/380 partidos | Tiros acumulados: 487
+  -> 40/380 partidos | Tiros acumulados: 965
+  -> 60/380 partidos | Tiros acumulados: 1472
+  -> 80/380 partidos | Tiros acumulados: 1975
+  -> 100/380 partidos | Tiros acumulados: 2482
+  -> 120/380 partidos | Tiros acumulados: 2989
+  -> 140/380 partidos | Tiros acumulados: 3504
+  -> 160/380 partidos | Tiros acumulados: 3949
+  -> 180/380 partidos | Tiros acumulados: 4501
+  -> 200/380 partidos | Tiros acumulados: 5033
+  -> 220/380 partidos | Tiros acumulados: 5533
+  -> 240/380 partidos | Tiros acumulados: 6005
+  -> 260/380 partidos | Tiros acumulados: 6502
+  -> 280/380 partidos | Tiros acumulados: 7047
+  -> 300/380 partidos | Tiros acumulados: 7536
+  -> 320/380 partidos | Tiros acumulados: 8053
+  -> 340/380 partidos | Tiros acumulados: 8523
+  -> 360/380 partidos | Tiros acumulados: 9027
+  -> 380/380 partidos | Tiros acumulados: 9523
+
+[OK] 'La Liga' — temporada 2025_2026 guardada:
+     Partidos :   380  →  C:\Users\ivanm\Desktop\football_scraping\data\clean\la_liga\2025_2026\understat\matches.csv
+     Tiros    :  9523  →  C:\Users\ivanm\Desktop\football_scraping\data\clean\la_liga\2025_2026\understat\shots.csv
+  [INFO] Iniciando scrape_sofascore para La Liga (2025/2026)...
+  [INFO] Iniciando sesión HTTP con SofaScore...
+
+[SEASON] Temporada: LaLiga 25/26  (id=77559)
+  [+] 383 partidos encontrados
+  [1/383] Match 14083613: Celta Vigo vs Levante UD
+  [2/383] Match 14083608: Real Betis vs Elche
+  [3/383] Match 14083634: Osasuna vs Atlético Madrid
+  [4/383] Match 14083629: Espanyol vs Athletic Club
+  [5/383] Match 14083644: Villarreal vs Sevilla
+  [6/383] Match 14083618: Getafe vs Mallorca
+  [7/383] Match 14083603: Deportivo Alavés vs FC Barcelona
+  [8/383] Match 14083639: Valencia vs Rayo Vallecano
+  [9/383] Match 14083624: Girona FC vs Real Sociedad
+  [10/383] Match 14083649: Real Madrid vs Real Oviedo
+  [11/383] Match 14083692: Real Oviedo vs Deportivo Alavés
+  [12/383] Match 14083671: Elche vs Getafe
+  [13/383] Match 14083676: Levante UD vs Mallorca
+  [14/383] Match 14083696: Osasuna vs Espanyol
+  [15/383] Match 14083687: Real Sociedad vs Valencia
+  [16/383] Match 14083682: Rayo Vallecano vs Villarreal
+  [17/383] Match 14083656: Athletic Club vs Celta Vigo
+  [18/383] Match 14083661: Atlético Madrid vs Girona FC
+  [19/383] Match 14083702: Sevilla vs Real Madrid
+  [20/383] Match 14083666: FC Barcelona vs Real Betis
+  [21/383] Match 14083727: Mallorca vs Real Oviedo
+  [22/383] Match 14083706: Deportivo Alavés vs Rayo Vallecano
+  [23/383] Match 14083723: Getafe vs Osasuna
+  [24/383] Match 14083743: Girona FC vs Elche
+  [25/383] Match 14083719: Espanyol vs Real Sociedad
+  [26/383] Match 14083715: Celta Vigo vs Sevilla
+  [27/383] Match 14083710: Real Betis vs Levante UD
+  [28/383] Match 14083739: Valencia vs FC Barcelona
+  [29/383] Match 14083731: Real Madrid vs Athletic Club
+  [30/383] Match 14083735: Villarreal vs Atlético Madrid
+  [31/383] Match 14083211: Real Betis vs Real Madrid
+  [32/383] Match 14083202: Deportivo Alavés vs Mallorca
+  [33/383] Match 14083245: Getafe vs FC Barcelona
+  [34/383] Match 14083255: Valencia vs Girona FC
+  [35/383] Match 14083242: Atlético Madrid vs Athletic Club
+  [36/383] Match 14083239: Rayo Vallecano vs Real Sociedad
+  [37/383] Match 14083252: Real Oviedo vs Elche
+  [38/383] Match 14083231: Osasuna vs Sevilla
+  [39/383] Match 14083248: Villarreal vs Celta Vigo
+  [40/383] Match 14083221: Espanyol vs Levante UD
+  [41/383] Match 14083457: Girona FC vs Mallorca
+  [42/383] Match 14083512: Villarreal vs Levante UD
+  [43/383] Match 14083476: Valencia vs Atlético Madrid
+  [44/383] Match 14083364: Deportivo Alavés vs Athletic Club
+  [45/383] Match 14083495: Osasuna vs FC Barcelona
+  [46/383] Match 14083401: Celta Vigo vs Elche
+  [47/383] Match 14083440: Getafe vs Rayo Vallecano
+  [48/383] Match 14083381: Real Betis vs Real Oviedo
+  [49/383] Match 14083422: Espanyol vs Real Madrid
+  [50/383] Match 14083526: Sevilla vs Real Sociedad
+  [51/383] Match 14083568: Levante UD vs Osasuna
+  [52/383] Match 14083578: Elche vs Deportivo Alavés
+  [53/383] Match 14083587: Sevilla vs Espanyol
+  [54/383] Match 14083551: Atlético Madrid vs Celta Vigo
+  [55/383] Match 14083583: Real Sociedad vs Real Betis
+  [56/383] Match 14083573: Mallorca vs Villarreal
+  [57/383] Match 14083539: Athletic Club vs Valencia
+  [58/383] Match 14083592: Real Oviedo vs Getafe
+  [59/383] Match 14083562: FC Barcelona vs Real Madrid
+  [60/383] Match 14083598: Rayo Vallecano vs Girona FC
+  [61/383] Match 14083697: Rayo Vallecano vs Elche
+  [62/383] Match 14083701: Real Sociedad vs Levante UD
+  [63/383] Match 14081816: Mallorca vs Real Madrid
+  [64/383] Match 14081811: Real Betis vs Espanyol
+  [65/383] Match 14081810: Atlético Madrid vs FC Barcelona
+  [66/383] Match 14081813: Getafe vs Athletic Club
+  [67/383] Match 14081817: Valencia vs Celta Vigo
+  [68/383] Match 14081814: Real Oviedo vs Sevilla
+  [69/383] Match 14081809: Deportivo Alavés vs Osasuna
+  [70/383] Match 14081812: Girona FC vs Villarreal
+  [71/383] Match 14083191: Real Madrid vs Girona FC
+  [72/383] Match 14083152: Real Sociedad vs Deportivo Alavés
+  [73/383] Match 14083132: Elche vs Valencia
+  [74/383] Match 14083113: FC Barcelona vs Espanyol
+  [75/383] Match 14083161: Sevilla vs Atlético Madrid
+  [76/383] Match 14083172: Osasuna vs Real Betis
+  [77/383] Match 14083142: Mallorca vs Rayo Vallecano
+  [78/383] Match 14083123: Celta Vigo vs Real Oviedo
+  [79/383] Match 14083102: Athletic Club vs Villarreal
+  [80/383] Match 14083182: Levante UD vs Getafe
+  [81/383] Match 14083270: Mallorca vs Valencia
+  [82/383] Match 14083258: Athletic Club vs Osasuna
+  [83/383] Match 14083318: Girona FC vs Real Betis
+  [84/383] Match 14083295: Real Madrid vs Deportivo Alavés
+  [85/383] Match 14083306: Elche vs Atlético Madrid
+  [86/383] Match 14083346: Real Sociedad vs Getafe
+  [87/383] Match 14083261: FC Barcelona vs Celta Vigo
+  [88/383] Match 14083265: Levante UD vs Sevilla
+  [89/383] Match 14083330: Rayo Vallecano vs Espanyol
+  [90/383] Match 14083282: Real Oviedo vs Villarreal
+  [91/383] Match 14083607: Celta Vigo vs Real Madrid
+  [92/383] Match 14081805: Osasuna vs Mallorca
+  [93/383] Match 14081802: Levante UD vs Girona FC
+  [94/383] Match 14083602: Atlético Madrid vs Real Sociedad
+  [95/383] Match 14083597: Athletic Club vs FC Barcelona
+  [96/383] Match 14081803: Villarreal vs Elche
+  [97/383] Match 14081801: Getafe vs Real Betis
+  [98/383] Match 14081804: Sevilla vs Rayo Vallecano
+  [99/383] Match 14081799: Valencia vs Deportivo Alavés
+  [100/383] Match 14081800: Espanyol vs Real Oviedo
+  [101/383] Match 14081806: Deportivo Alavés vs Villarreal
+  [102/383] Match 14083632: Girona FC vs Athletic Club
+  [103/383] Match 14083612: Atlético Madrid vs Getafe
+  [104/383] Match 14083627: Real Oviedo vs Valencia
+  [105/383] Match 14083637: Real Madrid vs Elche
+  [106/383] Match 14083642: Mallorca vs Espanyol
+  [107/383] Match 14083617: FC Barcelona vs Sevilla
+  [108/383] Match 14083622: Real Betis vs Celta Vigo
+  [109/383] Match 14083652: Real Sociedad vs Osasuna
+  [110/383] Match 14083647: Rayo Vallecano vs Levante UD
+  [111/383] Match 14081808: Villarreal vs Real Sociedad
+  [112/383] Match 14083668: Elche vs Mallorca
+  [113/383] Match 14083673: Espanyol vs Getafe
+  [114/383] Match 14083678: Levante UD vs Real Oviedo
+  [115/383] Match 14081815: Osasuna vs Girona FC
+  [116/383] Match 14083684: Sevilla vs Valencia
+  [117/383] Match 14083662: FC Barcelona vs Rayo Vallecano
+  [118/383] Match 14083689: Celta Vigo vs Deportivo Alavés
+  [119/383] Match 14083657: Athletic Club vs Real Betis
+  [120/383] Match 14081807: Real Madrid vs Atlético Madrid
+  [121/383] Match 14083378: Getafe vs Villarreal
+  [122/383] Match 14083436: Sevilla vs Deportivo Alavés
+  [123/383] Match 14083418: Real Madrid vs Real Sociedad
+  [124/383] Match 14083454: Real Oviedo vs Athletic Club
+  [125/383] Match 14083472: Rayo Vallecano vs Atlético Madrid
+  [126/383] Match 14083396: Levante UD vs Valencia
+  [127/383] Match 14083509: Mallorca vs Real Betis
+  [128/383] Match 14083491: Girona FC vs FC Barcelona
+  [129/383] Match 15398993: Levante UD vs Villarreal
+  [130/383] Match 14083549: Athletic Club vs Elche
+  [131/383] Match 14081792: Real Sociedad vs Real Oviedo
+  [132/383] Match 14083572: Real Betis vs Rayo Vallecano
+  [133/383] Match 14081794: Osasuna vs Real Madrid
+  [134/383] Match 14083561: Atlético Madrid vs Espanyol
+  [135/383] Match 14083582: Getafe vs Sevilla
+  [136/383] Match 14083567: FC Barcelona vs Levante UD
+  [137/383] Match 14083577: Celta Vigo vs Mallorca
+  [138/383] Match 14081796: Villarreal vs Valencia
+  [139/383] Match 14083537: Deportivo Alavés vs Girona FC
+  [140/383] Match 14081793: Levante UD vs Deportivo Alavés
+  [141/383] Match 14081790: Rayo Vallecano vs Athletic Club
+  [142/383] Match 14081789: FC Barcelona vs Villarreal
+  [143/383] Match 14081818: Mallorca vs Real Sociedad
+  [144/383] Match 14081795: Real Oviedo vs Atlético Madrid
+  [145/383] Match 14081819: Elche vs Espanyol
+  [146/383] Match 14083591: Valencia vs Osasuna
+  [147/383] Match 14081791: Real Betis vs Sevilla
+  [148/383] Match 14081797: Girona FC vs Celta Vigo
+  [149/383] Match 14081798: Real Madrid vs Getafe
+  [150/383] Match 15534915: Rayo Vallecano vs Real Oviedo
+  [151/383] Match 14083156: Valencia vs Espanyol
+  [152/383] Match 14083127: Sevilla vs Athletic Club
+  [153/383] Match 14083186: Villarreal vs Real Madrid
+  [154/383] Match 14083107: Atlético Madrid vs Mallorca
+  [155/383] Match 14083117: FC Barcelona vs Real Oviedo
+  [156/383] Match 14083136: Real Sociedad vs Celta Vigo
+  [157/383] Match 14083096: Deportivo Alavés vs Real Betis
+  [158/383] Match 14083166: Girona FC vs Getafe
+  [159/383] Match 14083236: Espanyol vs Deportivo Alavés
+  [160/383] Match 14083251: Real Oviedo vs Girona FC
+  [161/383] Match 14083227: Osasuna vs Villarreal
+  [162/383] Match 14083241: Levante UD vs Atlético Madrid
+  [163/383] Match 14083244: Elche vs FC Barcelona
+  [164/383] Match 14083254: Real Madrid vs Rayo Vallecano
+  [165/383] Match 14083207: Real Betis vs Valencia
+  [166/383] Match 14083247: Getafe vs Celta Vigo
+  [167/383] Match 14083195: Athletic Club vs Real Sociedad
+  [168/383] Match 14083217: Mallorca vs Sevilla
+  [169/383] Match 14083279: Celta Vigo vs Osasuna
+  [170/383] Match 14083341: Rayo Vallecano vs Real Oviedo
+  [171/383] Match 14083269: FC Barcelona vs Mallorca
+  [172/383] Match 14083292: Real Sociedad vs Elche
+  [173/383] Match 14083257: Deportivo Alavés vs Getafe
+  [174/383] Match 14083260: Athletic Club vs Levante UD
+  [175/383] Match 14083315: Sevilla vs Girona FC
+  [176/383] Match 14083263: Atlético Madrid vs Real Betis
+  [177/383] Match 14083327: Valencia vs Real Madrid
+  [178/383] Match 14083303: Villarreal vs Espanyol
+  [179/383] Match 14083360: Elche vs Osasuna
+  [180/383] Match 14083524: Espanyol vs Celta Vigo
+  [181/383] Match 14083205: Rayo Vallecano vs Getafe
+  [182/383] Match 14083196: Celta Vigo vs Valencia
+  [183/383] Match 14083200: Osasuna vs Athletic Club
+  [184/383] Match 14083198: Elche vs Villarreal
+  [185/383] Match 14083203: Espanyol vs FC Barcelona
+  [186/383] Match 14083209: Sevilla vs Levante UD
+  [187/383] Match 14083204: Real Madrid vs Real Betis
+  [188/383] Match 14083194: Deportivo Alavés vs Real Oviedo
+  [189/383] Match 14083208: Mallorca vs Girona FC
+  [190/383] Match 14083201: Real Sociedad vs Atlético Madrid
+  [191/383] Match 14083212: Getafe vs Real Sociedad
+  [192/383] Match 14083218: Real Oviedo vs Real Betis
+  [193/383] Match 14083214: Villarreal vs Deportivo Alavés
+  [194/383] Match 14083213: Girona FC vs Osasuna
+  [195/383] Match 14083220: Valencia vs Elche
+  [196/383] Match 14083223: Rayo Vallecano vs Mallorca
+  [197/383] Match 14083222: Levante UD vs Espanyol
+  [198/383] Match 14083219: Sevilla vs Celta Vigo
+  [199/383] Match 14083229: Espanyol vs Girona FC
+  [200/383] Match 14083238: Real Madrid vs Levante UD
+  [201/383] Match 14083235: Mallorca vs Athletic Club
+  [202/383] Match 14083232: Osasuna vs Real Oviedo
+  [203/383] Match 14083224: Real Betis vs Villarreal
+  [204/383] Match 14083230: Getafe vs Valencia
+  [205/383] Match 14083233: Atlético Madrid vs Deportivo Alavés
+  [206/383] Match 14083226: Celta Vigo vs Rayo Vallecano
+  [207/383] Match 14083237: Real Sociedad vs FC Barcelona
+  [208/383] Match 14083228: Elche vs Sevilla
+  [209/383] Match 14083146: Levante UD vs Elche
+  [210/383] Match 14083176: Rayo Vallecano vs Osasuna
+  [211/383] Match 14083162: Real Oviedo vs Mallorca
+  [212/383] Match 14083159: Villarreal vs Getafe
+  [213/383] Match 14083150: Deportivo Alavés vs Real Sociedad
+  [214/383] Match 14083155: Real Betis vs FC Barcelona
+  [215/383] Match 14083151: Athletic Club vs Atlético Madrid
+  [216/383] Match 14083153: Elche vs Girona FC
+  [217/383] Match 14083163: Valencia vs Sevilla
+  [218/383] Match 14083154: Espanyol vs Rayo Vallecano
+  [219/383] Match 14083158: Real Madrid vs Celta Vigo
+  [220/383] Match 14083160: Osasuna vs Levante UD
+  [221/383] Match 14083177: Real Sociedad vs Girona FC
+  [222/383] Match 14083165: Atlético Madrid vs Valencia
+  [223/383] Match 14083174: Mallorca vs Elche
+  [224/383] Match 14083168: FC Barcelona vs Osasuna
+  [225/383] Match 14083175: Getafe vs Espanyol
+  [226/383] Match 14083179: Sevilla vs Real Oviedo
+  [227/383] Match 14083171: Celta Vigo vs Athletic Club
+  [228/383] Match 14083169: Levante UD vs Villarreal
+  [229/383] Match 14083164: Deportivo Alavés vs Real Madrid
+  [230/383] Match 14083173: Rayo Vallecano vs Real Betis
+  [231/383] Match 14083193: Valencia vs Mallorca
+  [232/383] Match 14083192: Real Oviedo vs Celta Vigo
+  [233/383] Match 14083184: Levante UD vs Real Sociedad
+  [234/383] Match 14083188: Osasuna vs Deportivo Alavés
+  [235/383] Match 14083185: Real Madrid vs Sevilla
+  [236/383] Match 14083189: Girona FC vs Atlético Madrid
+  [237/383] Match 14083190: Villarreal vs FC Barcelona
+  [238/383] Match 14083183: Elche vs Rayo Vallecano
+  [239/383] Match 14083181: Real Betis vs Getafe
+  [240/383] Match 14083180: Athletic Club vs Espanyol
+  [241/383] Match 14083120: Sevilla vs Osasuna
+  [242/383] Match 14083108: Atlético Madrid vs Levante UD
+  [243/383] Match 14083111: Espanyol vs Villarreal
+  [244/383] Match 14083106: Athletic Club vs Real Oviedo
+  [245/383] Match 14083112: Rayo Vallecano vs Real Madrid
+  [246/383] Match 14083118: Mallorca vs Getafe
+  [247/383] Match 14083116: Valencia vs Real Betis
+  [248/383] Match 14083115: Celta Vigo vs FC Barcelona
+  [249/383] Match 14083133: Valencia vs Levante UD
+  [250/383] Match 14083121: Deportivo Alavés vs Celta Vigo
+  [251/383] Match 14083130: FC Barcelona vs Athletic Club
+  [252/383] Match 14083126: Osasuna vs Real Sociedad
+  [253/383] Match 14083134: Villarreal vs Mallorca
+  [254/383] Match 14083128: Real Oviedo vs Rayo Vallecano
+  [255/383] Match 14083122: Real Betis vs Girona FC
+  [256/383] Match 14083131: Getafe vs Atlético Madrid
+  [257/383] Match 14083124: Elche vs Real Madrid
+  [258/383] Match 14083125: Espanyol vs Sevilla
+  [259/383] Match 14083149: Getafe vs Elche
+  [260/383] Match 14083140: Mallorca vs Osasuna
+  [261/383] Match 14083144: FC Barcelona vs Deportivo Alavés
+  [262/383] Match 14083145: Levante UD vs Athletic Club
+  [263/383] Match 14083135: Atlético Madrid vs Real Oviedo
+  [264/383] Match 14083143: Real Sociedad vs Villarreal
+  [265/383] Match 14083147: Sevilla vs Real Betis
+  [266/383] Match 14083137: Celta Vigo vs Espanyol
+  [267/383] Match 14083139: Girona FC vs Real Madrid
+  [268/383] Match 14083141: Rayo Vallecano vs Valencia
+  [269/383] Match 14083215: FC Barcelona vs Atlético Madrid
+  [270/383] Match 14083210: Athletic Club vs Real Madrid
+  [271/383] Match 14083664: FC Barcelona vs Girona FC
+  [272/383] Match 14083690: Villarreal vs Real Betis
+  [273/383] Match 14083659: Atlético Madrid vs Osasuna
+  [274/383] Match 14083685: Elche vs Athletic Club
+  [275/383] Match 14083670: Celta Vigo vs Real Sociedad
+  [276/383] Match 14083680: Levante UD vs Rayo Vallecano
+  [277/383] Match 14083675: Getafe vs Real Madrid
+  [278/383] Match 14083655: Deportivo Alavés vs Valencia
+  [279/383] Match 14083712: Real Sociedad vs Sevilla
+  [280/383] Match 14083708: Girona FC vs Real Oviedo
+  [281/383] Match 14083737: Espanyol vs Elche
+  [282/383] Match 14083704: Athletic Club vs Getafe
+  [283/383] Match 14083717: Valencia vs Villarreal
+  [284/383] Match 14083742: Mallorca vs Levante UD
+  [285/383] Match 14083729: Real Madrid vs FC Barcelona
+  [286/383] Match 14083733: Osasuna vs Celta Vigo
+  [287/383] Match 14083721: Rayo Vallecano vs Deportivo Alavés
+  [288/383] Match 14083725: Real Betis vs Atlético Madrid
+  [289/383] Match 14083098: Getafe vs Girona FC
+  [290/383] Match 14083105: Villarreal vs Rayo Vallecano
+  [291/383] Match 14083094: Atlético Madrid vs Sevilla
+  [292/383] Match 14083101: Real Sociedad vs Athletic Club
+  [293/383] Match 14083099: Real Madrid vs Valencia
+  [294/383] Match 14083103: Levante UD vs Celta Vigo
+  [295/383] Match 14083093: Deportivo Alavés vs Espanyol
+  [296/383] Match 14083095: FC Barcelona vs Elche
+  [297/383] Match 14083097: Real Betis vs Mallorca
+  [298/383] Match 14083104: Real Oviedo vs Osasuna
+  [299/383] Match 14083110: Elche vs Real Sociedad
+  [300/383] Match 14083114: Girona FC vs Deportivo Alavés
+  [301/383] Match 14083369: Athletic Club vs Girona FC
+  [302/383] Match 14083443: Sevilla vs Villarreal
+  [303/383] Match 14083426: Levante UD vs Real Madrid
+  [304/383] Match 14083462: Getafe vs Deportivo Alavés
+  [305/383] Match 14083528: Real Sociedad vs Mallorca
+  [306/383] Match 14083386: Atlético Madrid vs Rayo Vallecano
+  [307/383] Match 14083516: Osasuna vs Elche
+  [308/383] Match 14083481: Real Oviedo vs FC Barcelona
+  [309/383] Match 14083595: Girona FC vs Espanyol
+  [310/383] Match 14083569: Getafe vs Levante UD
+  [311/383] Match 14083541: Atlético Madrid vs Real Madrid
+  [312/383] Match 14083580: Mallorca vs Deportivo Alavés
+  [313/383] Match 14083586: Villarreal vs Athletic Club
+  [314/383] Match 14083574: Rayo Vallecano vs Sevilla
+  [315/383] Match 14083589: Elche vs Celta Vigo
+  [316/383] Match 14083553: FC Barcelona vs Real Sociedad
+  [317/383] Match 14083564: Real Betis vs Osasuna
+  [318/383] Match 14083601: Valencia vs Real Oviedo
+  [319/383] Match 14652471: Osasuna vs Getafe
+  [320/383] Match 14083645: Real Oviedo vs Levante UD
+  [321/383] Match 14083615: Girona FC vs Valencia
+  [322/383] Match 14083610: Athletic Club vs Mallorca
+  [323/383] Match 14083620: Real Madrid vs Villarreal
+  [324/383] Match 14083605: Deportivo Alavés vs Elche
+  [325/383] Match 14083630: Sevilla vs FC Barcelona
+  [326/383] Match 14083650: Real Sociedad vs Rayo Vallecano
+  [327/383] Match 14083635: Espanyol vs Real Betis
+  [328/383] Match 14083625: Celta Vigo vs Atlético Madrid
+  [329/383] Match 14083694: Real Oviedo vs Espanyol
+  [330/383] Match 14083699: Sevilla vs Mallorca
+  [331/383] Match 14083109: Deportivo Alavés vs Atlético Madrid
+  [332/383] Match 14083157: Real Oviedo vs Real Sociedad
+  [333/383] Match 14083148: Girona FC vs Sevilla
+  [334/383] Match 14083197: Real Madrid vs Mallorca
+  [335/383] Match 14083119: Celta Vigo vs Villarreal
+  [336/383] Match 14083167: Real Betis vs Athletic Club
+  [337/383] Match 14083138: Espanyol vs Osasuna
+  [338/383] Match 14083178: Rayo Vallecano vs FC Barcelona
+  [339/383] Match 14083640: Osasuna vs Getafe
+  [340/383] Match 14083253: Sevilla vs Elche
+  [341/383] Match 14083240: Getafe vs Real Oviedo
+  [342/383] Match 14083256: Real Sociedad vs Real Madrid
+  [343/383] Match 14083246: Athletic Club vs Deportivo Alavés
+  [344/383] Match 14083206: Atlético Madrid vs Villarreal
+  [345/383] Match 14083225: Celta Vigo vs Girona FC
+  [346/383] Match 14083249: Levante UD vs Real Betis
+  [347/383] Match 14083243: Osasuna vs Rayo Vallecano
+  [348/383] Match 14083216: FC Barcelona vs Valencia
+  [349/383] Match 14083234: Espanyol vs Mallorca
+  [350/383] Match 14083266: Real Betis vs Real Sociedad
+  [351/383] Match 14083285: Girona FC vs Levante UD
+  [352/383] Match 14083333: Real Madrid vs Espanyol
+  [353/383] Match 14083259: Deportivo Alavés vs Sevilla
+  [354/383] Match 14083351: Villarreal vs Osasuna
+  [355/383] Match 14083298: Valencia vs Athletic Club
+  [356/383] Match 14083322: Rayo Vallecano vs Celta Vigo
+  [357/383] Match 14083310: Mallorca vs Atlético Madrid
+  [358/383] Match 14083275: Elche vs Real Oviedo
+  [359/383] Match 14083262: FC Barcelona vs Getafe
+  [360/383] Match 14083407: Espanyol vs Valencia
+  [361/383] Match 14082854: Girona FC vs Rayo Vallecano
+  [362/383] Match 14082858: Villarreal vs Real Oviedo
+  [363/383] Match 14082855: Mallorca vs FC Barcelona
+  [364/383] Match 14082849: Deportivo Alavés vs Levante UD
+  [365/383] Match 14082857: Valencia vs Real Sociedad
+  [366/383] Match 14082851: Celta Vigo vs Getafe
+  [367/383] Match 14082850: Athletic Club vs Sevilla
+  [368/383] Match 14082853: Espanyol vs Atlético Madrid
+  [369/383] Match 14082852: Elche vs Real Betis
+  [370/383] Match 14082856: Real Madrid vs Osasuna
+  [371/383] Match 14082864: Real Betis vs Deportivo Alavés
+  [372/383] Match 14082866: Mallorca vs Celta Vigo
+  [373/383] Match 14082860: Atlético Madrid vs Elche
+  [374/383] Match 14082865: Levante UD vs FC Barcelona
+  [375/383] Match 14082861: Osasuna vs Valencia
+  [376/383] Match 14082867: Real Sociedad vs Espanyol
+  [377/383] Match 14083100: Villarreal vs Girona FC
+  [378/383] Match 14082862: Real Oviedo vs Real Madrid
+  [379/383] Match 14082859: Athletic Club vs Rayo Vallecano
+  [380/383] Match 14083092: Sevilla vs Getafe
+  [381/383] Match 14083498: Celta Vigo vs Real Betis
+  [382/383] Match 14083129: Elche vs Levante UD
+  [383/383] Match 14083187: Valencia vs Getafe
+  CSV matches: C:\Users\ivanm\Desktop\football_scraping\data\clean\la_liga\2025_2026\sofascore\matches.csv
+  CSV shots: C:\Users\ivanm\Desktop\football_scraping\data\clean\la_liga\2025_2026\sofascore\shots.csv
+  CSV events: C:\Users\ivanm\Desktop\football_scraping\data\clean\la_liga\2025_2026\sofascore\events.csv
+  CSV teams: C:\Users\ivanm\Desktop\football_scraping\data\clean\la_liga\2025_2026\sofascore\teams.csv
+  CSV players: C:\Users\ivanm\Desktop\football_scraping\data\clean\la_liga\2025_2026\sofascore\players.csv
 =======================================================
   Transfermarkt scraper — ES1 2025/2026
 =======================================================
 
 [INFO] Equipo: real-madrid (id=418)
-==============================================================
-2026-05-26 17:15:58,966 - INFO -    Competición: La Liga
-2026-05-26 17:15:58,966 - INFO -    Temporada: 2025/2026
-2026-05-26 17:15:58,966 - INFO -    Fuente:    transfermarkt
-2026-05-26 17:15:58,966 - INFO - ── FASE 1: SCRAPING ─────────────────────────────────
-2026-05-26 17:15:58,966 - INFO - [INFO] full_refresh=True — se ignorará la caché local.
-2026-05-26 17:15:58,966 - INFO - [START] Scraping Transfermarkt...
-2026-05-26 17:15:58,967 - INFO - Lesiones: solo temporada TM 25/26
-2026-05-26 17:15:59,393 - INFO - Auto-descubiertos 20 equipos para ES1 2025
+  [OK] 44 jugadores (29 kader + 15 temporada) | 61 lesiones
+
+[INFO] Equipo: fc-barcelona (id=131)
+  [OK] 36 jugadores (25 kader + 11 temporada) | 59 lesiones
+
+[INFO] Equipo: atletico-madrid (id=13)
+  [OK] 44 jugadores (23 kader + 21 temporada) | 30 lesiones
+
+[INFO] Equipo: fc-villarreal (id=1050)
+  [OK] 41 jugadores (27 kader + 14 temporada) | 20 lesiones
+
+[INFO] Equipo: athletic-bilbao (id=621)
+  [OK] 40 jugadores (28 kader + 12 temporada) | 23 lesiones
+
+[INFO] Equipo: real-sociedad-san-sebastian (id=681)
+  [OK] 44 jugadores (25 kader + 19 temporada) | 19 lesiones
+
+[INFO] Equipo: real-betis-sevilla (id=150)
+  [OK] 39 jugadores (27 kader + 12 temporada) | 16 lesiones
+
+[INFO] Equipo: celta-vigo (id=940)
+  [OK] 38 jugadores (28 kader + 10 temporada) | 15 lesiones
+
+[INFO] Equipo: fc-valencia (id=1049)
+  [OK] 42 jugadores (27 kader + 15 temporada) | 23 lesiones
+
+[INFO] Equipo: fc-girona (id=12321)
+  [OK] 42 jugadores (27 kader + 15 temporada) | 27 lesiones
+
+[INFO] Equipo: fc-sevilla (id=368)
+  [OK] 40 jugadores (28 kader + 12 temporada) | 53 lesiones
+
+[INFO] Equipo: espanyol-barcelona (id=714)
+  [OK] 36 jugadores (23 kader + 13 temporada) | 6 lesiones
+
+[INFO] Equipo: rayo-vallecano (id=367)
+  [OK] 33 jugadores (27 kader + 6 temporada) | 6 lesiones
+
+[INFO] Equipo: ca-osasuna (id=331)
+  [OK] 34 jugadores (23 kader + 11 temporada) | 2 lesiones
+
+[INFO] Equipo: rcd-mallorca (id=237)
+  [OK] 38 jugadores (26 kader + 12 temporada) | 9 lesiones
+
+[INFO] Equipo: ud-levante (id=3368)
+  [OK] 37 jugadores (28 kader + 9 temporada) | 11 lesiones
+
+[INFO] Equipo: fc-elche (id=1531)
+  [OK] 43 jugadores (26 kader + 17 temporada) | 15 lesiones
+
+[INFO] Equipo: fc-getafe (id=3709)
+  [OK] 44 jugadores (25 kader + 19 temporada) | 10 lesiones
+
+[INFO] Equipo: deportivo-alaves (id=1108)
+  [OK] 37 jugadores (24 kader + 13 temporada) | 5 lesiones
+
+[INFO] Equipo: real-oviedo (id=2497)
+  [OK] 39 jugadores (26 kader + 13 temporada) | 5 lesiones
+
+  Equipos procesados: 20/20
+  CSV jugadores: C:\Users\ivanm\Desktop\football_scraping\data\clean\la_liga\2025_2026\transfermarkt\players.csv
+  CSV lesiones:  C:\Users\ivanm\Desktop\football_scraping\data\clean\la_liga\2025_2026\transfermarkt\injuries.csv
+ = 38 jugadores para lesiones
+2026-05-27 20:53:34,278 - INFO - ud-levante: 28 kader + 9 leistungsdaten = 37 jugadores para lesiones
+2026-05-27 20:58:16,460 - INFO - fc-elche: 26 kader + 17 leistungsdaten = 43 jugadores para lesiones
+2026-05-27 21:03:39,726 - INFO - fc-getafe: 25 kader + 19 leistungsdaten = 44 jugadores para lesiones
+2026-05-27 21:08:43,036 - INFO - deportivo-alaves: 24 kader + 13 leistungsdaten = 37 jugadores para lesiones
+2026-05-27 21:13:23,087 - INFO - real-oviedo: 26 kader + 13 leistungsdaten = 39 jugadores para lesiones
+2026-05-27 21:15:48,120 - INFO - [START] Scraping StatsBomb...
+2026-05-27 21:15:48,330 - INFO - StatsBomb: sin season_id Open Data para La Liga 2025/2026. Omitiendo.
+2026-05-27 21:15:48,330 - INFO - [START] Scraping WhoScored...
+2026-05-27 21:15:48,335 - INFO - WhoScored [La Liga]: descargando SOLO la temporada 2025/26
+2026-05-27 21:15:48,335 - INFO - ====== WebDriver manager ======
+2026-05-27 21:15:49,322 - INFO - Get LATEST chromedriver version for google-chrome
+2026-05-27 21:15:50,035 - INFO - Get LATEST chromedriver version for google-chrome
+2026-05-27 21:15:50,389 - INFO - WebDriver version 148.0.7778.178 selected
+2026-05-27 21:15:50,389 - INFO - Modern chrome version https://storage.googleapis.com/chrome-for-testing-public/148.0.7778.178/win64/chromedriver-win64.zip
+2026-05-27 21:15:50,389 - INFO - About to download new driver from https://storage.googleapis.com/chrome-for-testing-public/148.0.7778.178/win64/chromedriver-win64.zip
+2026-05-27 21:15:50,965 - INFO - Driver downloading response is 200
+2026-05-27 21:15:51,074 - INFO - Driver has been saved in cache [C:\Users\ivanm\.wdm\drivers\chromedriver\win64\148.0.7778.178]
+2026-05-27 21:15:52,262 - INFO - Iniciando navegador...
+2026-05-27 21:15:58,861 - INFO -   Cookies aceptadas
+2026-05-27 21:16:00,863 - INFO - 
+[SEASON] 2025/26
+2026-05-27 21:16:00,863 - INFO -   Obteniendo partidos de temporada 2025/26...
+2026-05-27 21:16:24,143 - INFO -   Datepicker -> año mas antiguo: 2025
+2026-05-27 21:16:26,931 - INFO -   Datepicker -> primer mes con partidos: ago
+2026-05-27 21:16:26,932 - INFO -   Posicionado al inicio de temporada via datepicker
+2026-05-27 21:16:30,839 - INFO -   - Inicio ('ago 2025'): 31 partidos visibles (acumulado=31)
+2026-05-27 21:16:33,067 - INFO -   - Sem +1 ('sep 2025'): 39 nuevos (acumulado=70)
+2026-05-27 21:16:35,391 - INFO -   - Sem +2 ('oct 2025'): 31 nuevos (acumulado=101)
+2026-05-27 21:16:37,676 - INFO -   - Sem +3 ('nov 2025'): 38 nuevos (acumulado=139)
+2026-05-27 21:16:40,647 - INFO -   - Sem +4 ('dic 2025'): 32 nuevos (acumulado=171)
+2026-05-27 21:16:43,534 - INFO -   - Sem +5 ('ene 2026'): 43 nuevos (acumulado=214)
+2026-05-27 21:16:46,119 - INFO -   - Sem +6 ('feb 2026'): 40 nuevos (acumulado=254)
+2026-05-27 21:16:49,391 - INFO -   - Sem +7 ('mar 2026'): 36 nuevos (acumulado=290)
+2026-05-27 21:16:52,727 - INFO -   - Sem +8 ('abr 2026'): 40 nuevos (acumulado=330)
+2026-05-27 21:16:55,966 - INFO -   - Sem +9 ('may 2026'): 50 nuevos (acumulado=380)
+2026-05-27 21:16:59,047 - INFO -   - Sem +10: rango sin cambios (streak=1/3)
+2026-05-27 21:17:01,504 - INFO -   - Sem +11: rango sin cambios (streak=2/3)
+2026-05-27 21:17:03,736 - INFO -   - Sem +12: rango sin cambios (streak=3/3)
+2026-05-27 21:17:03,737 - INFO -   - 3 intentos sin avanzar -> fin de temporada
+2026-05-27 21:17:03,737 - INFO -   TOTAL 380 partidos encontrados para 2025/26
+2026-05-27 21:17:03,737 - INFO -   [1/380] Partido 1913882
+2026-05-27 21:17:19,832 - INFO -   [2/380] Partido 1913883
+2026-05-27 21:17:37,986 - INFO -   [3/380] Partido 1913884
+2026-05-27 21:17:55,386 - INFO -   [4/380] Partido 1913885
+2026-05-27 21:18:10,991 - INFO -   [5/380] Partido 1913886
+2026-05-27 21:18:29,129 - INFO -   [6/380] Partido 1913887
+2026-05-27 21:18:49,012 - INFO -   [7/380] Partido 1913888
+2026-05-27 21:19:08,758 - INFO -   [8/380] Partido 1913889
+2026-05-27 21:19:25,652 - INFO -   [9/380] Partido 1913890
+2026-05-27 21:19:43,159 - INFO -   [10/380] Partido 1913891
+2026-05-27 21:19:58,663 - INFO -   -> 10/380 partidos | eventos: 15509
+2026-05-27 21:19:58,663 - INFO -   [11/380] Partido 1913892
+2026-05-27 21:20:19,742 - INFO -   [12/380] Partido 1913893
+2026-05-27 21:20:35,824 - INFO -   [13/380] Partido 1913894
+2026-05-27 21:20:54,405 - INFO -   [14/380] Partido 1913895
+2026-05-27 21:21:14,121 - INFO -   [15/380] Partido 1913896
+2026-05-27 21:21:34,761 - INFO -   [16/380] Partido 1913897
+2026-05-27 21:21:56,207 - INFO -   [17/380] Partido 1913898
+2026-05-27 21:22:13,943 - INFO -   [18/380] Partido 1913899
+2026-05-27 21:22:30,743 - INFO -   [19/380] Partido 1913900
+2026-05-27 21:22:48,239 - INFO -   [20/380] Partido 1913901
+2026-05-27 21:23:06,046 - INFO -   -> 20/380 partidos | eventos: 30584
+2026-05-27 21:23:06,046 - INFO -   [21/380] Partido 1913902
+2026-05-27 21:23:24,031 - INFO -   [22/380] Partido 1913903
+2026-05-27 21:23:44,494 - INFO -   [23/380] Partido 1913904
+2026-05-27 21:24:06,070 - INFO -   [24/380] Partido 1913905
+2026-05-27 21:24:22,286 - INFO -   [25/380] Partido 1913906
+2026-05-27 21:24:42,133 - INFO -   [26/380] Partido 1913907
+2026-05-27 21:24:58,790 - INFO -   [27/380] Partido 1913908
+2026-05-27 21:25:15,933 - INFO -   [28/380] Partido 1913909
+2026-05-27 21:25:33,698 - INFO -   [29/380] Partido 1913910
+2026-05-27 21:25:51,339 - INFO -   [30/380] Partido 1913911
+2026-05-27 21:26:10,133 - INFO -   -> 30/380 partidos | eventos: 46185
+2026-05-27 21:26:10,133 - INFO -   [31/380] Partido 1913912
+2026-05-27 21:26:30,487 - INFO -   [32/380] Partido 1913913
+2026-05-27 21:26:51,610 - INFO -   [33/380] Partido 1913914
+2026-05-27 21:27:12,837 - INFO -   [34/380] Partido 1913915
+2026-05-27 21:27:30,279 - INFO -   [35/380] Partido 1913916
+2026-05-27 21:27:49,464 - INFO -   [36/380] Partido 1913917
+2026-05-27 21:28:06,024 - INFO -   [37/380] Partido 1913918
+2026-05-27 21:28:27,389 - INFO -   [38/380] Partido 1913919
+2026-05-27 21:28:42,753 - INFO -   [39/380] Partido 1913920
+2026-05-27 21:28:58,781 - INFO -   [40/380] Partido 1913921
+2026-05-27 21:29:17,093 - INFO -   -> 40/380 partidos | eventos: 60736
+2026-05-27 21:29:17,094 - INFO -   [41/380] Partido 1913922
+2026-05-27 21:29:38,678 - INFO -   [42/380] Partido 1913923
+2026-05-27 21:29:59,971 - INFO -   [43/380] Partido 1913924
+2026-05-27 21:30:19,324 - INFO -   [44/380] Partido 1913925
+2026-05-27 21:30:38,070 - INFO -   [45/380] Partido 1913926
+2026-05-27 21:30:56,778 - INFO -   [46/380] Partido 1913927
+2026-05-27 21:31:17,648 - INFO -   [47/380] Partido 1913928
+2026-05-27 21:31:35,187 - INFO -   [48/380] Partido 1913929
+2026-05-27 21:31:53,102 - INFO -   [49/380] Partido 1913930
+2026-05-27 21:32:09,847 - INFO -   [50/380] Partido 1913931
+2026-05-27 21:32:27,624 - INFO -   -> 50/380 partidos | eventos: 75781
+2026-05-27 21:32:27,624 - INFO -   [51/380] Partido 1913932
+2026-05-27 21:32:43,799 - INFO -   [52/380] Partido 1913933
+2026-05-27 21:33:04,886 - INFO -   [53/380] Partido 1913934
+2026-05-27 21:33:23,584 - INFO -   [54/380] Partido 1913935
+2026-05-27 21:33:43,345 - INFO -   [55/380] Partido 1913936
+2026-05-27 21:33:59,127 - INFO -   [56/380] Partido 1913937
+2026-05-27 21:34:16,808 - INFO -   [57/380] Partido 1913938
+2026-05-27 21:34:33,821 - INFO -   [58/380] Partido 1913939
+2026-05-27 21:34:54,456 - INFO -   [59/380] Partido 1913940
+2026-05-27 21:35:14,296 - INFO -   [60/380] Partido 1913941
+2026-05-27 21:35:34,326 - INFO -   -> 60/380 partidos | eventos: 91455
+2026-05-27 21:35:34,326 - INFO -   [61/380] Partido 1913942
+2026-05-27 21:35:52,729 - INFO -   [62/380] Partido 1913943
+2026-05-27 21:36:12,120 - INFO -   [63/380] Partido 1913944
+2026-05-27 21:36:28,247 - INFO -   [64/380] Partido 1913945
+2026-05-27 21:36:47,423 - INFO -   [65/380] Partido 1913946
+2026-05-27 21:37:05,886 - INFO -   [66/380] Partido 1913947
+2026-05-27 21:37:25,911 - INFO -   [67/380] Partido 1913948
+2026-05-27 21:37:44,680 - INFO -   [68/380] Partido 1913949
+2026-05-27 21:38:02,178 - INFO -   [69/380] Partido 1913950
+2026-05-27 21:38:21,259 - INFO -   [70/380] Partido 1913951
+2026-05-27 21:38:39,313 - INFO -   -> 70/380 partidos | eventos: 106958
+2026-05-27 21:38:39,313 - INFO -   [71/380] Partido 1913952
+2026-05-27 21:38:59,401 - INFO -   [72/380] Partido 1913953
+2026-05-27 21:39:17,664 - INFO -   [73/380] Partido 1913954
+2026-05-27 21:39:34,608 - INFO -   [74/380] Partido 1913955
+2026-05-27 21:39:50,559 - INFO -   [75/380] Partido 1913956
+2026-05-27 21:40:11,425 - INFO -   [76/380] Partido 1913957
+2026-05-27 21:40:32,350 - INFO -   [77/380] Partido 1913958
+2026-05-27 21:40:51,596 - INFO -   [78/380] Partido 1913959
+2026-05-27 21:41:06,883 - INFO -   [79/380] Partido 1913960
+2026-05-27 21:41:24,551 - INFO -   [80/380] Partido 1913961
+2026-05-27 21:41:44,702 - INFO -   -> 80/380 partidos | eventos: 122349
+2026-05-27 21:41:44,702 - INFO -   [81/380] Partido 1913962
+2026-05-27 21:42:00,339 - INFO -   [82/380] Partido 1913963
+2026-05-27 21:42:20,668 - INFO -   [83/380] Partido 1913964
+2026-05-27 21:42:39,762 - INFO -   [84/380] Partido 1913965
+2026-05-27 21:42:56,020 - INFO -   [85/380] Partido 1913966
+2026-05-27 21:43:17,271 - INFO -   [86/380] Partido 1913967
+2026-05-27 21:43:37,759 - INFO -   [87/380] Partido 1913968
+2026-05-27 21:43:57,904 - INFO -   [88/380] Partido 1913969
+2026-05-27 21:44:17,234 - INFO -   [89/380] Partido 1913970
+2026-05-27 21:44:32,918 - INFO -   [90/380] Partido 1913971
+2026-05-27 21:44:50,916 - INFO -   -> 90/380 partidos | eventos: 137729
+2026-05-27 21:44:50,917 - INFO -   [91/380] Partido 1913972
+2026-05-27 21:45:09,785 - INFO -   [92/380] Partido 1913973
+2026-05-27 21:45:27,231 - INFO -   [93/380] Partido 1913974
+2026-05-27 21:45:45,602 - INFO -   [94/380] Partido 1913975
+2026-05-27 21:46:04,165 - INFO -   [95/380] Partido 1913976
+2026-05-27 21:46:21,775 - INFO -   [96/380] Partido 1913977
+2026-05-27 21:46:39,655 - INFO -   [97/380] Partido 1913978
+2026-05-27 21:46:59,865 - INFO -   [98/380] Partido 1913979
+2026-05-27 21:47:17,918 - INFO -   [99/380] Partido 1913980
+2026-05-27 21:47:35,802 - INFO -   [100/380] Partido 1913981
+2026-05-27 21:47:56,052 - INFO -   -> 100/380 partidos | eventos: 152522
+2026-05-27 21:47:56,052 - INFO - [ANTI-BOT] 100 partidos procesados — reinicio preventivo del driver
+2026-05-27 21:47:56,052 - INFO - [ANTI-BOT] Reiniciando driver — cerrando Chrome...
+2026-05-27 21:47:58,282 - INFO - [ANTI-BOT] Esperando 30s antes de abrir uno nuevo...
+2026-05-27 21:48:28,285 - INFO - ====== WebDriver manager ======
+2026-05-27 21:48:28,765 - INFO - Driver [C:\Users\ivanm\.wdm\drivers\chromedriver\win64\148.0.7778.178\chromedriver-win64/chromedriver.exe] found in cache by browser version
+2026-05-27 21:48:29,826 - INFO - [ANTI-BOT] Nuevo Chrome abierto. Aterrizando en home y aceptando cookies...
+2026-05-27 21:48:37,206 - INFO -   Cookies aceptadas
+2026-05-27 21:48:43,265 - INFO -   [101/380] Partido 1913982
+2026-05-27 21:49:02,423 - INFO -   [102/380] Partido 1913983
+2026-05-27 21:49:21,268 - INFO -   [103/380] Partido 1913984
+2026-05-27 21:49:41,650 - INFO -   [104/380] Partido 1913985
+2026-05-27 21:50:02,767 - INFO -   [105/380] Partido 1913986
+2026-05-27 21:50:18,854 - INFO -   [106/380] Partido 1913987
+2026-05-27 21:50:36,309 - INFO -   [107/380] Partido 1913988
+2026-05-27 21:50:53,624 - INFO -   [108/380] Partido 1913989
+2026-05-27 21:51:12,743 - INFO -   [109/380] Partido 1913990
+2026-05-27 21:51:33,466 - INFO -   [110/380] Partido 1913991
+2026-05-27 21:51:49,473 - INFO -   -> 110/380 partidos | eventos: 167993
+2026-05-27 21:51:49,473 - INFO -   [111/380] Partido 1913992
+2026-05-27 21:52:09,382 - INFO -   [112/380] Partido 1913993
+2026-05-27 21:52:28,725 - INFO -   [113/380] Partido 1913994
+2026-05-27 21:52:44,910 - INFO -   [114/380] Partido 1913995
+2026-05-27 21:53:01,472 - INFO -   [115/380] Partido 1913996
+2026-05-27 21:53:19,557 - INFO -   [116/380] Partido 1913997
+2026-05-27 21:53:35,623 - INFO -   [117/380] Partido 1913998
+2026-05-27 21:53:52,876 - INFO -   [118/380] Partido 1913999
+2026-05-27 21:54:12,954 - INFO -   [119/380] Partido 1914000
+2026-05-27 21:54:31,755 - INFO -   [120/380] Partido 1914001
+2026-05-27 21:54:50,071 - INFO -   -> 120/380 partidos | eventos: 183740
+2026-05-27 21:54:50,072 - INFO -   [121/380] Partido 1914002
+2026-05-27 21:55:07,263 - INFO -   [122/380] Partido 1914003
+2026-05-27 21:55:25,361 - INFO -   [123/380] Partido 1914004
+2026-05-27 21:55:44,702 - INFO -   [124/380] Partido 1914005
+2026-05-27 21:56:05,394 - INFO -   [125/380] Partido 1914006
+2026-05-27 21:56:26,312 - INFO -   [126/380] Partido 1914007
+2026-05-27 21:56:47,217 - INFO -   [127/380] Partido 1914008
+2026-05-27 21:57:06,797 - INFO -   [128/380] Partido 1914009
+2026-05-27 21:57:27,963 - INFO -   [129/380] Partido 1914010
+2026-05-27 21:57:48,584 - INFO -   [130/380] Partido 1914011
+2026-05-27 21:58:06,871 - INFO -   -> 130/380 partidos | eventos: 198925
+2026-05-27 21:58:06,871 - INFO -   [131/380] Partido 1914012
+2026-05-27 21:58:25,384 - INFO -   [132/380] Partido 1914013
+2026-05-27 21:58:42,224 - INFO -   [133/380] Partido 1914014
+2026-05-27 21:58:58,765 - INFO -   [134/380] Partido 1914015
+2026-05-27 21:59:15,615 - INFO -   [135/380] Partido 1914016
+2026-05-27 21:59:33,270 - INFO -   [136/380] Partido 1914017
+2026-05-27 21:59:53,171 - INFO -   [137/380] Partido 1914018
+2026-05-27 22:00:11,195 - INFO -   [138/380] Partido 1914019
+2026-05-27 22:00:30,436 - INFO -   [139/380] Partido 1914020
+2026-05-27 22:00:48,290 - INFO -   [140/380] Partido 1914021
+2026-05-27 22:01:05,760 - INFO -   -> 140/380 partidos | eventos: 214172
+2026-05-27 22:01:05,760 - INFO -   [141/380] Partido 1914022
+2026-05-27 22:01:25,265 - INFO -   [142/380] Partido 1914023
+2026-05-27 22:01:41,508 - INFO -   [143/380] Partido 1914024
+2026-05-27 22:02:01,838 - INFO -   [144/380] Partido 1914025
+2026-05-27 22:02:21,925 - INFO -   [145/380] Partido 1914026
+2026-05-27 22:02:40,825 - INFO -   [146/380] Partido 1914027
+2026-05-27 22:02:59,055 - INFO -   [147/380] Partido 1914028
+2026-05-27 22:03:15,010 - INFO -   [148/380] Partido 1914029
+2026-05-27 22:03:35,532 - INFO -   [149/380] Partido 1914030
+2026-05-27 22:03:51,536 - INFO -   [150/380] Partido 1914031
