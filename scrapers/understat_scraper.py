@@ -43,7 +43,13 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # OUTPUT_DIR legacy. Las rutas reales se construyen via utils.data_paths.
 OUTPUT_DIR = PROJECT_ROOT / "data" / "raw" / "understat"
 
-from utils.data_paths import save_clean_csv  # noqa: E402
+from utils.data_paths import save_clean_csv, raw_dir  # noqa: E402
+
+
+def _save_json(data, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2, default=str)
 
 
 def _parse_understat_date(date_str: str) -> "date | None":
@@ -261,16 +267,32 @@ def transform_shots(df_shots: pd.DataFrame, df_matches: pd.DataFrame) -> pd.Data
     ]
     return df[[c for c in cols if c in df.columns]]
 
-def extract_players(df_shots: pd.DataFrame) -> pd.DataFrame:
+def extract_players(
+    df_shots: pd.DataFrame,
+    *,
+    competition: str | None = None,
+    season: str | None = None,
+) -> pd.DataFrame:
     if df_shots.empty:
         return pd.DataFrame()
-    return (
-        df_shots[["understat_player_id", "player_name"]]
-        .drop_duplicates()
+    cols = ["understat_player_id", "player_name"]
+    if "understat_team" in df_shots.columns:
+        cols.append("understat_team")
+    df = (
+        df_shots[cols]
+        .drop_duplicates(subset=["understat_player_id"])
         .dropna(subset=["understat_player_id"])
         .sort_values("understat_player_id")
         .reset_index(drop=True)
     )
+    if "understat_team" in df.columns:
+        df = df.rename(columns={"understat_team": "team_name"})
+    if competition:
+        df["competition"] = competition
+    if season:
+        df["season"] = season
+    df["source"] = "understat"
+    return df
 
 def extract_teams(df_matches: pd.DataFrame) -> pd.DataFrame:
     if df_matches.empty:
@@ -335,6 +357,12 @@ async def scrape_understat(
                 print(f"  [!] Sin partidos para {competition_name} {season}. Saltando.")
                 continue
 
+            # ── Guardar raw JSON de partidos ──
+            _folder = f"{season}_{season + 1}"
+            _season_raw = raw_dir(competition_name, _folder, "understat")
+            _season_raw.mkdir(parents=True, exist_ok=True)
+            _save_json(matches, _season_raw / "matches.json")
+
             # Filtrar por fecha
             if from_date_obj:
                 original_count = len(matches)
@@ -352,6 +380,10 @@ async def scrape_understat(
 
                 try:
                     shots = await get_match_shots(session, mid)
+                    if shots:
+                        _match_raw = _season_raw / "matches" / str(mid)
+                        _match_raw.mkdir(parents=True, exist_ok=True)
+                        _save_json(shots, _match_raw / "shots.json")
                     for s in shots:
                         s["season"] = season
                     all_shots.extend(shots)
@@ -372,15 +404,20 @@ async def scrape_understat(
 
     df_matches = pd.DataFrame(all_matches)
     df_shots   = pd.DataFrame(all_shots)
-    
+
+    season_year   = seasons[0]
+    folder_season = f"{season_year}_{season_year + 1}"
+
     # Aplicar transformaciones
     df_shots_clean = transform_shots(df_shots, df_matches)
-    df_players     = extract_players(df_shots)
+    df_players     = extract_players(
+        df_shots,
+        competition=competition_name,
+        season=folder_season,
+    )
     df_teams       = extract_teams(df_matches)
 
     # Layout canónico: data/clean/<comp>/<season>/understat/<table>.csv
-    season_year   = seasons[0]
-    folder_season = f"{season_year}_{season_year + 1}"
 
     matches_path = save_clean_csv(competition_name, folder_season, "understat",
                                   "matches", df_matches)

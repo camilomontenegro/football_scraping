@@ -538,7 +538,11 @@ def scrape_sofascore(
         df_shots   = transform_shots(all_shots)
         df_events  = transform_events(all_events)
         df_teams   = extract_teams(matches)
-        df_players = extract_players(df_shots, df_events)
+        df_players = extract_players(
+            df_shots, df_events, df_teams,
+            competition=resolved_comp,
+            season=folder_season,
+        )
 
         # Cada CSV se escribe en data/clean/<comp>/<season>/sofascore/ con
         # nombres simples (la fuente ya está en la carpeta). Se omiten DataFrames
@@ -686,11 +690,28 @@ def extract_teams(matches: list[dict]) -> pd.DataFrame:
     return df
 
 
-def extract_players(shots_df: pd.DataFrame, events_df: pd.DataFrame) -> pd.DataFrame:
+def extract_players(
+    shots_df: pd.DataFrame,
+    events_df: pd.DataFrame,
+    teams_df: pd.DataFrame | None = None,
+    *,
+    competition: str | None = None,
+    season: str | None = None,
+) -> pd.DataFrame:
     """Extrae jugadores únicos de tiros y eventos -> columnas de dim_player.
 
-    Columnas: id_sofascore, canonical_name, team_id_ss
+    Columnas: id_sofascore, canonical_name, team_id_ss, team_name, competition, season, source
     """
+    team_names: dict = {}
+    if teams_df is not None and not teams_df.empty:
+        id_col = "id_sofascore" if "id_sofascore" in teams_df.columns else None
+        name_col = "canonical_name" if "canonical_name" in teams_df.columns else None
+        if id_col and name_col:
+            for _, t in teams_df.iterrows():
+                tid = t.get(id_col)
+                if tid is not None and str(tid).strip():
+                    team_names[int(tid)] = t.get(name_col)
+
     frames = []
     for df in (shots_df, events_df):
         if not df.empty and "player_id_ss" in df.columns:
@@ -700,16 +721,22 @@ def extract_players(shots_df: pd.DataFrame, events_df: pd.DataFrame) -> pd.DataF
                 cols.append("team_id_ss")
             frames.append(df[cols].rename(columns=renames))
     if not frames:
-        return pd.DataFrame(columns=["id_sofascore", "canonical_name"])
+        return pd.DataFrame(columns=[
+            "id_sofascore", "canonical_name", "team_id_ss", "team_name",
+            "competition", "season", "source",
+        ])
     combined = pd.concat(frames)
-    # Keep first occurrence (preserves team_id_ss from the first appearance)
-    return (
-        combined
-        .drop_duplicates(subset=["id_sofascore"])
-        .dropna(subset=["id_sofascore"])
-        .sort_values("id_sofascore")
-        .reset_index(drop=True)
-    )
+    combined = combined.drop_duplicates(subset=["id_sofascore"]).dropna(subset=["id_sofascore"])
+    if "team_id_ss" in combined.columns:
+        combined["team_name"] = combined["team_id_ss"].apply(
+            lambda x: team_names.get(int(x)) if pd.notna(x) else None
+        )
+    if competition:
+        combined["competition"] = competition
+    if season:
+        combined["season"] = season
+    combined["source"] = "sofascore"
+    return combined.sort_values("id_sofascore").reset_index(drop=True)
 
 
 # â”€â”€ HELPERS INTERNOS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

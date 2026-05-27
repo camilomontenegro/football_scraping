@@ -434,8 +434,13 @@ def available_sources_for_competition(
         available.append("statsbomb")
 
     ws = sources_map.get("whoscored", {})
-    if ws.get("tournament_id") is not None and _reference_has_source(competition, season, "whoscored"):
-        available.append("whoscored")
+    if (
+        ws.get("tournament_id") is not None
+        and _reference_has_source(competition, season, "whoscored")
+    ):
+        from scrapers.whoscored_scraper import whoscored_season_available
+        if whoscored_season_available(competition, season):
+            available.append("whoscored")
 
     return available
 
@@ -749,7 +754,10 @@ def run_pipeline(
 # ─────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Football Data Pipeline (unified)")
-    parser.add_argument("--scrape", action="store_true")
+    parser.add_argument("--scrape", action="store_true",
+                        help="Descargar datos (scraping) antes de cargar")
+    parser.add_argument("--load", action="store_true",
+                        help="Solo cargar CSVs a BD (sin scrape). Es el comportamiento por defecto.")
     parser.add_argument("--update", action="store_true")
     parser.add_argument("--competition", "-c", type=str, default=None)
     parser.add_argument("--source", "-s", default="all",
@@ -765,6 +773,9 @@ if __name__ == "__main__":
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--from-date", type=str, default=None)
     args = parser.parse_args()
+
+    if args.scrape and args.load:
+        parser.error("Usa --scrape o --load, no ambos a la vez.")
 
     if args.list:
         list_available_competitions()

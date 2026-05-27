@@ -399,29 +399,60 @@ def extract_teams(matches_df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def extract_players(events_df: pd.DataFrame) -> pd.DataFrame:
-    """Extrae jugadores unicos de los eventos -> columnas de dim_player.
-
-    Columnas: id_statsbomb, canonical_name
-    """
+def extract_players(
+    events_df: pd.DataFrame,
+    *,
+    competition: str | None = None,
+    season: str | None = None,
+) -> pd.DataFrame:
+    """Extrae jugadores unicos de los eventos -> columnas de dim_player."""
     if events_df.empty or "player_id_sb" not in events_df.columns:
-        return pd.DataFrame(columns=["id_statsbomb", "canonical_name"])
+        return pd.DataFrame(columns=[
+            "id_statsbomb", "canonical_name", "team_id_sb", "team_name",
+            "competition", "season", "source",
+        ])
+
+    cols = ["player_id_sb", "player_name"]
+    if "team_id_sb" in events_df.columns:
+        cols.append("team_id_sb")
+    if "team_name" in events_df.columns:
+        cols.append("team_name")
 
     df = (
-        events_df[["player_id_sb", "player_name"]]
+        events_df[cols]
         .rename(columns={"player_id_sb": "id_statsbomb", "player_name": "canonical_name"})
         .drop_duplicates(subset=["id_statsbomb"])
         .dropna(subset=["id_statsbomb"])
     )
 
     if df.empty:
-        return pd.DataFrame(columns=["id_statsbomb", "canonical_name"])
+        return pd.DataFrame(columns=[
+            "id_statsbomb", "canonical_name", "team_id_sb", "team_name",
+            "competition", "season", "source",
+        ])
 
-    return (
-        df
-        .sort_values("id_statsbomb")
-        .reset_index(drop=True)
-    )
+    if competition:
+        df["competition"] = competition
+    elif "competition" in events_df.columns:
+        comp_map = (
+            events_df.dropna(subset=["player_id_sb", "competition"])
+            .drop_duplicates(subset=["player_id_sb"])
+            .set_index("player_id_sb")["competition"]
+        )
+        df["competition"] = df["id_statsbomb"].map(comp_map)
+
+    if season:
+        df["season"] = season
+    elif "season" in events_df.columns:
+        season_map = (
+            events_df.dropna(subset=["player_id_sb", "season"])
+            .drop_duplicates(subset=["player_id_sb"])
+            .set_index("player_id_sb")["season"]
+        )
+        df["season"] = df["id_statsbomb"].map(season_map)
+
+    df["source"] = "statsbomb"
+    return df.sort_values("id_statsbomb").reset_index(drop=True)
 
 
 # â”€â”€ MAIN â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -463,7 +494,11 @@ def main():
         df_matches = transform_matches(matches_df)
         df_events  = transform_events(all_events)
         df_teams   = extract_teams(matches_df)
-        df_players = extract_players(df_events)
+        df_players = extract_players(
+            df_events,
+            competition=args.competition,
+            season=season_lbl.replace("_", "/"),
+        )
 
         save_clean_csv(args.competition, season_lbl, "statsbomb", "matches", df_matches)
         save_clean_csv(args.competition, season_lbl, "statsbomb", "events",  df_events)

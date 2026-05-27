@@ -5,6 +5,7 @@
 -- ── Limpieza previa (idempotente) ─────────────────────────
 -- DROP en orden inverso de dependencias por las FKs.
 -- CASCADE elimina índices y constraints asociados.
+DROP TABLE IF EXISTS player_scrape_provenance CASCADE;
 DROP TABLE IF EXISTS fact_injuries   CASCADE;
 DROP TABLE IF EXISTS fact_events     CASCADE;
 DROP TABLE IF EXISTS fact_shots      CASCADE;
@@ -101,7 +102,9 @@ CREATE TABLE player_review (
     created_at TIMESTAMP DEFAULT NOW(),
     reviewed_at TIMESTAMP,
     source_team_id VARCHAR(50),
-    source_team_name VARCHAR(150)
+    source_team_name VARCHAR(150),
+    competition VARCHAR(100),
+    season VARCHAR(20)
 );
 
 CREATE INDEX IF NOT EXISTS idx_player_review_source ON player_review (source_system, source_id);
@@ -285,6 +288,30 @@ CREATE UNIQUE INDEX ux_injuries_unique ON fact_injuries (
 );
 
 CREATE INDEX idx_injuries_player ON fact_injuries (player_id);
+
+
+-- ── player_scrape_provenance ──────────────────────────────
+-- Trazabilidad: de qué comp/temporada/equipo salió cada ID de jugador
+-- en cada fuente. Clave para desambiguar homónimos ("Pedro", "Koke"…).
+CREATE TABLE player_scrape_provenance (
+    id               SERIAL PRIMARY KEY,
+    source_system    VARCHAR(50)  NOT NULL,
+    source_player_id VARCHAR(50)  NOT NULL,
+    scraped_name     VARCHAR(150) NOT NULL,
+    competition      VARCHAR(100) NOT NULL DEFAULT '',
+    season           VARCHAR(20)  NOT NULL DEFAULT '',
+    team_name        VARCHAR(150),
+    team_id          VARCHAR(50)  NOT NULL DEFAULT '',
+    canonical_id     INTEGER REFERENCES dim_player (canonical_id),
+    scraped_at       TIMESTAMP DEFAULT NOW(),
+    UNIQUE (source_system, source_player_id, competition, season, team_id)
+);
+
+CREATE INDEX idx_player_provenance_canonical
+    ON player_scrape_provenance (canonical_id);
+
+CREATE INDEX idx_player_provenance_name
+    ON player_scrape_provenance (LOWER(scraped_name));
 
 
 -- ══════════════════════════════════════════════════════════
