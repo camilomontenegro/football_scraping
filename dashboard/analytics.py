@@ -3,10 +3,12 @@ dashboard/analytics.py
 ======================
 Read-only DB queries for the Shot Intelligence tab.
 
-All queries filter data_source = 'understat'. The three sources in fact_shots
-use incompatible coordinate systems (StatsBomb 0-120x0-80 yards, Understat
-0-105x0-68 meters, SofaScore 0-100x0-100 percent). Understat is the only
-loaded source and its 105x68m system matches mplsoccer's custom pitch exactly.
+Coordinate normalisation (all sources converted to 0-105 m × 0-68 m):
+  - Understat raw (0-1):   x * 105,  y * 68   (detected when x <= 1.1)
+  - Understat meters:      as-is
+  - SofaScore (0-100 %):  x * 1.05, y * 0.68
+Normalisation is applied inline in SQL so it works regardless of whether
+the database was populated with raw or pre-normalised values.
 """
 from __future__ import annotations
 
@@ -52,26 +54,44 @@ def get_heatmap_data(
         team_filter = "AND fs.team_id = :tid"
         params["tid"] = team_id
     sql = f"""
+        WITH _norm AS (
+            SELECT
+                CASE fs.data_source
+                    WHEN 'understat' THEN
+                        CASE WHEN fs.x <= 1.1 THEN fs.x * 105 ELSE fs.x END
+                    WHEN 'sofascore' THEN (100 - fs.x) * 1.05
+                    ELSE fs.x
+                END AS x_m,
+                CASE fs.data_source
+                    WHEN 'understat' THEN
+                        CASE WHEN fs.y <= 1.1 THEN fs.y * 68 ELSE fs.y END
+                    WHEN 'sofascore' THEN fs.y * 0.68
+                    ELSE fs.y
+                END AS y_m,
+                fs.result,
+                fs.xg
+            FROM fact_shots fs
+            JOIN dim_match m ON fs.match_id = m.match_id
+            {comp_join}
+            WHERE m.season = :season
+              AND fs.data_source IN ('understat', 'sofascore')
+              AND fs.x IS NOT NULL
+              AND fs.y IS NOT NULL
+              {comp_filter}
+              {team_filter}
+        )
         SELECT
-            FLOOR(fs.x / 10) * 10            AS x_band,
-            FLOOR(fs.y / 10) * 10            AS y_band,
+            FLOOR(x_m / 10) * 10             AS x_band,
+            FLOOR(y_m / 10) * 10             AS y_band,
             COUNT(*)                          AS shots,
-            SUM(CASE WHEN fs.result = 'Goal' THEN 1 ELSE 0 END) AS goals,
-            ROUND(AVG(fs.xg)::numeric, 3)    AS avg_xg,
+            SUM(CASE WHEN result = 'Goal' THEN 1 ELSE 0 END) AS goals,
+            ROUND(AVG(xg)::numeric, 3)       AS avg_xg,
             ROUND(
-                SUM(CASE WHEN fs.result = 'Goal' THEN 1 ELSE 0 END)::numeric
+                SUM(CASE WHEN result = 'Goal' THEN 1 ELSE 0 END)::numeric
                 / NULLIF(COUNT(*), 0),
                 3
             )                                AS conversion_rate
-        FROM fact_shots fs
-        JOIN dim_match m ON fs.match_id = m.match_id
-        {comp_join}
-        WHERE m.season = :season
-          AND fs.data_source = 'understat'
-          AND fs.x IS NOT NULL
-          AND fs.y IS NOT NULL
-          {comp_filter}
-          {team_filter}
+        FROM _norm
         GROUP BY x_band, y_band
         HAVING COUNT(*) >= 10
         ORDER BY avg_xg DESC
@@ -115,7 +135,7 @@ def get_player_finishing(
         JOIN dim_match m  ON fs.match_id  = m.match_id
         {comp_join}
         WHERE m.season = :season
-          AND fs.data_source = 'understat'
+          AND fs.data_source IN ('understat', 'sofascore')
           {comp_filter}
           {team_filter}
         GROUP BY p.canonical_name
