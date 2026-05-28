@@ -373,6 +373,7 @@ def render() -> None:
     if run_clicked:
         kwargs = {
             "scrape": full_scrape,
+            "load": False,
             "competition": competition,
             "source": source,
             "season": season,

@@ -63,44 +63,7 @@ Selecciona una opción:
 ============================================================
   Accion      : Descarga completa
   Competicion : Champions League
-  Temporada   : 2022/2023
-  Fuente(s)   : all
-  Filtro      : todos los partidos
-============================================================
-
-  S = ejecutar     0 = volver atrás     Q = salir
-¿Lanzar el pipeline? [S/0/q]: 
-¿Cómo filtrar los partidos descargados? (default: Todos los partidos)
-  1) Todos los partidos
-  2) Sólo de un equipo
-  3) Desde una fecha
-  0) volver al paso anterior
-  q) salir del wizard
-Selecciona una opción: 
-[i] Understat sólo cubre ligas domésticas — se ha eliminado de la lista de fuentes para esta competición.
-
-Selecciona la fuente(s) de datos a usar: (default: all)
-  1) all
-  2) transfermarkt
-  3) sofascore
-  4) statsbomb
-  5) whoscored
-  0) volver al paso anterior
-  q) salir del wizard
-Selecciona una opción: 
-¿Cómo filtrar los partidos descargados? (default: Todos los partidos)
-  1) Todos los partidos
-  2) Sólo de un equipo
-  3) Desde una fecha
-  0) volver al paso anterior
-  q) salir del wizard
-Selecciona una opción: 
-============================================================
-  RESUMEN DE LA OPERACION
-============================================================
-  Accion      : Descarga completa
-  Competicion : Champions League
-  Temporada   : 2022/2023
+  Temporada   : 2021/2022
   Fuente(s)   : whoscored
   Filtro      : todos los partidos
 ============================================================
@@ -108,18 +71,526 @@ Selecciona una opción:
   S = ejecutar     0 = volver atrás     Q = salir
 ¿Lanzar el pipeline? [S/0/q]: 
 === INICIANDO EL PROCESO ===
-2026-05-27 21:17:05,875 - INFO - =================================================================
-2026-05-27 21:17:05,876 - INFO -    FOOTBALL DATA PIPELINE
-2026-05-27 21:17:05,876 - INFO - =================================================================
-2026-05-27 21:17:05,876 - INFO -    Competición: Champions League
-2026-05-27 21:17:05,876 - INFO -    Temporada: 2022/2023
-2026-05-27 21:17:05,876 - INFO -    Fuente:    whoscored
-2026-05-27 21:17:05,876 - INFO - ── FASE 1: SCRAPING ─────────────────────────────────
-2026-05-27 21:17:05,877 - INFO - [INFO] full_refresh=True — se ignorará la caché local.
-2026-05-27 21:17:05,877 - INFO - [START] Scraping WhoScored...
-2026-05-27 21:17:05,877 - INFO - WhoScored [Champions League]: descargando SOLO la temporada 2022/23
-2026-05-27 21:17:05,877 - INFO -   Champions League 2022/23: 9 stages (fase de grupos + eliminatorias)
-2026-05-27 21:17:05,877 - INFO - ====== WebDriver manager ======
-2026-05-27 21:17:06,278 - INFO - Driver [C:\Users\Ivan\.wdm\drivers\chromedriver\win64\148.0.7778.178\chromedriver-win64/chromedriver.exe] found in cache by browser version
-2026-05-27 21:17:07,542 - INFO - Iniciando navegador...
-2026-05-27 21:17:12,248 - WARNING - Retrying (Retry(total=2, connect=None, read=None, redirect=None, status=None)) after connection broken by 'ConnectionResetError(10054, 'Se ha forzado la interrupción de una conexión existente por el host remoto', None, 10054, None)': /session/e46250a52edf84685b95d0a75e49a8ac
+
+=== PROCESO FINALIZADO EXITOSAMENTE ===
+=======================================================
+2026-05-28 00:23:11,094 - INFO -    FOOTBALL DATA PIPELINE
+2026-05-28 00:23:11,095 - INFO - =================================================================
+2026-05-28 00:23:11,095 - INFO -    Competición: Champions League
+2026-05-28 00:23:11,095 - INFO -    Temporada: 2021/2022
+2026-05-28 00:23:11,095 - INFO -    Fuente:    whoscored
+2026-05-28 00:23:11,095 - INFO - ── FASE 1: SCRAPING ─────────────────────────────────
+2026-05-28 00:23:11,096 - INFO - [INFO] full_refresh=True — se ignorará la caché local.
+2026-05-28 00:23:11,096 - INFO - [START] Scraping WhoScored...
+2026-05-28 00:23:11,096 - INFO - WhoScored [Champions League]: descargando SOLO la temporada 2021/22
+2026-05-28 00:23:11,096 - INFO -   Champions League 2021/22: 9 stages (fase de grupos + eliminatorias)
+2026-05-28 00:23:11,096 - INFO - ====== WebDriver manager ======
+2026-05-28 00:23:11,841 - INFO - Get LATEST chromedriver version for google-chrome
+2026-05-28 00:23:12,490 - INFO - Get LATEST chromedriver version for google-chrome
+2026-05-28 00:23:13,124 - INFO - WebDriver version 148.0.7778.178 selected
+2026-05-28 00:23:13,129 - INFO - Modern chrome version https://storage.googleapis.com/chrome-for-testing-public/148.0.7778.178/win64/chromedriver-win64.zip
+2026-05-28 00:23:13,129 - INFO - About to download new driver from https://storage.googleapis.com/chrome-for-testing-public/148.0.7778.178/win64/chromedriver-win64.zip
+2026-05-28 00:23:13,443 - INFO - Driver downloading response is 200
+2026-05-28 00:23:13,834 - INFO - Driver has been saved in cache [C:\Users\Ivan\.wdm\drivers\chromedriver\win64\148.0.7778.178]
+2026-05-28 00:23:15,075 - INFO - Iniciando navegador...
+2026-05-28 00:23:22,546 - INFO -   Cookies aceptadas
+2026-05-28 00:23:24,547 - INFO - 
+[DISCOVERY] 2021/22 (stage 20088)
+2026-05-28 00:23:24,547 - INFO -   Obteniendo partidos (2021/22 (stage 20088))...
+2026-05-28 00:23:47,620 - INFO -   Datepicker -> año mas antiguo: 2021
+2026-05-28 00:23:50,386 - INFO -   Datepicker -> primer mes con partidos: sept
+2026-05-28 00:23:50,386 - INFO -   Posicionado al inicio de temporada via datepicker
+2026-05-28 00:23:53,986 - INFO -   - Inicio ('sep 2021'): 4 partidos visibles (acumulado=4)
+2026-05-28 00:23:57,134 - INFO -   - Sem +1 ('oct 2021'): 2 nuevos (acumulado=6)
+2026-05-28 00:23:59,221 - INFO -   - Sem +2 ('nov 2021'): 4 nuevos (acumulado=10)
+2026-05-28 00:24:02,676 - INFO -   - Sem +3 ('dic 2021'): 2 nuevos (acumulado=12)
+2026-05-28 00:24:05,389 - INFO -   - Sem +4: rango sin cambios (streak=1/3)
+2026-05-28 00:24:08,291 - INFO -   - Sem +5: rango sin cambios (streak=2/3)
+2026-05-28 00:24:10,739 - INFO -   - Sem +6: rango sin cambios (streak=3/3)
+2026-05-28 00:24:10,739 - INFO -   - 3 intentos sin avanzar -> fin de temporada
+2026-05-28 00:24:10,739 - INFO -   TOTAL 12 partidos en 2021/22 (stage 20088)
+2026-05-28 00:24:10,739 - INFO -   2021/22 (stage 20088): 12 partidos (12 nuevos, total acumulado=12)
+2026-05-28 00:24:10,740 - INFO - 
+[DISCOVERY] 2021/22 (stage 20089)
+2026-05-28 00:24:10,740 - INFO -   Obteniendo partidos (2021/22 (stage 20089))...
+2026-05-28 00:24:33,733 - INFO -   Datepicker -> año mas antiguo: 2021
+2026-05-28 00:24:36,491 - INFO -   Datepicker -> primer mes con partidos: sept
+2026-05-28 00:24:36,491 - INFO -   Posicionado al inicio de temporada via datepicker
+2026-05-28 00:24:39,339 - INFO -   - Inicio ('sep 2021'): 4 partidos visibles (acumulado=4)
+2026-05-28 00:24:41,606 - INFO -   - Sem +1 ('oct 2021'): 2 nuevos (acumulado=6)
+2026-05-28 00:24:44,058 - INFO -   - Sem +2 ('nov 2021'): 4 nuevos (acumulado=10)
+2026-05-28 00:24:46,585 - INFO -   - Sem +3 ('dic 2021'): 2 nuevos (acumulado=12)
+2026-05-28 00:24:48,789 - INFO -   - Sem +4: rango sin cambios (streak=1/3)
+2026-05-28 00:24:50,968 - INFO -   - Sem +5: rango sin cambios (streak=2/3)
+2026-05-28 00:24:54,023 - INFO -   - Sem +6: rango sin cambios (streak=3/3)
+2026-05-28 00:24:54,023 - INFO -   - 3 intentos sin avanzar -> fin de temporada
+2026-05-28 00:24:54,023 - INFO -   TOTAL 12 partidos en 2021/22 (stage 20089)
+2026-05-28 00:24:54,023 - INFO -   2021/22 (stage 20089): 12 partidos (12 nuevos, total acumulado=24)
+2026-05-28 00:24:54,023 - INFO - 
+[DISCOVERY] 2021/22 (stage 20090)
+2026-05-28 00:24:54,024 - INFO -   Obteniendo partidos (2021/22 (stage 20090))...
+2026-05-28 00:25:16,989 - INFO -   Datepicker -> año mas antiguo: 2021
+2026-05-28 00:25:19,746 - INFO -   Datepicker -> primer mes con partidos: sept
+2026-05-28 00:25:19,746 - INFO -   Posicionado al inicio de temporada via datepicker
+2026-05-28 00:25:22,577 - INFO -   - Inicio ('sep 2021'): 4 partidos visibles (acumulado=4)
+2026-05-28 00:25:25,031 - INFO -   - Sem +1 ('oct 2021'): 2 nuevos (acumulado=6)
+2026-05-28 00:25:27,730 - INFO -   - Sem +2 ('nov 2021'): 4 nuevos (acumulado=10)
+2026-05-28 00:25:31,229 - INFO -   - Sem +3 ('dic 2021'): 2 nuevos (acumulado=12)
+2026-05-28 00:25:33,959 - INFO -   - Sem +4: rango sin cambios (streak=1/3)
+2026-05-28 00:25:36,813 - INFO -   - Sem +5: rango sin cambios (streak=2/3)
+2026-05-28 00:25:39,491 - INFO -   - Sem +6: rango sin cambios (streak=3/3)
+2026-05-28 00:25:39,491 - INFO -   - 3 intentos sin avanzar -> fin de temporada
+2026-05-28 00:25:39,492 - INFO -   TOTAL 12 partidos en 2021/22 (stage 20090)
+2026-05-28 00:25:39,492 - INFO -   2021/22 (stage 20090): 12 partidos (12 nuevos, total acumulado=36)
+2026-05-28 00:25:39,492 - INFO - 
+[DISCOVERY] 2021/22 (stage 20091)
+2026-05-28 00:25:39,492 - INFO -   Obteniendo partidos (2021/22 (stage 20091))...
+2026-05-28 00:26:02,510 - INFO -   Datepicker -> año mas antiguo: 2021
+2026-05-28 00:26:05,269 - INFO -   Datepicker -> primer mes con partidos: sept
+2026-05-28 00:26:05,269 - INFO -   Posicionado al inicio de temporada via datepicker
+2026-05-28 00:26:07,950 - INFO -   - Inicio ('sep 2021'): 4 partidos visibles (acumulado=4)
+2026-05-28 00:26:10,190 - INFO -   - Sem +1 ('oct 2021'): 2 nuevos (acumulado=6)
+2026-05-28 00:26:12,291 - INFO -   - Sem +2 ('nov 2021'): 4 nuevos (acumulado=10)
+2026-05-28 00:26:15,409 - INFO -   - Sem +3 ('dic 2021'): 2 nuevos (acumulado=12)
+2026-05-28 00:26:18,044 - INFO -   - Sem +4: rango sin cambios (streak=1/3)
+2026-05-28 00:26:21,503 - INFO -   - Sem +5: rango sin cambios (streak=2/3)
+2026-05-28 00:26:23,777 - INFO -   - Sem +6: rango sin cambios (streak=3/3)
+2026-05-28 00:26:23,777 - INFO -   - 3 intentos sin avanzar -> fin de temporada
+2026-05-28 00:26:23,777 - INFO -   TOTAL 12 partidos en 2021/22 (stage 20091)
+2026-05-28 00:26:23,778 - INFO -   2021/22 (stage 20091): 12 partidos (12 nuevos, total acumulado=48)
+2026-05-28 00:26:23,778 - INFO - 
+[DISCOVERY] 2021/22 (stage 20092)
+2026-05-28 00:26:23,778 - INFO -   Obteniendo partidos (2021/22 (stage 20092))...
+2026-05-28 00:26:46,763 - INFO -   Datepicker -> año mas antiguo: 2021
+2026-05-28 00:26:49,521 - INFO -   Datepicker -> primer mes con partidos: sept
+2026-05-28 00:26:49,521 - INFO -   Posicionado al inicio de temporada via datepicker
+2026-05-28 00:26:53,374 - INFO -   - Inicio ('sep 2021'): 4 partidos visibles (acumulado=4)
+2026-05-28 00:26:55,495 - INFO -   - Sem +1 ('oct 2021'): 2 nuevos (acumulado=6)
+2026-05-28 00:26:57,989 - INFO -   - Sem +2 ('nov 2021'): 4 nuevos (acumulado=10)
+2026-05-28 00:27:00,415 - INFO -   - Sem +3 ('dic 2021'): 2 nuevos (acumulado=12)
+2026-05-28 00:27:03,415 - INFO -   - Sem +4: rango sin cambios (streak=1/3)
+2026-05-28 00:27:06,639 - INFO -   - Sem +5: rango sin cambios (streak=2/3)
+2026-05-28 00:27:09,427 - INFO -   - Sem +6: rango sin cambios (streak=3/3)
+2026-05-28 00:27:09,428 - INFO -   - 3 intentos sin avanzar -> fin de temporada
+2026-05-28 00:27:09,428 - INFO -   TOTAL 12 partidos en 2021/22 (stage 20092)
+2026-05-28 00:27:09,428 - INFO -   2021/22 (stage 20092): 12 partidos (12 nuevos, total acumulado=60)
+2026-05-28 00:27:09,428 - INFO - 
+[DISCOVERY] 2021/22 (stage 20093)
+2026-05-28 00:27:09,428 - INFO -   Obteniendo partidos (2021/22 (stage 20093))...
+2026-05-28 00:27:32,381 - INFO -   Datepicker -> año mas antiguo: 2021
+2026-05-28 00:27:35,141 - INFO -   Datepicker -> primer mes con partidos: sept
+2026-05-28 00:27:35,141 - INFO -   Posicionado al inicio de temporada via datepicker
+2026-05-28 00:27:38,924 - INFO -   - Inicio ('sep 2021'): 4 partidos visibles (acumulado=4)
+2026-05-28 00:27:41,273 - INFO -   - Sem +1 ('oct 2021'): 2 nuevos (acumulado=6)
+2026-05-28 00:27:43,377 - INFO -   - Sem +2 ('nov 2021'): 4 nuevos (acumulado=10)
+2026-05-28 00:27:45,603 - INFO -   - Sem +3 ('dic 2021'): 2 nuevos (acumulado=12)
+2026-05-28 00:27:47,987 - INFO -   - Sem +4: rango sin cambios (streak=1/3)
+2026-05-28 00:27:51,486 - INFO -   - Sem +5: rango sin cambios (streak=2/3)
+2026-05-28 00:27:54,191 - INFO -   - Sem +6: rango sin cambios (streak=3/3)
+2026-05-28 00:27:54,191 - INFO -   - 3 intentos sin avanzar -> fin de temporada
+2026-05-28 00:27:54,191 - INFO -   TOTAL 12 partidos en 2021/22 (stage 20093)
+2026-05-28 00:27:54,192 - INFO -   2021/22 (stage 20093): 12 partidos (12 nuevos, total acumulado=72)
+2026-05-28 00:27:54,192 - INFO - 
+[DISCOVERY] 2021/22 (stage 20094)
+2026-05-28 00:27:54,192 - INFO -   Obteniendo partidos (2021/22 (stage 20094))...
+2026-05-28 00:28:17,181 - INFO -   Datepicker -> año mas antiguo: 2021
+2026-05-28 00:28:19,938 - INFO -   Datepicker -> primer mes con partidos: sept
+2026-05-28 00:28:19,938 - INFO -   Posicionado al inicio de temporada via datepicker
+2026-05-28 00:28:22,900 - INFO -   - Inicio ('sep 2021'): 4 partidos visibles (acumulado=4)
+2026-05-28 00:28:25,236 - INFO -   - Sem +1 ('oct 2021'): 2 nuevos (acumulado=6)
+2026-05-28 00:28:28,117 - INFO -   - Sem +2 ('nov 2021'): 4 nuevos (acumulado=10)
+2026-05-28 00:28:30,267 - INFO -   - Sem +3 ('dic 2021'): 2 nuevos (acumulado=12)
+2026-05-28 00:28:32,957 - INFO -   - Sem +4: rango sin cambios (streak=1/3)
+2026-05-28 00:28:35,961 - INFO -   - Sem +5: rango sin cambios (streak=2/3)
+2026-05-28 00:28:38,918 - INFO -   - Sem +6: rango sin cambios (streak=3/3)
+2026-05-28 00:28:38,918 - INFO -   - 3 intentos sin avanzar -> fin de temporada
+2026-05-28 00:28:38,918 - INFO -   TOTAL 12 partidos en 2021/22 (stage 20094)
+2026-05-28 00:28:38,918 - INFO -   2021/22 (stage 20094): 12 partidos (12 nuevos, total acumulado=84)
+2026-05-28 00:28:38,919 - INFO - 
+[DISCOVERY] 2021/22 (stage 20095)
+2026-05-28 00:28:38,919 - INFO -   Obteniendo partidos (2021/22 (stage 20095))...
+2026-05-28 00:29:01,937 - INFO -   Datepicker -> año mas antiguo: 2021
+2026-05-28 00:29:04,693 - INFO -   Datepicker -> primer mes con partidos: sept
+2026-05-28 00:29:04,693 - INFO -   Posicionado al inicio de temporada via datepicker
+2026-05-28 00:29:08,586 - INFO -   - Inicio ('sep 2021'): 4 partidos visibles (acumulado=4)
+2026-05-28 00:29:12,137 - INFO -   - Sem +1 ('oct 2021'): 2 nuevos (acumulado=6)
+2026-05-28 00:29:14,290 - INFO -   - Sem +2 ('nov 2021'): 4 nuevos (acumulado=10)
+2026-05-28 00:29:17,509 - INFO -   - Sem +3 ('dic 2021'): 2 nuevos (acumulado=12)
+2026-05-28 00:29:19,733 - INFO -   - Sem +4: rango sin cambios (streak=1/3)
+2026-05-28 00:29:22,625 - INFO -   - Sem +5: rango sin cambios (streak=2/3)
+2026-05-28 00:29:26,056 - INFO -   - Sem +6: rango sin cambios (streak=3/3)
+2026-05-28 00:29:26,056 - INFO -   - 3 intentos sin avanzar -> fin de temporada
+2026-05-28 00:29:26,056 - INFO -   TOTAL 12 partidos en 2021/22 (stage 20095)
+2026-05-28 00:29:26,056 - INFO -   2021/22 (stage 20095): 12 partidos (12 nuevos, total acumulado=96)
+2026-05-28 00:29:26,056 - INFO - 
+[DISCOVERY] 2021/22 (stage 20265)
+2026-05-28 00:29:26,056 - INFO -   Obteniendo partidos (2021/22 (stage 20265))...
+2026-05-28 00:29:49,048 - INFO -   Datepicker -> año mas antiguo: 2022
+2026-05-28 00:29:51,807 - INFO -   Datepicker -> primer mes con partidos: feb
+2026-05-28 00:29:51,807 - INFO -   Posicionado al inicio de temporada via datepicker
+2026-05-28 00:29:55,228 - INFO -   - Inicio ('feb 2022'): 8 partidos visibles (acumulado=8)
+2026-05-28 00:29:58,545 - INFO -   - Sem +1 ('mar 2022'): 8 nuevos (acumulado=16)
+2026-05-28 00:30:01,742 - INFO -   - Sem +2 ('abr 2022'): 10 nuevos (acumulado=26)
+2026-05-28 00:30:04,246 - INFO -   - Sem +3 ('may 2022'): 3 nuevos (acumulado=29)
+2026-05-28 00:30:07,767 - INFO -   - Sem +4: rango sin cambios (streak=1/3)
+2026-05-28 00:30:09,992 - INFO -   - Sem +5: rango sin cambios (streak=2/3)
+2026-05-28 00:30:13,501 - INFO -   - Sem +6: rango sin cambios (streak=3/3)
+2026-05-28 00:30:13,501 - INFO -   - 3 intentos sin avanzar -> fin de temporada
+2026-05-28 00:30:13,501 - INFO -   TOTAL 29 partidos en 2021/22 (stage 20265)
+2026-05-28 00:30:13,501 - INFO -   2021/22 (stage 20265): 29 partidos (29 nuevos, total acumulado=125)
+2026-05-28 00:30:13,501 - INFO - 
+[DISCOVERY] Total único: 125 partidos en 9 stage(s)
+2026-05-28 00:30:13,503 - INFO -   [1/125] Partido 1592101
+2026-05-28 00:30:30,160 - INFO -   [2/125] Partido 1592102
+2026-05-28 00:30:50,221 - INFO -   [3/125] Partido 1592103
+2026-05-28 00:31:11,540 - INFO -   [4/125] Partido 1592104
+2026-05-28 00:31:32,916 - INFO -   [5/125] Partido 1592105
+2026-05-28 00:31:48,449 - INFO -   [6/125] Partido 1592106
+2026-05-28 00:32:04,190 - INFO -   [7/125] Partido 1592107
+2026-05-28 00:32:24,180 - INFO -   [8/125] Partido 1592108
+2026-05-28 00:32:40,127 - INFO -   [9/125] Partido 1592109
+2026-05-28 00:32:58,972 - INFO -   [10/125] Partido 1592110
+2026-05-28 00:33:16,234 - INFO -   -> 10/125 partidos | eventos: 16257
+2026-05-28 00:33:16,234 - INFO -   [11/125] Partido 1592111
+2026-05-28 00:33:33,217 - INFO -   [12/125] Partido 1592112
+2026-05-28 00:33:52,221 - INFO -   [13/125] Partido 1592113
+2026-05-28 00:34:12,223 - INFO -   [14/125] Partido 1592114
+2026-05-28 00:34:30,295 - INFO -   [15/125] Partido 1592115
+2026-05-28 00:34:49,178 - INFO -   [16/125] Partido 1592116
+2026-05-28 00:35:09,796 - INFO -   [17/125] Partido 1592117
+2026-05-28 00:35:30,899 - INFO -   [18/125] Partido 1592118
+2026-05-28 00:35:51,760 - INFO -   [19/125] Partido 1592119
+2026-05-28 00:36:12,924 - INFO -   [20/125] Partido 1592120
+2026-05-28 00:36:30,851 - INFO -   -> 20/125 partidos | eventos: 31870
+2026-05-28 00:36:30,852 - INFO -   [21/125] Partido 1592121
+2026-05-28 00:36:51,677 - INFO -   [22/125] Partido 1592122
+2026-05-28 00:37:08,835 - INFO -   [23/125] Partido 1592123
+2026-05-28 00:37:26,987 - INFO -   [24/125] Partido 1592124
+2026-05-28 00:37:45,688 - INFO -   [25/125] Partido 1592185
+2026-05-28 00:38:03,818 - INFO -   [26/125] Partido 1592186
+2026-05-28 00:38:23,423 - INFO -   [27/125] Partido 1592187
+2026-05-28 00:38:43,059 - INFO -   [28/125] Partido 1592188
+2026-05-28 00:38:59,131 - INFO -   [29/125] Partido 1592189
+2026-05-28 00:39:18,965 - INFO -   [30/125] Partido 1592190
+2026-05-28 00:39:36,512 - INFO -   -> 30/125 partidos | eventos: 47889
+2026-05-28 00:39:36,512 - INFO -   [31/125] Partido 1592191
+2026-05-28 00:39:52,383 - INFO -   [32/125] Partido 1592192
+2026-05-28 00:40:08,451 - INFO -   [33/125] Partido 1592193
+2026-05-28 00:40:26,515 - INFO -   [34/125] Partido 1592194
+2026-05-28 00:40:44,568 - INFO -   [35/125] Partido 1592195
+2026-05-28 00:41:04,438 - INFO -   [36/125] Partido 1592196
+2026-05-28 00:41:22,107 - INFO -   [37/125] Partido 1592137
+2026-05-28 00:41:42,289 - INFO -   [38/125] Partido 1592138
+2026-05-28 00:42:01,401 - INFO -   [39/125] Partido 1592139
+2026-05-28 00:42:22,517 - INFO -   [40/125] Partido 1592140
+2026-05-28 00:42:39,593 - INFO -   -> 40/125 partidos | eventos: 63996
+2026-05-28 00:42:39,593 - INFO -   [41/125] Partido 1592141
+2026-05-28 00:42:56,194 - INFO -   [42/125] Partido 1592142
+2026-05-28 00:43:14,615 - INFO -   [43/125] Partido 1592143
+2026-05-28 00:43:33,703 - INFO -   [44/125] Partido 1592144
+2026-05-28 00:43:51,148 - INFO -   [45/125] Partido 1592145
+2026-05-28 00:44:08,562 - INFO -   [46/125] Partido 1592146
+2026-05-28 00:44:27,781 - INFO -   [47/125] Partido 1592147
+2026-05-28 00:44:46,742 - INFO -   [48/125] Partido 1592148
+2026-05-28 00:45:04,812 - INFO -   [49/125] Partido 1592125
+2026-05-28 00:45:21,917 - INFO -   [50/125] Partido 1592126
+2026-05-28 00:45:41,570 - INFO -   -> 50/125 partidos | eventos: 80187
+2026-05-28 00:45:41,571 - INFO -   [51/125] Partido 1592127
+2026-05-28 00:46:00,829 - INFO -   [52/125] Partido 1592128
+2026-05-28 00:46:21,899 - INFO -   [53/125] Partido 1592129
+2026-05-28 00:46:37,810 - INFO -   [54/125] Partido 1592130
+2026-05-28 00:46:58,839 - INFO -   [55/125] Partido 1592131
+2026-05-28 00:47:20,061 - INFO -   [56/125] Partido 1592132
+2026-05-28 00:47:40,107 - INFO -   [57/125] Partido 1592133
+2026-05-28 00:47:58,439 - INFO -   [58/125] Partido 1592134
+2026-05-28 00:48:13,878 - INFO -   [59/125] Partido 1592135
+2026-05-28 00:48:30,523 - INFO -   [60/125] Partido 1592136
+2026-05-28 00:48:50,101 - INFO -   -> 60/125 partidos | eventos: 96395
+2026-05-28 00:48:50,101 - INFO -   [61/125] Partido 1592173
+2026-05-28 00:49:11,348 - INFO -   [62/125] Partido 1592174
+2026-05-28 00:49:29,712 - INFO -   [63/125] Partido 1592175
+2026-05-28 00:49:50,346 - INFO -   [64/125] Partido 1592176
+2026-05-28 00:50:10,418 - INFO -   [65/125] Partido 1592177
+2026-05-28 00:50:26,026 - INFO -   [66/125] Partido 1592178
+2026-05-28 00:50:46,628 - INFO -   [67/125] Partido 1592179
+2026-05-28 00:51:03,952 - INFO -   [68/125] Partido 1592180
+2026-05-28 00:51:20,479 - INFO -   [69/125] Partido 1592181
+2026-05-28 00:51:37,212 - INFO -   [70/125] Partido 1592182
+2026-05-28 00:51:53,443 - INFO -   -> 70/125 partidos | eventos: 112150
+2026-05-28 00:51:53,443 - INFO -   [71/125] Partido 1592183
+2026-05-28 00:52:14,919 - INFO -   [72/125] Partido 1592184
+2026-05-28 00:52:33,722 - INFO -   [73/125] Partido 1592161
+2026-05-28 00:52:54,459 - INFO -   [74/125] Partido 1592162
+2026-05-28 00:53:12,773 - INFO -   [75/125] Partido 1592163
+2026-05-28 00:53:33,812 - INFO -   [76/125] Partido 1592164
+2026-05-28 00:53:52,388 - INFO -   [77/125] Partido 1592165
+2026-05-28 00:54:08,952 - INFO -   [78/125] Partido 1592166
+2026-05-28 00:54:25,672 - INFO -   [79/125] Partido 1592167
+2026-05-28 00:54:42,605 - INFO -   [80/125] Partido 1592168
+2026-05-28 00:54:59,624 - INFO -   -> 80/125 partidos | eventos: 127735
+2026-05-28 00:54:59,624 - INFO -   [81/125] Partido 1592169
+2026-05-28 00:55:20,467 - INFO -   [82/125] Partido 1592170
+2026-05-28 00:55:40,242 - INFO -   [83/125] Partido 1592171
+2026-05-28 00:55:56,532 - INFO -   [84/125] Partido 1592172
+2026-05-28 00:56:15,828 - INFO -   [85/125] Partido 1592149
+2026-05-28 00:56:33,135 - INFO -   [86/125] Partido 1592150
+2026-05-28 00:56:51,793 - INFO -   [87/125] Partido 1592151
+2026-05-28 00:57:10,042 - INFO -   [88/125] Partido 1592152
+2026-05-28 00:57:25,461 - INFO -   [89/125] Partido 1592153
+2026-05-28 00:57:44,430 - INFO -   [90/125] Partido 1592154
+2026-05-28 00:58:03,131 - INFO -   -> 90/125 partidos | eventos: 143824
+2026-05-28 00:58:03,131 - INFO -   [91/125] Partido 1592155
+2026-05-28 00:58:23,832 - INFO -   [92/125] Partido 1592156
+2026-05-28 00:58:41,720 - INFO -   [93/125] Partido 1592157
+2026-05-28 00:58:57,709 - INFO -   [94/125] Partido 1592158
+2026-05-28 00:59:14,206 - INFO -   [95/125] Partido 1592159
+2026-05-28 00:59:34,218 - INFO -   [96/125] Partido 1592160
+2026-05-28 00:59:52,728 - INFO -   [97/125] Partido 1604553
+2026-05-28 01:00:12,529 - INFO -   [98/125] Partido 1604554
+2026-05-28 01:00:30,123 - INFO -   [99/125] Partido 1604555
+2026-05-28 01:00:49,899 - INFO -   [100/125] Partido 1604556
+2026-05-28 01:01:05,793 - INFO -   -> 100/125 partidos | eventos: 160052
+2026-05-28 01:01:05,793 - INFO - [ANTI-BOT] 100 partidos procesados — reinicio preventivo del driver
+2026-05-28 01:01:05,793 - INFO - [ANTI-BOT] Reiniciando driver — cerrando Chrome...
+2026-05-28 01:01:07,947 - INFO - [ANTI-BOT] Esperando 30s antes de abrir uno nuevo...
+2026-05-28 01:01:37,948 - INFO - ====== WebDriver manager ======
+2026-05-28 01:01:38,322 - INFO - Driver [C:\Users\Ivan\.wdm\drivers\chromedriver\win64\148.0.7778.178\chromedriver-win64/chromedriver.exe] found in cache by browser version
+2026-05-28 01:01:39,476 - INFO - [ANTI-BOT] Nuevo Chrome abierto. Aterrizando en home y aceptando cookies...
+2026-05-28 01:01:45,797 - INFO -   Cookies aceptadas
+2026-05-28 01:01:51,859 - INFO -   [101/125] Partido 1604557
+2026-05-28 01:02:09,197 - INFO -   [102/125] Partido 1604558
+2026-05-28 01:02:30,032 - INFO -   [103/125] Partido 1604559
+2026-05-28 01:02:48,724 - INFO -   [104/125] Partido 1604560
+2026-05-28 01:03:08,736 - INFO -   [105/125] Partido 1604561
+2026-05-28 01:03:29,332 - INFO -   [106/125] Partido 1604562
+2026-05-28 01:03:46,030 - INFO -   [107/125] Partido 1604563
+2026-05-28 01:04:05,025 - INFO -   [108/125] Partido 1604564
+2026-05-28 01:04:24,451 - INFO -   [109/125] Partido 1604565
+2026-05-28 01:04:44,927 - INFO -   [110/125] Partido 1604566
+2026-05-28 01:05:01,204 - INFO -   -> 110/125 partidos | eventos: 176037
+2026-05-28 01:05:01,205 - INFO -   [111/125] Partido 1604567
+2026-05-28 01:05:17,457 - INFO -   [112/125] Partido 1604568
+2026-05-28 01:05:35,587 - INFO -   [113/125] Partido 1630507
+2026-05-28 01:05:51,966 - INFO -   [114/125] Partido 1630508
+2026-05-28 01:06:08,274 - INFO -   [115/125] Partido 1630509
+2026-05-28 01:06:28,704 - INFO -   [116/125] Partido 1630510
+2026-05-28 01:06:48,170 - INFO -   [117/125] Partido 1630511
+2026-05-28 01:07:08,574 - INFO -   [118/125] Partido 1630512
+2026-05-28 01:07:24,865 - INFO -   [119/125] Partido 1630513
+2026-05-28 01:07:45,454 - INFO -   [120/125] Partido 1630514
+2026-05-28 01:08:01,455 - INFO -   -> 120/125 partidos | eventos: 193350
+2026-05-28 01:08:01,456 - INFO -   [121/125] Partido 1633954
+2026-05-28 01:08:22,179 - INFO -   [122/125] Partido 1633955
+2026-05-28 01:08:38,413 - INFO -   [123/125] Partido 1633956
+2026-05-28 01:08:54,830 - INFO -   [124/125] Partido 1633957
+2026-05-28 01:09:11,835 - INFO -   [125/125] Partido 1635069
+2026-05-28 01:09:29,457 - INFO -   Descarga completa: 125 partidos
+2026-05-28 01:09:31,563 - INFO - Driver cerrado.
+2026-05-28 01:09:32,108 - INFO - WhoScored guardará 1 temporada(s): ['2021/22']
+2026-05-28 01:09:32,112 - INFO -   · matches: 125 filas → C:\Users\Ivan\Desktop\football_scraping\data\clean\champions_league\2021_2022\whoscored\matches.csv
+2026-05-28 01:09:33,504 - INFO -   · events: 201999 filas → C:\Users\Ivan\Desktop\football_scraping\data\clean\champions_league\2021_2022\whoscored\events.csv
+2026-05-28 01:09:33,510 - INFO -   · players: 901 filas → C:\Users\Ivan\Desktop\football_scraping\data\clean\champions_league\2021_2022\whoscored\players.csv
+2026-05-28 01:09:33,512 - INFO -   · teams: 32 filas → C:\Users\Ivan\Desktop\football_scraping\data\clean\champions_league\2021_2022\whoscored\teams.csv
+2026-05-28 01:09:33,512 - INFO - [OK] WhoScored Champions League 2021_2022 — CSVs escritos
+2026-05-28 01:09:33,512 - INFO -     Totales: matches=125 events=201999 players=901 teams=32
+2026-05-28 01:09:37,632 - INFO - ── FASE 2/3: CARGA EN DB ────────────────────────────
+2026-05-28 01:09:37,637 - INFO - ── CARGANDO DIMENSIONES ────────────────────────────
+2026-05-28 01:09:37,637 - INFO - [START] Cargando dim_team... (comp=todas)
+2026-05-28 01:09:37,650 - INFO - dim_team ← SofaScore: 20 equipos
+2026-05-28 01:09:37,657 - INFO - dim_team ← Transfermarkt: 1 equipos enriquecidos
+2026-05-28 01:09:37,713 - INFO - dim_team ← WhoScored: 132 equipos
+2026-05-28 01:09:37,720 - INFO - dim_team ← Understat: 20 equipos
+2026-05-28 01:09:37,721 - INFO - team_loader: no hay teams.csv de StatsBomb
+2026-05-28 01:09:37,721 - INFO - [OK] dim_team completado — 173 registros procesados
+2026-05-28 01:09:37,723 - INFO - [START] Cargando dim_player (todas)...
+2026-05-28 01:09:37,726 - INFO - Schema player_scrape_provenance verificado
+2026-05-28 01:09:37,787 - INFO - dim_player ← Transfermarkt (fase 1): 36 jugadores
+2026-05-28 01:09:37,905 - INFO - Construyendo caché de jugadores para resolución sin tildes...
+2026-05-28 01:09:38,286 - INFO - Caché construida: 18720 jugadores
+2026-05-28 01:09:41,249 - INFO - dim_player ← sofascore (fase 2): 525 enlazados | 17 encolados
+2026-05-28 01:09:42,635 - INFO - dim_player ← understat (fase 3): 491 enlazados | 8 encolados
+2026-05-28 01:09:42,635 - INFO - player_loader fase 4: no hay players.csv de statsbomb
+2026-05-28 01:09:46,289 - INFO - dim_player ← whoscored (fase 5): 2388 enlazados | 9 encolados
+2026-05-28 01:09:46,295 - INFO - [OK] dim_player completado — 18720 jugadores canónicos | 32 pendientes en player_review
+2026-05-28 01:09:46,295 - INFO - [START] Cargando dim_match... (comp=todas)
+2026-05-28 01:09:46,656 - INFO - dim_match ← SofaScore: 383 insertados | 0 sin equipos resueltos
+2026-05-28 01:09:46,659 - INFO -   · C:\Users\Ivan\Desktop\football_scraping\data\clean\la_liga\2025_2026\understat\matches.csv
+2026-05-28 01:09:47,053 - INFO - dim_match ← Understat: 380 enlazados/insertados | 0 omitidos
+2026-05-28 01:09:47,055 - INFO - Analizando eventos de WhoScored para vincular partidos (4 archivos)...
+2026-05-28 01:09:47,082 - INFO -   fechas cargadas: 564 partidos con match_date conocida
+2026-05-28 01:09:47,082 - INFO -   attendance cargado: 560 partidos con asistencia
+2026-05-28 01:09:49,446 - INFO - dim_match ← WhoScored: 460 enlazados | 23 insertados | 0 fechas añadidas | 0 sin equipos
+2026-05-28 01:09:49,450 - INFO - [OK] backfill competition_id: 0 filas actualizadas, 0 siguen NULL
+2026-05-28 01:09:49,454 - INFO - [OK] dim_match completado — 15683 partidos
+2026-05-28 01:09:49,455 - INFO - ── CARGANDO HECHOS (FACTS) ─────────────────────────
+2026-05-28 01:09:49,455 - INFO - [START] Cargando fact_shots... (comp=todas)
+2026-05-28 01:09:52,702 - INFO - fact_shots ← SofaScore: 0 insertados | 9511 sin FKs resueltas
+2026-05-28 01:09:52,728 - INFO -   · shots.csv
+2026-05-28 01:10:01,332 - INFO - fact_shots ← Understat: 9459 insertados | 64 sin FKs resueltas
+2026-05-28 01:10:01,333 - INFO - [OK] fact_shots completado — 9459 tiros insertados
+2026-05-28 01:10:01,334 - INFO - [START] Cargando fact_events... (comp=todas)
+2026-05-28 01:10:01,395 - INFO -   precargando cachés de FKs (sofascore)...
+2026-05-28 01:10:01,452 - INFO -   cachés: matches=15191  players=15766  teams=434
+2026-05-28 01:10:01,801 - INFO - fact_events ← sofascore: 2906 insertados | 5224 sin FKs
+2026-05-28 01:10:01,805 - INFO - fact_events: no hay events.csv de statsbomb
+2026-05-28 01:10:11,181 - INFO -   precargando cachés de FKs (whoscored)...
+2026-05-28 01:10:11,255 - INFO -   cachés: matches=10747  players=11097  teams=208
+2026-05-28 01:10:12,165 - INFO -   · 5000 eventos insertados...
+2026-05-28 01:10:13,073 - INFO -   · 10000 eventos insertados...
+2026-05-28 01:10:13,968 - INFO -   · 15000 eventos insertados...
+2026-05-28 01:10:14,915 - INFO -   · 20000 eventos insertados...
+2026-05-28 01:10:15,855 - INFO -   · 25000 eventos insertados...
+2026-05-28 01:10:16,762 - INFO -   · 30000 eventos insertados...
+2026-05-28 01:10:17,668 - INFO -   · 35000 eventos insertados...
+2026-05-28 01:10:18,565 - INFO -   · 40000 eventos insertados...
+2026-05-28 01:10:19,468 - INFO -   · 45000 eventos insertados...
+2026-05-28 01:10:20,380 - INFO -   · 50000 eventos insertados...
+2026-05-28 01:10:21,277 - INFO -   · 55000 eventos insertados...
+2026-05-28 01:10:22,159 - INFO -   · 60000 eventos insertados...
+2026-05-28 01:10:23,056 - INFO -   · 65000 eventos insertados...
+2026-05-28 01:10:23,971 - INFO -   · 70000 eventos insertados...
+2026-05-28 01:10:24,881 - INFO -   · 75000 eventos insertados...
+2026-05-28 01:10:25,783 - INFO -   · 80000 eventos insertados...
+2026-05-28 01:10:26,692 - INFO -   · 85000 eventos insertados...
+2026-05-28 01:10:27,603 - INFO -   · 90000 eventos insertados...
+2026-05-28 01:10:28,496 - INFO -   · 95000 eventos insertados...
+2026-05-28 01:10:29,399 - INFO -   · 100000 eventos insertados...
+2026-05-28 01:10:30,295 - INFO -   · 105000 eventos insertados...
+2026-05-28 01:10:31,082 - INFO -   · 110000 eventos insertados...
+2026-05-28 01:10:31,730 - INFO -   · 115000 eventos insertados...
+2026-05-28 01:10:32,402 - INFO -   · 120000 eventos insertados...
+2026-05-28 01:10:33,338 - INFO -   · 125000 eventos insertados...
+2026-05-28 01:10:34,127 - INFO -   · 130000 eventos insertados...
+2026-05-28 01:10:34,865 - INFO -   · 135000 eventos insertados...
+2026-05-28 01:10:35,687 - INFO -   · 140000 eventos insertados...
+2026-05-28 01:10:36,425 - INFO -   · 145000 eventos insertados...
+2026-05-28 01:10:37,156 - INFO -   · 150000 eventos insertados...
+2026-05-28 01:10:37,799 - INFO -   · 155000 eventos insertados...
+2026-05-28 01:10:38,435 - INFO -   · 160000 eventos insertados...
+2026-05-28 01:10:39,073 - INFO -   · 165000 eventos insertados...
+2026-05-28 01:10:39,719 - INFO -   · 170000 eventos insertados...
+2026-05-28 01:10:40,356 - INFO -   · 175000 eventos insertados...
+2026-05-28 01:10:40,998 - INFO -   · 180000 eventos insertados...
+2026-05-28 01:10:41,639 - INFO -   · 185000 eventos insertados...
+2026-05-28 01:10:42,273 - INFO -   · 190000 eventos insertados...
+2026-05-28 01:10:42,916 - INFO -   · 195000 eventos insertados...
+2026-05-28 01:10:43,550 - INFO -   · 200000 eventos insertados...
+2026-05-28 01:10:44,187 - INFO -   · 205000 eventos insertados...
+2026-05-28 01:10:44,827 - INFO -   · 210000 eventos insertados...
+2026-05-28 01:10:45,470 - INFO -   · 215000 eventos insertados...
+2026-05-28 01:10:46,108 - INFO -   · 220000 eventos insertados...
+2026-05-28 01:10:46,747 - INFO -   · 225000 eventos insertados...
+2026-05-28 01:10:47,381 - INFO -   · 230000 eventos insertados...
+2026-05-28 01:10:48,023 - INFO -   · 235000 eventos insertados...
+2026-05-28 01:10:48,662 - INFO -   · 240000 eventos insertados...
+2026-05-28 01:10:49,307 - INFO -   · 245000 eventos insertados...
+2026-05-28 01:10:49,953 - INFO -   · 250000 eventos insertados...
+2026-05-28 01:10:50,603 - INFO -   · 255000 eventos insertados...
+2026-05-28 01:10:51,250 - INFO -   · 260000 eventos insertados...
+2026-05-28 01:10:51,877 - INFO -   · 265000 eventos insertados...
+2026-05-28 01:10:52,512 - INFO -   · 270000 eventos insertados...
+2026-05-28 01:10:53,173 - INFO -   · 275000 eventos insertados...
+2026-05-28 01:10:53,816 - INFO -   · 280000 eventos insertados...
+2026-05-28 01:10:54,454 - INFO -   · 285000 eventos insertados...
+2026-05-28 01:10:55,094 - INFO -   · 290000 eventos insertados...
+2026-05-28 01:10:55,731 - INFO -   · 295000 eventos insertados...
+2026-05-28 01:10:56,376 - INFO -   · 300000 eventos insertados...
+2026-05-28 01:10:57,012 - INFO -   · 305000 eventos insertados...
+2026-05-28 01:10:57,660 - INFO -   · 310000 eventos insertados...
+2026-05-28 01:10:58,308 - INFO -   · 315000 eventos insertados...
+2026-05-28 01:10:58,972 - INFO -   · 320000 eventos insertados...
+2026-05-28 01:10:59,703 - INFO -   · 325000 eventos insertados...
+2026-05-28 01:11:00,352 - INFO -   · 330000 eventos insertados...
+2026-05-28 01:11:00,993 - INFO -   · 335000 eventos insertados...
+2026-05-28 01:11:01,773 - INFO -   · 340000 eventos insertados...
+2026-05-28 01:11:02,475 - INFO -   · 345000 eventos insertados...
+2026-05-28 01:11:03,123 - INFO -   · 350000 eventos insertados...
+2026-05-28 01:11:03,776 - INFO -   · 355000 eventos insertados...
+2026-05-28 01:11:04,427 - INFO -   · 360000 eventos insertados...
+2026-05-28 01:11:05,072 - INFO -   · 365000 eventos insertados...
+2026-05-28 01:11:05,724 - INFO -   · 370000 eventos insertados...
+2026-05-28 01:11:06,370 - INFO -   · 375000 eventos insertados...
+2026-05-28 01:11:07,025 - INFO -   · 380000 eventos insertados...
+2026-05-28 01:11:07,670 - INFO -   · 385000 eventos insertados...
+2026-05-28 01:11:08,325 - INFO -   · 390000 eventos insertados...
+2026-05-28 01:11:08,983 - INFO -   · 395000 eventos insertados...
+2026-05-28 01:11:09,628 - INFO -   · 400000 eventos insertados...
+2026-05-28 01:11:10,275 - INFO -   · 405000 eventos insertados...
+2026-05-28 01:11:10,927 - INFO -   · 410000 eventos insertados...
+2026-05-28 01:11:11,567 - INFO -   · 415000 eventos insertados...
+2026-05-28 01:11:12,206 - INFO -   · 420000 eventos insertados...
+2026-05-28 01:11:12,852 - INFO -   · 425000 eventos insertados...
+2026-05-28 01:11:13,491 - INFO -   · 430000 eventos insertados...
+2026-05-28 01:11:14,126 - INFO -   · 435000 eventos insertados...
+2026-05-28 01:11:14,758 - INFO -   · 440000 eventos insertados...
+2026-05-28 01:11:15,400 - INFO -   · 445000 eventos insertados...
+2026-05-28 01:11:16,039 - INFO -   · 450000 eventos insertados...
+2026-05-28 01:11:16,692 - INFO -   · 455000 eventos insertados...
+2026-05-28 01:11:17,324 - INFO -   · 460000 eventos insertados...
+2026-05-28 01:11:17,968 - INFO -   · 465000 eventos insertados...
+2026-05-28 01:11:18,616 - INFO -   · 470000 eventos insertados...
+2026-05-28 01:11:19,256 - INFO -   · 475000 eventos insertados...
+2026-05-28 01:11:19,943 - INFO -   · 480000 eventos insertados...
+2026-05-28 01:11:20,578 - INFO -   · 485000 eventos insertados...
+2026-05-28 01:11:21,209 - INFO -   · 490000 eventos insertados...
+2026-05-28 01:11:21,854 - INFO -   · 495000 eventos insertados...
+2026-05-28 01:11:22,486 - INFO -   · 500000 eventos insertados...
+2026-05-28 01:11:23,127 - INFO -   · 505000 eventos insertados...
+2026-05-28 01:11:23,763 - INFO -   · 510000 eventos insertados...
+2026-05-28 01:11:24,398 - INFO -   · 515000 eventos insertados...
+2026-05-28 01:11:25,034 - INFO -   · 520000 eventos insertados...
+2026-05-28 01:11:25,685 - INFO -   · 525000 eventos insertados...
+2026-05-28 01:11:26,344 - INFO -   · 530000 eventos insertados...
+2026-05-28 01:11:26,993 - INFO -   · 535000 eventos insertados...
+2026-05-28 01:11:27,632 - INFO -   · 540000 eventos insertados...
+2026-05-28 01:11:28,273 - INFO -   · 545000 eventos insertados...
+2026-05-28 01:11:28,918 - INFO -   · 550000 eventos insertados...
+2026-05-28 01:11:29,553 - INFO -   · 555000 eventos insertados...
+2026-05-28 01:11:30,192 - INFO -   · 560000 eventos insertados...
+2026-05-28 01:11:30,838 - INFO -   · 565000 eventos insertados...
+2026-05-28 01:11:31,479 - INFO -   · 570000 eventos insertados...
+2026-05-28 01:11:32,119 - INFO -   · 575000 eventos insertados...
+2026-05-28 01:11:32,760 - INFO -   · 580000 eventos insertados...
+2026-05-28 01:11:33,395 - INFO -   · 585000 eventos insertados...
+2026-05-28 01:11:34,034 - INFO -   · 590000 eventos insertados...
+2026-05-28 01:11:34,676 - INFO -   · 595000 eventos insertados...
+2026-05-28 01:11:35,310 - INFO -   · 600000 eventos insertados...
+2026-05-28 01:11:35,958 - INFO -   · 605000 eventos insertados...
+2026-05-28 01:11:36,598 - INFO -   · 610000 eventos insertados...
+2026-05-28 01:11:37,230 - INFO -   · 615000 eventos insertados...
+2026-05-28 01:11:37,864 - INFO -   · 620000 eventos insertados...
+2026-05-28 01:11:38,496 - INFO -   · 625000 eventos insertados...
+2026-05-28 01:11:39,134 - INFO -   · 630000 eventos insertados...
+2026-05-28 01:11:39,771 - INFO -   · 635000 eventos insertados...
+2026-05-28 01:11:40,406 - INFO -   · 640000 eventos insertados...
+2026-05-28 01:11:41,045 - INFO -   · 645000 eventos insertados...
+2026-05-28 01:11:41,680 - INFO -   · 650000 eventos insertados...
+2026-05-28 01:11:42,316 - INFO -   · 655000 eventos insertados...
+2026-05-28 01:11:42,959 - INFO -   · 660000 eventos insertados...
+2026-05-28 01:11:43,597 - INFO -   · 665000 eventos insertados...
+2026-05-28 01:11:44,252 - INFO -   · 670000 eventos insertados...
+2026-05-28 01:11:44,893 - INFO -   · 675000 eventos insertados...
+2026-05-28 01:11:45,535 - INFO -   · 680000 eventos insertados...
+2026-05-28 01:11:46,173 - INFO -   · 685000 eventos insertados...
+2026-05-28 01:11:46,811 - INFO -   · 690000 eventos insertados...
+2026-05-28 01:11:47,453 - INFO -   · 695000 eventos insertados...
+2026-05-28 01:11:48,091 - INFO -   · 700000 eventos insertados...
+2026-05-28 01:11:48,730 - INFO -   · 705000 eventos insertados...
+2026-05-28 01:11:49,369 - INFO -   · 710000 eventos insertados...
+2026-05-28 01:11:50,011 - INFO -   · 715000 eventos insertados...
+2026-05-28 01:11:50,646 - INFO -   · 720000 eventos insertados...
+2026-05-28 01:11:51,285 - INFO -   · 725000 eventos insertados...
+2026-05-28 01:11:51,925 - INFO -   · 730000 eventos insertados...
+2026-05-28 01:11:52,562 - INFO -   · 735000 eventos insertados...
+2026-05-28 01:11:53,200 - INFO -   · 740000 eventos insertados...
+2026-05-28 01:11:53,844 - INFO -   · 745000 eventos insertados...
+2026-05-28 01:11:54,486 - INFO -   · 750000 eventos insertados...
+2026-05-28 01:11:55,124 - INFO -   · 755000 eventos insertados...
+2026-05-28 01:11:55,451 - INFO - fact_events ← whoscored: 757524 insertados | 142535 sin FKs
+2026-05-28 01:11:55,676 - INFO - [OK] fact_events completado — 760430 eventos insertados
+2026-05-28 01:11:55,678 - INFO - [START] Cargando fact_injuries... (comp=todas)
+2026-05-28 01:11:55,682 - INFO -   · injuries.csv (6 filas)
+2026-05-28 01:11:55,690 - INFO - fact_injuries ← Transfermarkt: 6 insertadas | 0 sin jugador resuelto
+2026-05-28 01:11:55,690 - INFO - =================================================================
+2026-05-28 01:11:55,690 - INFO -    PIPELINE COMPLETADO EXITOSAMENTE
+2026-05-28 01:11:55,690 - INFO - =================================================================

@@ -14,7 +14,7 @@ data/
 │           └── <source>/             ← transfermarkt, sofascore, ...
 │               ├── stadiums/<team_slug>.json
 │               ├── players/<team_slug>.json
-│               └── injuries/<team_slug>.json
+│               └── injuries/<player_id>.json    ← historial completo por jugador
 │
 ├── clean/                            ← CSV "DB-ready" que leen los loaders
 │   └── <comp_slug>/<season>/<source>/

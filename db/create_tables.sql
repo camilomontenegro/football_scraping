@@ -277,7 +277,11 @@ CREATE TABLE fact_injuries (
     date_from DATE,
     date_until DATE,
     days_absent INTEGER,
-    matches_missed SMALLINT
+    matches_missed SMALLINT,
+    -- Club donde estaba el jugador durante la lesión (Transfermarkt)
+    club_name VARCHAR(200),
+    club_id_tm INTEGER,
+    club_slug VARCHAR(150)
 );
 
 CREATE UNIQUE INDEX ux_injuries_unique ON fact_injuries (

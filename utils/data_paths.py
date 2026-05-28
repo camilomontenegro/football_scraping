@@ -12,7 +12,7 @@ Estructura objetivo (acordada con el equipo):
     │           └── <source>/← p.ej. transfermarkt, sofascore, ...
     │               ├── stadiums/<team_slug>.json
     │               ├── players/<team_slug>.json
-    │               └── injuries/<team_slug>.json
+    │               └── injuries/<player_id>.json  ← historial completo por jugador
     │
     └── clean/               ← CSV DB-ready (los que leen los loaders)
         └── <comp_slug>/<season>/<source>/
