@@ -855,6 +855,7 @@ def interactive_flow() -> None:
     match_filter = state.get("match_filter", {})
     kwargs = {
         "scrape": state["full_scrape"],
+        "load": False,
         "competition": state["competition"],
         "source": state["source"],
         "season": state["season"],
@@ -924,6 +925,7 @@ def main() -> None:
 
     kwargs = {
         "scrape": args.scrape or not args.update,
+        "load": False,
         "competition": competition,
         "source": args.source,
         "season": season,

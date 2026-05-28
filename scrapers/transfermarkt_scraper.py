@@ -12,12 +12,15 @@ Estructura:
     6. MAIN            — scrape → transform → guardar en disco
 
 Rutas estándar (`utils.data_paths`):
-    data/raw/<comp>/<season>/transfermarkt/players/<team>.json    ← plantilla de la temporada
-    data/raw/<comp>/<season>/transfermarkt/injuries/<team>.json   ← lesiones crudas
-    data/clean/<comp>/<season>/transfermarkt/players.csv          ← dim_player
-    data/clean/<comp>/<season>/transfermarkt/injuries.csv         ← fact_injuries
+    data/raw/<comp>/<season>/transfermarkt/players/<team>.json        ← plantilla de la temporada
+    data/raw/<comp>/<season>/transfermarkt/injuries/<player_id>.json  ← historial completo de lesiones
+    data/clean/<comp>/<season>/transfermarkt/players.csv              ← dim_player
+    data/clean/<comp>/<season>/transfermarkt/injuries.csv             ← fact_injuries
 
 Lesiones: se recorre kader + leistungsdaten (toda la plantilla de la temporada).
+Para cada jugador, se descarga su historial COMPLETO de lesiones (todas las
+temporadas y clubes) desde /verletzungen/spieler/{id}. Cada registro incluye
+el club en el que estaba el jugador en ese momento.
 Las URLs de lesiones usan el ID canónico del jugador, no el slug de la tabla.
 
 Caché global:
@@ -463,24 +466,14 @@ def _players_for_injury_scrape(
     )
 
 
-def tm_season_label(season_start: int) -> str:
-    """Año de inicio (2025) → etiqueta de temporada en Transfermarkt ('25/26')."""
-    return f"{season_start % 100:02d}/{(season_start + 1) % 100:02d}"
-
-
-def _filter_injuries_for_season(injuries: list[dict], tm_season: str) -> list[dict]:
-    """Transfermarkt devuelve historial completo; nos quedamos solo con la temporada pedida."""
-    return [inj for inj in injuries if (inj.get("season") or "").strip() == tm_season]
-
 
 def _load_cached_player_injuries(
     competition_name: str,
     season_label: str,
-    team_slug: str,
     player_id: str,
 ) -> list[dict]:
-    """Reutiliza lesiones ya guardadas en raw JSON cuando la caché evita re-scrape."""
-    path = raw_dir(competition_name, season_label, "transfermarkt", "injuries") / f"{team_slug}.json"
+    """Reutiliza lesiones ya guardadas en raw JSON por player_id."""
+    path = raw_dir(competition_name, season_label, "transfermarkt", "injuries") / f"{player_id}.json"
     if not path.exists():
         return []
     try:
@@ -488,14 +481,41 @@ def _load_cached_player_injuries(
             data = json.load(f)
     except (OSError, json.JSONDecodeError):
         return []
-    return [
-        inj for inj in data.get("injuries", [])
-        if str(inj.get("player_id_tm")) == str(player_id)
-    ]
+    return data.get("injuries", [])
+
+
+def _extract_club_from_td(td) -> dict:
+    """Extrae club name / id / slug del td class=wappen_verletzung.
+
+    Estructura HTML:
+        <td class="rechts hauptlink wappen_verletzung">
+            <a href="/club-slug/startseite/verein/{id}/saison_id/{year}" title="Club Name">
+                <img ... title="Club Name"/>
+            </a>
+            <span>7</span>          ← matches_missed
+        </td>
+    Puede haber >1 club si el jugador estuvo en varios durante la lesión;
+    se toma el primero como principal.
+    """
+    link = td.find("a", href=lambda h: h and "/verein/" in h)
+    if not link:
+        return {"club_name": None, "club_id_tm": None, "club_slug": None}
+    href = link.get("href", "")
+    club_id_m = re.search(r"/verein/(\d+)", href)
+    parts = href.split("/")
+    return {
+        "club_name": link.get("title") or (link.find("img") or {}).get("title"),
+        "club_id_tm": int(club_id_m.group(1)) if club_id_m else None,
+        "club_slug":  parts[1] if len(parts) > 1 else None,
+    }
 
 
 def get_player_injuries(player_slug: str, player_id: str) -> list[dict]:
-    """Historial de lesiones de un jugador."""
+    """Historial COMPLETO de lesiones de un jugador (todas las temporadas).
+
+    Cada registro incluye temporada, tipo de lesión, fechas, días de baja,
+    partidos perdidos y el club en el que estaba el jugador en ese momento.
+    """
     # URL por ID: evita lesiones de otro jugador cuando slug e id no coinciden.
     url = f"https://www.transfermarkt.es/-/verletzungen/spieler/{player_id}"
     r = request_with_retry(url)
@@ -522,6 +542,7 @@ def get_player_injuries(player_slug: str, player_id: str) -> list[dict]:
             continue
         days_m = re.search(r"\d+", cols[4].text.strip())
         span = cols[5].find("span")
+        club = _extract_club_from_td(cols[5])
         injuries.append({
             "season":         cols[0].text.strip(),
             "injury_type":    cols[1].text.strip(),
@@ -529,6 +550,9 @@ def get_player_injuries(player_slug: str, player_id: str) -> list[dict]:
             "date_until":     parse_date(cols[3].text.strip()),
             "days_absent":    int(days_m.group()) if days_m else None,
             "matches_missed": int(span.text.strip()) if span and span.text.strip().isdigit() else None,
+            "club_name":      club["club_name"],
+            "club_id_tm":     club["club_id_tm"],
+            "club_slug":      club["club_slug"],
         })
 
     time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
@@ -564,8 +588,7 @@ def scrape_transfermarkt(
     if competition_name is None:
         competition_name = "La Liga"
 
-    tm_injury_season = tm_season_label(season)
-    log.info("Lesiones: solo temporada TM %s", tm_injury_season)
+    log.info("Lesiones: historial completo por jugador")
 
     from utils.batch import generate_batch_id
     batch_id = generate_batch_id()
@@ -638,14 +661,13 @@ def scrape_transfermarkt(
                     if days_since < 7:
                         skipped_players += 1
                         injuries = _load_cached_player_injuries(
-                            competition_name, season_label, team_slug, player_id_str,
+                            competition_name, season_label, player_id_str,
                         )
-                        injuries = _filter_injuries_for_season(injuries, tm_injury_season)
                         for inj in injuries:
                             row = dict(inj)
                             row["player_id_tm"] = p["player_id"]
                             row["player_name"]  = p["player_name"]
-                            row["team_slug"]    = team_slug
+                            row["squad_team_slug"] = team_slug
                             row["batch_id"]     = batch_id
                             team_injuries.append(row)
                         continue
@@ -655,7 +677,7 @@ def scrape_transfermarkt(
             try:
                 injuries = get_player_injuries(p["player_slug"], p["player_id"])
                 cache[player_id_str] = today_str
-                injuries = _filter_injuries_for_season(injuries, tm_injury_season)
+
                 if from_date_obj:
                     filtered: list[dict] = []
                     for inj in injuries:
@@ -684,8 +706,23 @@ def scrape_transfermarkt(
                 for inj in injuries:
                     inj["player_id_tm"] = p["player_id"]
                     inj["player_name"]  = p["player_name"]
-                    inj["team_slug"]    = team_slug
+                    inj["squad_team_slug"] = team_slug
                     inj["batch_id"]     = batch_id
+
+                # Guardar raw por jugador (historial completo)
+                save_raw_json(
+                    competition_name, season_label, "transfermarkt",
+                    player_id_str,
+                    {
+                        "batch_id":    batch_id,
+                        "player_id":   player_id_str,
+                        "player_name": p["player_name"],
+                        "player_slug": p["player_slug"],
+                        "injuries":    injuries,
+                    },
+                    subdir="injuries",
+                )
+
                 team_injuries.extend(injuries)
             except Exception as e:
                 log.warning("%s — lesiones fallidas: %s", p["player_name"], e)
@@ -695,11 +732,6 @@ def scrape_transfermarkt(
             team_slug, {"batch_id": batch_id, "players": players},
             subdir="players",
         )
-        save_raw_json(
-            competition_name, season_label, "transfermarkt",
-            team_slug, {"batch_id": batch_id, "injuries": team_injuries},
-            subdir="injuries",
-        )
 
         all_players.extend(players)
         all_injuries.extend(team_injuries)
@@ -707,7 +739,7 @@ def scrape_transfermarkt(
         print(
             f"  [OK] {len(players)} jugadores "
             f"({len(kader_players)} kader + {extra_players} temporada) "
-            f"| {len(team_injuries)} lesiones"
+            f"| {len(team_injuries)} lesiones (historial completo)"
         )
         save_cache(cache)
 
@@ -757,22 +789,32 @@ def transform_players(players_raw: list[dict]) -> pd.DataFrame:
 
 
 def transform_injuries(injuries_raw: list[dict]) -> pd.DataFrame:
-    """Adapta a las columnas de `fact_injuries`."""
+    """Adapta a las columnas de `fact_injuries`.
+
+    Cada fila representa una lesión histórica del jugador con el club
+    en el que estaba en ese momento (extraído de la página de lesiones).
+    ``squad_team_slug`` indica desde qué plantilla se descubrió al jugador.
+    """
     rows = [{
-        "player_id_tm":   inj.get("player_id_tm"),
-        "player_name":    inj.get("player_name"),
-        "season":         inj.get("season"),
-        "injury_type":    inj.get("injury_type"),
-        "date_from":      inj.get("date_from"),
-        "date_until":     inj.get("date_until"),
-        "days_absent":    inj.get("days_absent"),
-        "matches_missed": inj.get("matches_missed"),
+        "player_id_tm":    inj.get("player_id_tm"),
+        "player_name":     inj.get("player_name"),
+        "season":          inj.get("season"),
+        "injury_type":     inj.get("injury_type"),
+        "date_from":       inj.get("date_from"),
+        "date_until":      inj.get("date_until"),
+        "days_absent":     inj.get("days_absent"),
+        "matches_missed":  inj.get("matches_missed"),
+        "club_name":       inj.get("club_name"),
+        "club_id_tm":      inj.get("club_id_tm"),
+        "club_slug":       inj.get("club_slug"),
+        "squad_team_slug": inj.get("squad_team_slug"),
     } for inj in injuries_raw]
     df = pd.DataFrame(rows)
     if not df.empty:
         df["player_id_tm"]   = pd.to_numeric(df["player_id_tm"], errors="coerce").astype("Int64")
         df["days_absent"]    = pd.to_numeric(df["days_absent"], errors="coerce").astype("Int32")
         df["matches_missed"] = pd.to_numeric(df["matches_missed"], errors="coerce").astype("Int16")
+        df["club_id_tm"]     = pd.to_numeric(df["club_id_tm"], errors="coerce").astype("Int64")
     return df.reset_index(drop=True)
 
 

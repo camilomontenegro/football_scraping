@@ -651,6 +651,7 @@ def run_load(cancel_event: Optional[threading.Event] = None) -> None:
 # ─────────────────────────────────────────────────────────────────────
 def run_pipeline(
     scrape: bool = False,
+    load: bool = False,
     competition: Optional[str] = None,
     source: str = "all",
     season: str = "2024/2025",
@@ -667,6 +668,9 @@ def run_pipeline(
         logger.info("   Competición: %s", competition)
     logger.info("   Temporada: %s", season)
     logger.info("   Fuente:    %s", source)
+    logger.info("   Modo:      %s", " + ".join(
+        f for f, v in [("scrape", scrape), ("load", load), ("update", update)] if v
+    ) or "solo load")
 
     try:
         _raise_if_cancelled(cancel_event)
@@ -724,15 +728,22 @@ def run_pipeline(
                 logger.error("Error fatal en fase de scraping: %s", e, exc_info=True)
                 raise SystemExit(1)
 
-        _raise_if_cancelled(cancel_event)
-        logger.info("── FASE 2/3: CARGA EN DB ────────────────────────────")
-        try:
-            run_load(cancel_event=cancel_event)
-        except PipelineCancelled:
-            raise
-        except Exception as e:
-            logger.error("Error fatal en fase de carga: %s", e, exc_info=True)
-            raise SystemExit(1)
+        if load:
+            _raise_if_cancelled(cancel_event)
+            logger.info("── FASE 2/3: CARGA EN DB ────────────────────────────")
+            try:
+                run_load(cancel_event=cancel_event)
+            except PipelineCancelled:
+                raise
+            except Exception as e:
+                logger.error("Error fatal en fase de carga: %s", e, exc_info=True)
+                raise SystemExit(1)
+        elif scrape:
+            logger.info("")
+            logger.info("   Los datos se han descargado a data/raw/ y data/clean/.")
+            logger.info("   Para cargarlos en la BD ejecuta:")
+            logger.info("     python wizard/pipeline_runner.py --load")
+            logger.info("")
 
         logger.info("=================================================================")
         logger.info("   PIPELINE COMPLETADO EXITOSAMENTE")
@@ -755,9 +766,9 @@ def run_pipeline(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Football Data Pipeline (unified)")
     parser.add_argument("--scrape", action="store_true",
-                        help="Descargar datos (scraping) antes de cargar")
+                        help="Descargar datos (scraping). No carga en BD automáticamente.")
     parser.add_argument("--load", action="store_true",
-                        help="Solo cargar CSVs a BD (sin scrape). Es el comportamiento por defecto.")
+                        help="Cargar CSVs existentes a BD.")
     parser.add_argument("--update", action="store_true")
     parser.add_argument("--competition", "-c", type=str, default=None)
     parser.add_argument("--source", "-s", default="all",
@@ -774,14 +785,17 @@ if __name__ == "__main__":
     parser.add_argument("--from-date", type=str, default=None)
     args = parser.parse_args()
 
-    if args.scrape and args.load:
-        parser.error("Usa --scrape o --load, no ambos a la vez.")
-
     if args.list:
         list_available_competitions()
     else:
+        # Si no se pide ni --scrape ni --load ni --update ni --check,
+        # mostrar ayuda para evitar ejecuciones vacías.
+        if not any([args.scrape, args.load, args.update, args.check]):
+            parser.print_help()
+            raise SystemExit(0)
         run_pipeline(
             scrape=args.scrape,
+            load=args.load,
             competition=args.competition,
             source=args.source,
             season=args.season,

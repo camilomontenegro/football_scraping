@@ -484,20 +484,28 @@ def load_injuries(conn, comp_name: str | None = None) -> int:
             conn.execute(text("""
                 INSERT INTO fact_injuries
                     (player_id, season, injury_type, date_from,
-                     date_until, days_absent, matches_missed)
+                     date_until, days_absent, matches_missed,
+                     club_name, club_id_tm, club_slug)
                 VALUES
                     (:pid, :season, :itype, :dfrom,
-                     :duntil, :days, :mm)
+                     :duntil, :days, :mm,
+                     :club_name, :club_id_tm, :club_slug)
                 ON CONFLICT (player_id, season, injury_type, date_from)
-                DO NOTHING
+                DO UPDATE SET
+                    club_name  = COALESCE(EXCLUDED.club_name,  fact_injuries.club_name),
+                    club_id_tm = COALESCE(EXCLUDED.club_id_tm, fact_injuries.club_id_tm),
+                    club_slug  = COALESCE(EXCLUDED.club_slug,  fact_injuries.club_slug)
             """), {
-                "pid":    pid,
-                "season": row.get("season") or None,
-                "itype":  row.get("injury_type") or None,
-                "dfrom":  date_from,
-                "duntil": date_until,
-                "days":   _safe_int(row.get("days_absent")),
-                "mm":     _safe_int(row.get("matches_missed")),
+                "pid":        pid,
+                "season":     row.get("season") or None,
+                "itype":      row.get("injury_type") or None,
+                "dfrom":      date_from,
+                "duntil":     date_until,
+                "days":       _safe_int(row.get("days_absent")),
+                "mm":         _safe_int(row.get("matches_missed")),
+                "club_name":  row.get("club_name") or None,
+                "club_id_tm": _safe_int(row.get("club_id_tm")),
+                "club_slug":  row.get("club_slug") or None,
             })
             conn.execute(text(f"RELEASE SAVEPOINT {sp_name}"))
             count += 1
