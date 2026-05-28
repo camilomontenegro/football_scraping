@@ -2,7 +2,8 @@
 -- Consultas frecuentes para análisis y verificación de  datos cargados de una competición
 -- Permite  fiscalizar  el proceso de carga  de datos 
 
---------------------------------------------------------------------------------------------
+---------------------------------------- PLAYERS ----------------------------------------------------
+
 -- JUGADORES  DE UNA COMPETICION 
 --obtiene los jugadores de una competicion concreta (en este caso, Premier League) que han tenido eventos o tiros registrados en la base de datos
 --No hay forma de saber la competición del jugador sin utilizar los tiros o eventos 
@@ -12,21 +13,22 @@ FROM dim_player dp
 WHERE dp.canonical_id IN (
     SELECT player_id FROM fact_events fe
     JOIN dim_match dm ON fe.match_id = dm.match_id
-    WHERE dm.competition_id = 
+    WHERE dm.competition_id =:competition_id
     UNION
     SELECT player_id FROM fact_shots fs
     JOIN dim_match dm ON fs.match_id = dm.match_id
-    WHERE dm.competition_id = 
+    WHERE dm.competition_id =:competition_id
 )
 ORDER BY canonical_name;
 
+-- CONTEO DE JUGADORES INSERTADOS EN UN DÍA
 -- Comprobar el numero de jugadores insertados en un dia 
--- Ten en cuenta que habra que registros que no se cuenten al insertar los jugadores de uan liga porque ya existian en la base de datos ( se cargaron en la champiomns por ejemplo) y solo se actualizan 
+-- Ten en cuenta que habra  registros que no se cuenten al insertar los jugadores de unA liga porque ya existian en la base de datos ( se cargaron en la champiomns por ejemplo) y solo se actualizan 
 select count(*) from dim_player
 where created_at ::date =CURRENT_DATE
 
 
---------------------------------------------------------------------------------------------
+
 -- TOTAL JUGADORES DE UAN COMPETICION  - CON Y SIN ID EN CADA FUENTE
 -- Obtiene el número total de jugadores   de una competicion concreta
 -- Muestra cuantos jugadores tienen ID en cada fuente (sofascore, whoscored, understat, transfermarkt) y cuantos no lo tienen
@@ -68,19 +70,61 @@ FROM dim_player dp
 WHERE dp.canonical_id IN (
     SELECT player_id FROM fact_events fe
     JOIN dim_match dm ON fe.match_id = dm.match_id
-    WHERE dm.competition_id =
+    WHERE dm.competition_id =:competition_id
     UNION
     SELECT player_id FROM fact_shots fs
     JOIN dim_match dm ON fs.match_id = dm.match_id
-    WHERE dm.competition_id =
+    WHERE dm.competition_id =:competition_id
 );
 
 
+-- Muestra todos los registros de jugadores cuyo canonical_name aparece más de una vez.
+-- Permite ver todas las columnas para determinar si son duplicados reales
+-- o jugadores distintos con el mismo nombre.
+-- Los registros aparecen agrupados por nombre para facilitar la comparación.
+SELECT dp.*
+FROM dim_player dp
+WHERE dp.canonical_name IN (
+    SELECT canonical_name 
+    FROM dim_player
+    GROUP BY canonical_name 
+    HAVING COUNT(*) > 1
+)
+ORDER BY dp.canonical_name, dp.canonical_id;
 
 
+-- Resumen: cuántos registros tiene cada nombre duplicado
+-- y cuántos tienen id_transfermarkt asignado.
+-- Si con_tm > 1 → probablemente jugadores distintos con el mismo nombre.
+-- Si con_tm <= 1 con veces > 1 → posible duplicado real del mismo jugador.
+SELECT 
+    canonical_name,
+    COUNT(*) as veces,
+    COUNT(id_transfermarkt) as con_tm,
+    COUNT(id_sofascore) as con_ss,
+    COUNT(id_whoscored) as con_ws
+FROM dim_player
+WHERE canonical_name IN (
+    SELECT canonical_name FROM dim_player
+    GROUP BY canonical_name HAVING COUNT(*) > 1
+)
+GROUP BY canonical_name
+ORDER BY veces DESC, canonical_name;
 
 
---------------------------------------------------------------------------------------------
+---------------------------------------- TEAMS ----------------------------------------------------
+-- EQUIPOS DE UNA COMPETICIÓN
+-- Muestra los equipos de una competición específica 
+-- Al ejecutar saldrá una ventana para introducir el id de la competición.
+
+SELECT * FROM dim_team dt
+WHERE dt.canonical_id IN (
+    SELECT dm.home_team_id FROM dim_match dm WHERE dm.competition_id = :competition_id
+    UNION
+    SELECT dm.away_team_id FROM dim_match dm WHERE dm.competition_id = :competition_id
+);
+
+
 -- TOTAL EQUIPOS DE UNA COMPETICION - CON Y SIN ID EN CADA FUENTE
 -- Comprueba cuántos equipos tienen cada ID de fuente enlazado
 -- COUNT(columna) ignora los NULL, por lo que la diferencia con COUNT(*) da los NULL
@@ -123,7 +167,15 @@ WHERE dt.canonical_id IN (
     SELECT away_team_id FROM dim_match WHERE competition_id = :competition_id
 );
 
---------------------------------------------------------------------------------------------
+---------------------------------------- MATCHES  ----------------------------------------------------
+
+-- PARTIDOS DE UNA COMPETICIÓN 
+-- Muestra toda la información de los partidos de una competición
+SELECT * 
+FROM dim_match 
+WHERE competition_id=:competition_id;
+
+
 -- PARTIDOS DE UNA COMPETICION - CON Y SIN ID EN CADA FUENTE
 -- Comprueba cuántos partidos de la competicion  tienen cada ID de fuente enlazado
 -- COUNT(columna) ignora los NULL, por lo que la diferencia con COUNT(*) da los NULL
@@ -140,11 +192,18 @@ SELECT
     COUNT(id_statsbomb)     as con_statsbomb,
     COUNT(*) - COUNT(id_statsbomb)     as sin_statsbomb
 FROM dim_match
-WHERE competition_id = ;
+WHERE competition_id = :competition_id;
+
+-- PARTIDOS DE UNA COMPETICIÓN POR TEMPORADA 
+
+SELECT season, COUNT(*) 
+FROM dim_match
+WHERE competition_id=:competition_id 
+GROUP BY season 
+ORDER BY season ASC;
 
 
-
--- comprobar partidos repetidos
+-- Comprobar partidos repetidos
 SELECT match_date, home_team_id, away_team_id, season, COUNT(*) as veces
 FROM dim_match
 WHERE competition_id = 1
@@ -156,8 +215,8 @@ LIMIT 20;
 
 
 
---------------------------------------------------------------------------------------------
--- SHOTS 
+---------------------------------------- SHOTS ----------------------------------------------------
+
 -- Conteo de tiros por fuente
 SELECT 
     fs.data_source,
@@ -181,30 +240,31 @@ WHERE dm.competition_id = 1
 GROUP BY fs.data_source;
 
 
-
---Tiros de los jugadores de una competicion concreta (en este caso, Premier League) con el nombre del jugador y el equipo
+-- TIROS DE JUGADORES DE UNA COMPETICIÓN
+-- Muestra los tiros de los jugadores de una competicion concreta con el nombre del jugador y el equipo
 select dp.canonical_name, dt.canonical_name, fs.*
 from fact_shots fs
 join dim_player dp  on fs.player_id = dp.canonical_id
 join dim_team dt on fs.team_id = dt.canonical_id
 join dim_match dm on fs.match_id = dm.match_id
 join dim_competition dc on dm.competition_id = dc.canonical_id
-where dc.canonical_id = ;
+where dc.canonical_id =:competition_id;
 
 
---tiros totales por jugador de uan competicion concreta
+-- TOTAL TIROS POR JUGADOR EN UNA COMPETICIÓN 
+-- Tiros totales por jugador de una competicion concreta
 select dp.canonical_name, COUNT(*) as total_tiros_jugador
 from fact_shots fs
 join dim_player dp  on fs.player_id = dp.canonical_id 
 join dim_team dt on fs.team_id = dt.canonical_id 
 join dim_match dm on fs.match_id = dm.match_id 
 join dim_competition dc on dm.competition_id = dc.canonical_id 
-where dc.canonical_id =11
-group 
-by dp.canonical_name 
+where dc.canonical_id =:competition_id
+group by dp.canonical_name 
 order by total_tiros_jugador desc;
 
---tiros totales por equipo de una competicion concreta 
+-- TIROS TOTALES POR EQUIPO EN UNA COMPETICIÓN 
+-- tiros totales por equipo de una competicion concreta 
 select dt.canonical_name, COUNT(*) as total_tiros_equipo
 from fact_shots fs
 join dim_player dp  on fs.player_id = dp.canonical_id 
@@ -216,15 +276,15 @@ group
 by dt.canonical_name 
 order by total_tiros_equipo desc;
 
---------------------------------------------------------------------------------------------
---EVENTS 
+---------------------------------------- EVENTS ----------------------------------------------------
+
 -- Conteo de eventos por fuente
 SELECT 
     fe.data_source,
     COUNT(*) as total_eventos
 FROM fact_events fe
 JOIN dim_match dm ON fe.match_id = dm.match_id
-WHERE dm.competition_id = 
+WHERE dm.competition_id =:competition_id
 GROUP BY fe.data_source;
 
 -- Verificación de coordenadas por fuente
@@ -263,8 +323,8 @@ LIMIT 20;
 
 
 
---------------------------------------------------------------------------------------------
--- PLAYER REVIEW 
+---------------------------------------- PLAYER REVIEW ----------------------------------------------------
+
 -- La mayoría de los jugadores en player_review aparecen una sola vez — simplemente son jugadores que el sistema no pudo enlazar automáticamente por diferencias de nombre entre fuentes. No son duplicados, son jugadores pendientes de resolución manual.
 
 -- Comprueba cuántos hay pendientes y cómo están distribuidos
