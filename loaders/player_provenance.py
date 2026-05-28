@@ -33,6 +33,14 @@ def ensure_player_provenance_schema(conn) -> None:
             ADD COLUMN IF NOT EXISTS season VARCHAR(20)
     """))
     conn.execute(text("""
+        ALTER TABLE player_review
+            ADD COLUMN IF NOT EXISTS source_team_id VARCHAR(50)
+    """))
+    conn.execute(text("""
+        ALTER TABLE player_review
+            ADD COLUMN IF NOT EXISTS source_team_name VARCHAR(150)
+    """))
+    conn.execute(text("""
         CREATE TABLE IF NOT EXISTS player_scrape_provenance (
             id               SERIAL PRIMARY KEY,
             source_system    VARCHAR(50)  NOT NULL,

@@ -361,6 +361,67 @@ def get_scraped_sofascore_match_ids() -> set[int]:
 
 # ── ORCHESTRATOR ──────────────────────────────────────────────────────────────
 
+def _sofascore_blocked_help(detail: Exception) -> str:
+    return (
+        "SofaScore sigue devolviendo challenge/403 incluso con Chrome. "
+        "Esto normalmente indica bloqueo del origen/IP. Ejecuta desde una IP residencial "
+        "o define SOFASCORE_PROXY con un proxy residencial/sticky válido. "
+        f"Detalle original: {detail}"
+    )
+
+
+def _ensure_selenium_client(
+    client,
+    driver: webdriver.Chrome | None,
+) -> tuple[webdriver.Chrome, webdriver.Chrome]:
+    """Abre Chrome visible y reutiliza cookies si HTTP ya fue bloqueado."""
+    if driver is not None:
+        return driver, driver
+    print("  [INFO] Reintentando con Chrome visible para resolver cookies/challenge...")
+    driver = create_driver(headless=False)
+    driver.get(SOFASCORE_WEB)
+    time.sleep(5)
+    return driver, driver
+
+
+def _get_season_id_with_fallback(
+    client,
+    driver: webdriver.Chrome | None,
+    tournament_id: int,
+    season_name: str,
+) -> tuple[Optional[int], Optional[str], object, webdriver.Chrome | None]:
+    try:
+        season_id, season_label = get_season_id(client, tournament_id, season_name)
+        return season_id, season_label, client, driver
+    except SofaScoreBlockedError as e:
+        print(f"  [WARN] Cliente HTTP bloqueado al resolver temporada: {e}")
+        driver, client = _ensure_selenium_client(client, driver)
+        try:
+            season_id, season_label = get_season_id(client, tournament_id, season_name)
+            return season_id, season_label, client, driver
+        except SofaScoreBlockedError as selenium_error:
+            raise SofaScoreBlockedError(_sofascore_blocked_help(selenium_error)) from selenium_error
+
+
+def _get_matches_with_fallback(
+    client,
+    driver: webdriver.Chrome | None,
+    tournament_id: int,
+    season_id: int,
+) -> tuple[list[dict], object, webdriver.Chrome | None]:
+    try:
+        matches = get_matches(client, tournament_id, season_id)
+        return matches, client, driver
+    except SofaScoreBlockedError as e:
+        print(f"  [WARN] Cliente HTTP bloqueado al descargar partidos: {e}")
+        driver, client = _ensure_selenium_client(client, driver)
+        try:
+            matches = get_matches(client, tournament_id, season_id)
+            return matches, client, driver
+        except SofaScoreBlockedError as selenium_error:
+            raise SofaScoreBlockedError(_sofascore_blocked_help(selenium_error)) from selenium_error
+
+
 def scrape_sofascore(
     season_name: str = None,
     tournament_id: int = TOURNAMENT_ID,
@@ -397,29 +458,16 @@ def scrape_sofascore(
         if season_id:
             print(f"  [INFO] SofaScore season_id resuelto desde tabla maestra: {season_id}")
         else:
-            season_id, season_label = get_season_id(client, tournament_id, season_name)
+            season_id, season_label, client, driver = _get_season_id_with_fallback(
+                client, driver, tournament_id, season_name,
+            )
         if season_id is None:
             raise ValueError(f"Temporada '{season_name}' no encontrada en SofaScore")
 
         print(f"\n[SEASON] Temporada: {season_label}  (id={season_id})")
-        try:
-            matches = get_matches(client, tournament_id, season_id)
-        except SofaScoreBlockedError as e:
-            print(f"  [WARN] Cliente HTTP bloqueado por SofaScore: {e}")
-            print("  [INFO] Reintentando con Chrome visible para resolver cookies/challenge...")
-            driver = create_driver(headless=False)
-            driver.get(SOFASCORE_WEB)
-            time.sleep(5)
-            client = driver
-            try:
-                matches = get_matches(client, tournament_id, season_id)
-            except SofaScoreBlockedError as selenium_error:
-                raise SofaScoreBlockedError(
-                    "SofaScore sigue devolviendo challenge/403 incluso con Chrome. "
-                    "Esto normalmente indica bloqueo del origen/IP. Ejecuta desde una IP residencial "
-                    "o define SOFASCORE_PROXY con un proxy residencial/sticky válido. "
-                    f"Detalle original: {selenium_error}"
-                ) from selenium_error
+        matches, client, driver = _get_matches_with_fallback(
+            client, driver, tournament_id, season_id,
+        )
         print(f"  [+] {len(matches)} partidos encontrados")
 
         # Resolución de competition_name: si llegó vacío intentamos por

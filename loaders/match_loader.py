@@ -31,6 +31,21 @@ from utils.data_paths import iter_clean_csvs
 
 log = logging.getLogger(__name__)
 
+_DIM_MATCH_SCHEMA_READY = False
+
+
+def ensure_dim_match_schema(conn) -> None:
+    """Aplica migraciones idempotentes requeridas por los loaders de partidos."""
+    global _DIM_MATCH_SCHEMA_READY
+    if _DIM_MATCH_SCHEMA_READY:
+        return
+
+    conn.execute(text("""
+        ALTER TABLE dim_match ADD COLUMN IF NOT EXISTS attendance INTEGER
+    """))
+    _DIM_MATCH_SCHEMA_READY = True
+    log.info("Schema dim_match verificado (attendance)")
+
 
 # Filtro de competición activo (lo setea load_matches para encadenar a sub-pasos).
 _active_comp_filter: list = [None]
@@ -848,6 +863,7 @@ def load_matches(conn, comp_name: str | None = None) -> int:
         comp_name: si se especifica restringe a `data/clean/<comp_slug>/...`.
     """
     log.info("[START] Cargando dim_match... (comp=%s)", comp_name or "todas")
+    ensure_dim_match_schema(conn)
     _active_comp_filter[0] = comp_name
     try:
         _load_from_sofascore(conn)
