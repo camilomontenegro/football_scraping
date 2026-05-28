@@ -23,28 +23,22 @@ from typing import Dict, Any
 # ═══════════════════════════════════════════════════════════════════════
 # DICCIONARIO DE COMPETICIONES
 # ═══════════════════════════════════════════════════════════════════════
-
 COMPETITIONS: Dict[str, Dict[str, Any]] = {
     # ═══════════════════════════════════════════════════════════════════
     # ESPAÑA
     # ═══════════════════════════════════════════════════════════════════
-    
-
-
+ 
     "La Liga": {
         "name": "LaLiga",
         "country": "Spain",
         "country_code": "ES",
+        "folder": "la_liga",
+        "data_sources": ["sofascore", "transfermarkt", "whoscored", "understat"],
         "sources": {
-
-            # En  transfermarkt  las url usan slugs. 
-            # hay que añadir el slug de la competición al diccionario
-            # Se añade el slug en todos los diccionarios 
-
             "transfermarkt": {
                 "league_code": "ES1",
                 "name": "LaLiga",
-                "slug":"laliga",
+                "slug": "laliga",
             },
             "sofascore": {
                 "tournament_id": 8,
@@ -65,11 +59,13 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             },
         },
     },
-    
+ 
     "Segunda División": {
         "name": "Segunda División",
         "country": "Spain",
         "country_code": "ES",
+        "folder": "segunda_division",
+        "data_sources": ["sofascore", "transfermarkt", "whoscored"],
         "sources": {
             "transfermarkt": {
                 "league_code": "ES2",
@@ -77,16 +73,15 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "slug": "laliga2",
             },
             "sofascore": {
-                "tournament_id": 54, # Cambiado de 39 a 54
+                "tournament_id": 54,
                 "name": "LaLiga2",
             },
             "understat": {
-                # understat no tiene datos de Segunda Division 
-                "league": None,
-                "name": "La Liga",  # Understat no tiene Segunda
+                "league": None,  # Understat no tiene Segunda División
+                "name": "La Liga",
             },
             "statsbomb": {
-                "competition_id": None,  # Verificar
+                "competition_id": None,
                 "name": "Segunda División",
             },
             "whoscored": {
@@ -96,15 +91,17 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             },
         },
     },
-    
+ 
     # ═══════════════════════════════════════════════════════════════════
     # INGLATERRA
     # ═══════════════════════════════════════════════════════════════════
-    
+ 
     "Premier League": {
         "name": "Premier League",
         "country": "England",
         "country_code": "GB",
+        "folder": "premier_league",
+        "data_sources": ["sofascore", "transfermarkt", "whoscored", "understat"],
         "sources": {
             "transfermarkt": {
                 "league_code": "GB1",
@@ -112,7 +109,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "slug": "premier-league",
             },
             "sofascore": {
-                "tournament_id": 17, #cambiado de 2 a 17
+                "tournament_id": 17,
                 "name": "Premier League",
             },
             "understat": {
@@ -130,19 +127,21 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             },
         },
     },
-    
+ 
     "Championship": {
         "name": "Championship",
         "country": "England",
         "country_code": "GB",
+        "folder": "championship",
+        "data_sources": ["sofascore", "transfermarkt", "whoscored"],
         "sources": {
             "transfermarkt": {
                 "league_code": "GB2",
                 "name": "Championship",
-                "slug":"championship",
+                "slug": "championship",
             },
             "sofascore": {
-                "tournament_id":18, #cambiado de 35 a 18
+                "tournament_id": 18,
                 "name": "Championship",
             },
             "understat": {
@@ -160,15 +159,17 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             },
         },
     },
-    
+ 
     # ═══════════════════════════════════════════════════════════════════
     # ALEMANIA
     # ═══════════════════════════════════════════════════════════════════
-    
+ 
     "Bundesliga": {
         "name": "Bundesliga",
         "country": "Germany",
         "country_code": "DE",
+        "folder": "bundesliga",
+        "data_sources": ["sofascore", "transfermarkt", "whoscored", "understat"],
         "sources": {
             "transfermarkt": {
                 "league_code": "L1",
@@ -176,7 +177,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "slug": "bundesliga",
             },
             "sofascore": {
-                "tournament_id": 35,  # cambiado de 3 a 35
+                "tournament_id": 35,
                 "name": "Bundesliga",
             },
             "understat": {
@@ -189,29 +190,30 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             },
             "whoscored": {
                 "region_id": 81,
-                # el tournament id se cambia de 7 a 3 
                 "tournament_id": 3,
                 "name": "Bundesliga",
             },
         },
     },
-    
+ 
     # ═══════════════════════════════════════════════════════════════════
     # ITALIA
     # ═══════════════════════════════════════════════════════════════════
-    
+ 
     "Serie A": {
         "name": "Serie A",
         "country": "Italy",
         "country_code": "IT",
+        "folder": "serie_a",
+        "data_sources": ["sofascore", "transfermarkt", "whoscored", "understat"],
         "sources": {
             "transfermarkt": {
                 "league_code": "IT1",
                 "name": "Serie A",
-                "slug":"serie-a",
+                "slug": "serie-a",
             },
             "sofascore": {
-                "tournament_id":  23, #Estaba 4 ,cambiado a 23
+                "tournament_id": 23,
                 "name": "Serie A",
             },
             "understat": {
@@ -223,31 +225,32 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Serie A",
             },
             "whoscored": {
-                
-                "region_id":  108, # de  106 a 108 ,
-                "tournament_id": 5,  #  de 13 a 5
+                "region_id": 108,
+                "tournament_id": 5,
                 "name": "Serie A",
             },
         },
     },
-    
+ 
     # ═══════════════════════════════════════════════════════════════════
     # FRANCIA
     # ═══════════════════════════════════════════════════════════════════
-    
+ 
     "Ligue 1": {
         "name": "Ligue 1",
         "country": "France",
         "country_code": "FR",
+        "folder": "ligue_1",
+        "data_sources": ["sofascore", "transfermarkt", "whoscored", "understat"],
         "sources": {
             "transfermarkt": {
                 "league_code": "FR1",
                 "name": "Ligue 1",
-                "slug":"ligue-1",
+                "slug": "ligue-1",
             },
             "sofascore": {
-                "tournament_id": 34, #cambiado de 5 a 34
-                "name": "Ligue 1", 
+                "tournament_id": 34,
+                "name": "Ligue 1",
             },
             "understat": {
                 "league": "Ligue_1",
@@ -259,33 +262,34 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             },
             "whoscored": {
                 "region_id": 74,
-                "tournament_id": 22, # cambiado de 1 a 22 
+                "tournament_id": 22,
                 "name": "Ligue 1",
             },
         },
     },
-    
+ 
     # ═══════════════════════════════════════════════════════════════════
     # PORTUGAL
     # ═══════════════════════════════════════════════════════════════════
-    
+ 
     "Primeira Liga": {
         "name": "Primeira Liga",
         "country": "Portugal",
         "country_code": "PT",
+        "folder": "primeira_liga",
+        "data_sources": ["sofascore", "transfermarkt", "whoscored"],
         "sources": {
             "transfermarkt": {
                 "league_code": "PO1",
-                 #LigaPortugal pone en la web 
                 "name": "Primeira Liga",
                 "slug": "liga-nos",
             },
             "sofascore": {
-                "tournament_id": 238, #cambiado 314 por 238
-                "name": "Liga Portugal Betclic",  #cambiado tmbn el nombre
+                "tournament_id": 238,
+                "name": "Liga Portugal Betclic",
             },
             "understat": {
-                "league": None, # Understat no tiene Primeira Liga
+                "league": None,  # Understat no tiene Primeira Liga
                 "name": "Primeira Liga",
             },
             "statsbomb": {
@@ -293,29 +297,31 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Primeira Liga",
             },
             "whoscored": {
-                "region_id": 177, # antes 178 
-                "tournament_id": 21, # antes 187
+                "region_id": 177,
+                "tournament_id": 21,
                 "name": "Primeira Liga",
             },
         },
     },
-    
+ 
     # ═══════════════════════════════════════════════════════════════════
     # PAÍSES BAJOS
     # ═══════════════════════════════════════════════════════════════════
-    
+ 
     "Eredivisie": {
         "name": "Eredivisie",
         "country": "Netherlands",
         "country_code": "NL",
+        "folder": "eredivisie",
+        "data_sources": ["sofascore", "transfermarkt", "whoscored"],
         "sources": {
             "transfermarkt": {
                 "league_code": "NL1",
                 "name": "Eredivisie",
-                "slug":"eredivisie",
+                "slug": "eredivisie",
             },
             "sofascore": {
-                "tournament_id": 37, # cambiado de 9 a 37
+                "tournament_id": 37,
                 "name": "Eredivisie",
             },
             "understat": {
@@ -328,20 +334,22 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
             },
             "whoscored": {
                 "region_id": 155,
-                "tournament_id": 13, # antes 10
+                "tournament_id": 13,
                 "name": "Eredivisie",
             },
         },
     },
-    
+ 
     # ═══════════════════════════════════════════════════════════════════
     # COMPETICIONES EUROPEAS
     # ═══════════════════════════════════════════════════════════════════
-    
+ 
     "Champions League": {
         "name": "UEFA Champions League",
         "country": "Europe",
         "country_code": "EU",
+        "folder": "champions",
+        "data_sources": ["sofascore", "transfermarkt", "whoscored"],
         "sources": {
             "transfermarkt": {
                 "league_code": "CL",
@@ -361,17 +369,20 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Champions League",
             },
             "whoscored": {
-                "region_id": 250, 
-                "tournament_id": 12, 
+                "region_id": 250,
+                "tournament_id": 12,
                 "name": "Champions League",
+                "slug": "europe-champions-league",
             },
         },
     },
-    
+ 
     "Europa League": {
         "name": "UEFA Europa League",
         "country": "Europe",
         "country_code": "EU",
+        "folder": "europa_league",
+        "data_sources": ["sofascore", "transfermarkt", "whoscored"],
         "sources": {
             "transfermarkt": {
                 "league_code": "EL",
@@ -391,25 +402,28 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Europa League",
             },
             "whoscored": {
-                "region_id": 250, # antes era 2
-                "tournament_id": 30, # antes era 404
+                "region_id": 250,
+                "tournament_id": 30,
                 "name": "Europa League",
             },
         },
     },
-    
+
+    # Esta no esta descargada
     "Europa Conference League": {
         "name": "UEFA Europa Conference League",
         "country": "Europe",
         "country_code": "EU",
+        "folder": "europa_conference_league",
+        "data_sources": ["sofascore", "transfermarkt", "whoscored"],
         "sources": {
             "transfermarkt": {
                 "league_code": "ECL",
                 "name": "Conference League",
-                "slug":"uefa-europa-conference-league"
+                "slug": "uefa-europa-conference-league",
             },
             "sofascore": {
-                "tournament_id": 17015,  # Nuevo ID para Europa Conference League 17015
+                "tournament_id": 17015,
                 "name": "Europa Conference League",
             },
             "understat": {
@@ -428,7 +442,6 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
         },
     },
 }
-
 # he cambiado el tipo de dato de  ind_understat en dim_competition a VARCHAR para poder meter el codigo 
 # de understat. Probablemente seria mejor, dejarlo en None en el propio dictionarip
 
@@ -457,6 +470,27 @@ def get_source_ids(competition_name: str, source: str) -> Dict[str, Any]:
         return comp["sources"][source]
     return {}
 
+ 
+def get_competition_folder(competition_name: str) -> str | None:
+    """Obtiene el nombre de la carpeta de datos para una competición."""
+    comp = get_competition(competition_name)
+    return comp.get("folder") if comp else None
+ 
+ 
+def get_data_sources(competition_name: str) -> list[str]:
+    """Obtiene las fuentes de datos disponibles para una competición.
+    Devuelve una lista con las fuentes de las que se extraen datos para una competicion
+    Para algunas competiciones understat no tiene datos (Champions League, EuropaLeague, Primeira liga, etc)
+    
+    Ejemplo:
+        get_data_sources("La Liga") → ["sofascore", "transfermarkt", "whoscored", "understat"]
+        get_data_sources("Champions League") → ["sofascore", "transfermarkt", "whoscored"]
+        get_data_sources("Primeira Liga") → ["sofascore", "transfermarkt", "whoscored"]
+    """
+
+    comp = get_competition(competition_name)
+    return comp.get("data_sources", []) if comp else []
+ 
 
 # ═══════════════════════════════════════════════════════════════════════
 # SLUG
