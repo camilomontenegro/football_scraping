@@ -34,6 +34,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import random
 import re
 import csv
 import sys
@@ -64,18 +65,94 @@ class SofaScoreBlockedError(RuntimeError):
     """Raised when SofaScore returns anti-bot challenge/forbidden JSON."""
 
 #CONSTANTS
-TOURNAMENT_ID = 8                          # La Liga en SofaScore
-SEASON_NAMES  = ["LaLiga 20/21", "LaLiga 21/22", "LaLiga 22/23", "LaLiga 23/24", "LaLiga 24/25", "LaLiga 25/26"]  # temporadas a scrapear
-DELAY_SEC     = 1.2                        # pausa entre peticiones; SofaScore penaliza ráfagas rápidas
+TOURNAMENT_ID = 8                          # La Liga en SofaScore (default CLI)
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        log.warning("Valor inválido en %s=%r; uso por defecto %.1f", name, raw, default)
+        return default
+
+
+# Pausas anti-bloqueo (env: SOFASCORE_DELAY_SEC, SOFASCORE_MATCH_DELAY_SEC, …)
+REQUEST_DELAY_SEC = _env_float("SOFASCORE_DELAY_SEC", 2.5)           # entre peticiones HTTP
+MATCH_DELAY_SEC = _env_float("SOFASCORE_MATCH_DELAY_SEC", 4.0)       # tras cada partido (3 endpoints)
+JITTER_SEC = _env_float("SOFASCORE_JITTER_SEC", 0.8)                 # aleatorio extra por petición
+BLOCK_COOLDOWN_SEC = _env_float("SOFASCORE_BLOCK_COOLDOWN_SEC", 45.0)  # tras 403/429
+DELAY_SEC = REQUEST_DELAY_SEC  # alias legacy (reintentos internos)
+
+_last_request_at: float = 0.0
+
+
+def _throttle(min_sec: float | None = None) -> None:
+    """Espera entre peticiones para no disparar rate-limit / bloqueo de IP."""
+    global _last_request_at
+    target = (min_sec if min_sec is not None else REQUEST_DELAY_SEC) + (
+        random.uniform(0.0, JITTER_SEC) if JITTER_SEC > 0 else 0.0
+    )
+    elapsed = time.monotonic() - _last_request_at
+    if elapsed < target:
+        time.sleep(target - elapsed)
+    _last_request_at = time.monotonic()
+
+
+def _throttle_between_matches() -> None:
+    """Pausa extra al terminar shots+events+lineups de un partido."""
+    if MATCH_DELAY_SEC <= 0:
+        return
+    extra = MATCH_DELAY_SEC + (random.uniform(0.0, JITTER_SEC) if JITTER_SEC > 0 else 0.0)
+    log.debug("Pausa entre partidos: %.1fs", extra)
+    time.sleep(extra)
+    global _last_request_at
+    _last_request_at = time.monotonic()
+
+
+def _throttle_after_block() -> None:
+    """Enfriamiento tras 403/429 antes de seguir con el siguiente partido."""
+    if BLOCK_COOLDOWN_SEC <= 0:
+        return
+    wait = BLOCK_COOLDOWN_SEC + random.uniform(0.0, JITTER_SEC * 2 if JITTER_SEC > 0 else 0.0)
+    log.warning("Pausa anti-bloqueo %.0fs antes de continuar…", wait)
+    time.sleep(wait)
+    global _last_request_at
+    _last_request_at = time.monotonic()
+
+
+def _print_throttle_config() -> None:
+    print(
+        f"  [INFO] Pausas SofaScore: {REQUEST_DELAY_SEC:.1f}s/petición, "
+        f"{MATCH_DELAY_SEC:.1f}s/partido, jitter ±{JITTER_SEC:.1f}s, "
+        f"cooldown 403: {BLOCK_COOLDOWN_SEC:.0f}s "
+        f"(env: SOFASCORE_DELAY_SEC, SOFASCORE_MATCH_DELAY_SEC, …)"
+    )
+
+
 PROJECT_ROOT  = Path(__file__).resolve().parent.parent
+from scrapers.sofascore_seasons import (
+    SOFASCORE_SEASON_IDS,
+    TOURNAMENT_ID_BY_COMPETITION,
+    default_seasons_for_competition,
+    get_fallback_season_id,
+    season_lookup_keys as _season_lookup_keys,
+    sofascore_season_available,
+)
+
+# Compat legacy: temporadas por defecto de La Liga si no se pasa --competition/--seasons
+SEASON_NAMES = default_seasons_for_competition("La Liga")
 SOFASCORE_API = "https://api.sofascore.com/api/v1"
-SOFASCORE_WEB = "https://www.sofascore.com/"
+SOFASCORE_MIRROR_API = "https://api.var11.com/api/v1"
+SOFASCORE_WEB = "https://www.sofascore.com/es-la"
 SOFASCORE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "en-US,en;q=0.9,es;q=0.8",
     "Origin": "https://www.sofascore.com",
-    "Referer": SOFASCORE_WEB,
+    "Referer": "https://www.sofascore.com/",
     "Sec-Fetch-Dest": "empty",
     "Sec-Fetch-Mode": "cors",
     "Sec-Fetch-Site": "same-site",
@@ -103,17 +180,133 @@ def create_driver(headless: bool = True) -> webdriver.Chrome:
     if headless:
         options.add_argument("--headless=new")
     options.add_argument("--disable-gpu")
-    options.add_argument("--disable-images")
     options.add_argument("--disable-extensions")
     options.add_argument("--no-sandbox")
     options.add_argument("--window-size=1365,900")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
     options.add_argument(f"--user-agent={SOFASCORE_HEADERS['User-Agent']}")
+
+    profile = os.getenv("SOFASCORE_CHROME_PROFILE")
+    if profile:
+        options.add_argument(f"--user-data-dir={profile}")
+
     options.page_load_strategy = "eager"
 
-    return webdriver.Chrome(
+    driver = webdriver.Chrome(
         service=Service(ChromeDriverManager().install()),
         options=options,
     )
+    try:
+        driver.execute_cdp_cmd(
+            "Page.addScriptToEvaluateOnNewDocument",
+            {"source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"},
+        )
+    except Exception:
+        pass
+    return driver
+
+
+_PREFERRED_API_BASE: str | None = None
+
+
+def _remember_working_base(full_url: str) -> None:
+    global _PREFERRED_API_BASE
+    for base in (SOFASCORE_API, SOFASCORE_MIRROR_API):
+        if full_url.startswith(f"{base}/"):
+            _PREFERRED_API_BASE = base
+            if base != SOFASCORE_API:
+                log.info("SofaScore: usando base alternativa %s", base)
+            return
+
+
+def _api_bases() -> list[str]:
+    """API bases to try, in order. Mirror is used automatically after 403/challenge."""
+    primary = os.getenv("SOFASCORE_API", SOFASCORE_API).rstrip("/")
+    mirror = os.getenv("SOFASCORE_MIRROR_API", SOFASCORE_MIRROR_API).rstrip("/")
+    disable_mirror = os.getenv("SOFASCORE_DISABLE_MIRROR", "").lower() in ("1", "true", "yes")
+    mirror_first = os.getenv("SOFASCORE_MIRROR_FIRST", "").lower() in ("1", "true", "yes")
+
+    bases: list[str] = []
+    if _PREFERRED_API_BASE:
+        bases.append(_PREFERRED_API_BASE)
+    if mirror_first and mirror and mirror not in bases:
+        bases.append(mirror)
+    if primary and primary not in bases:
+        bases.append(primary)
+    if not disable_mirror and mirror and mirror not in bases:
+        bases.append(mirror)
+    return bases
+
+
+def _relative_api_path(url: str) -> str:
+    for base in _api_bases():
+        prefix = f"{base}/"
+        if url.startswith(prefix):
+            return url[len(prefix):]
+    marker = "/api/v1/"
+    idx = url.find(marker)
+    if idx >= 0:
+        return url[idx + len(marker):]
+    return url.lstrip("/")
+
+
+def _alternate_api_urls(url: str) -> list[str]:
+    rel = _relative_api_path(url)
+    return [f"{base}/{rel}" for base in _api_bases()]
+
+
+def _sync_driver_cookies_to_session(driver: webdriver.Chrome, session) -> None:
+    """Copia cookies del navegador a la sesión HTTP tras superar el challenge."""
+    for cookie in driver.get_cookies():
+        name = cookie.get("name")
+        value = cookie.get("value")
+        if not name or value is None:
+            continue
+        domain = cookie.get("domain") or ".sofascore.com"
+        try:
+            session.cookies.set(name, value, domain=domain)
+        except Exception:
+            try:
+                session.cookies.set(name, value)
+            except Exception:
+                pass
+
+
+def _browser_fetch_json(driver: webdriver.Chrome, url: str, timeout_ms: int = 30000) -> dict:
+    """Ejecuta fetch() dentro del navegador (mismas cookies que la web)."""
+    script = """
+        const url = arguments[0];
+        const timeoutMs = arguments[1];
+        const done = arguments[arguments.length - 1];
+        const timer = setTimeout(() => done(JSON.stringify({
+            error: {reason: "browser fetch timeout"}
+        })), timeoutMs);
+        fetch(url, {
+            credentials: "include",
+            headers: {Accept: "application/json, text/plain, */*"},
+        })
+        .then(async (resp) => {
+            const text = await resp.text();
+            if (!resp.ok) {
+                clearTimeout(timer);
+                done(JSON.stringify({error: {reason: `HTTP ${resp.status}`, body: text.slice(0, 200)}}));
+                return;
+            }
+            clearTimeout(timer);
+            done(text);
+        })
+        .catch((err) => {
+            clearTimeout(timer);
+            done(JSON.stringify({error: {reason: String(err)}}));
+        });
+    """
+    body = driver.execute_async_script(script, url, timeout_ms)
+    if not body:
+        raise RuntimeError(f"Browser fetch vacío para {url}")
+    data = json.loads(body)
+    return _validate_sofascore_payload(data, url)
 
 
 def create_http_session():
@@ -161,33 +354,53 @@ def _validate_sofascore_payload(data: dict, url: str) -> dict:
 
 
 def _get_json_http(session: requests.Session, url: str) -> dict:
-    """Obtiene JSON vía requests, con reintentos cortos para 429/5xx."""
-    last_exc: Exception | None = None
-    for attempt in range(3):
-        try:
-            resp = session.get(url, timeout=20)
-            if resp.status_code in {403, 401, 429}:
-                raise SofaScoreBlockedError(
-                    f"SofaScore bloquea {url}: HTTP {resp.status_code}"
-                )
-            if resp.status_code >= 500 and attempt < 2:
-                time.sleep(DELAY_SEC * (attempt + 2))
-                continue
-            resp.raise_for_status()
-            return _validate_sofascore_payload(resp.json(), url)
-        except SofaScoreBlockedError:
-            raise
-        except (Exception, ValueError) as e:
-            last_exc = e
-            if attempt < 2:
-                time.sleep(DELAY_SEC * (attempt + 1))
-                continue
+    """Obtiene JSON vía HTTP probando bases alternativas (oficial → mirror)."""
+    last_blocked: Exception | None = None
+    for attempt_url in _alternate_api_urls(url):
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            try:
+                resp = session.get(attempt_url, timeout=25)
+                if resp.status_code in {403, 401, 429}:
+                    raise SofaScoreBlockedError(
+                        f"SofaScore bloquea {attempt_url}: HTTP {resp.status_code}"
+                    )
+                if resp.status_code >= 500 and attempt < 2:
+                    time.sleep(DELAY_SEC * (attempt + 2))
+                    continue
+                resp.raise_for_status()
+                data = resp.json()
+                _remember_working_base(attempt_url)
+                return _validate_sofascore_payload(data, attempt_url)
+            except SofaScoreBlockedError as e:
+                last_blocked = e
+                last_exc = e
+                break
+            except (Exception, ValueError) as e:
+                last_exc = e
+                if attempt < 2:
+                    time.sleep(DELAY_SEC * (attempt + 1))
+                    continue
+                break
+        if last_blocked and attempt_url != _alternate_api_urls(url)[-1]:
+            log.debug("SofaScore bloqueado en %s; probando base alternativa...", attempt_url)
+            continue
+    if last_blocked:
+        raise last_blocked
     raise RuntimeError(f"No se pudo leer JSON de SofaScore en {url}: {last_exc}")
 
 
-def _get_json_selenium(driver: webdriver.Chrome, url: str, timeout: float = 5) -> dict:
-    """Navega a una URL de la API de SofaScore con Selenium y devuelve JSON."""
-    driver.get(url)
+def _get_json_selenium(driver: webdriver.Chrome, url: str, timeout: float = 8) -> dict:
+    """Obtiene JSON con Selenium: fetch en contexto web y fallback a navegar la URL."""
+    last_exc: Exception | None = None
+    for attempt_url in _alternate_api_urls(url):
+        try:
+            return _browser_fetch_json(driver, attempt_url, timeout_ms=int(timeout * 1000))
+        except Exception as e:
+            last_exc = e
+            log.debug("Browser fetch falló en %s: %s", attempt_url, e)
+
+    driver.get(_alternate_api_urls(url)[0])
     try:
         WebDriverWait(driver, timeout).until(
             lambda d: len(d.find_element("tag name", "body").text.strip()) > 0
@@ -204,6 +417,7 @@ def _get_json_selenium(driver: webdriver.Chrome, url: str, timeout: float = 5) -
 
 def get_json(client, url: str) -> dict:
     """Devuelve JSON desde SofaScore usando requests o Selenium."""
+    _throttle()
     if _is_http_session(client):
         return _get_json_http(client, url)
     return _get_json_selenium(client, url)
@@ -211,24 +425,25 @@ def get_json(client, url: str) -> dict:
 
 # â”€â”€ FETCH FUNCTIONS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def _season_lookup_keys(season_name: str) -> set[str]:
-    keys = {str(season_name or "").strip()}
-    if re.match(r"^\d{4}/\d{4}$", str(season_name or "")):
-        start_year, end_year = season_name.split("/")
-        keys.add(f"{start_year[-2:]}/{end_year[-2:]}")
-        keys.add(f"{start_year}/{end_year[-2:]}")
-    return {k.lower() for k in keys if k}
+def _api_url(*parts: str) -> str:
+    """Construye URL canónica (base primaria) para un path relativo de la API."""
+    rel = "/".join(str(p).strip("/") for p in parts if p is not None)
+    return f"{_api_bases()[0]}/{rel}"
 
 
-def get_season_id(driver: webdriver.Chrome, tournament_id: int, season_name: str) -> tuple[Optional[int], Optional[str]]:
+def get_season_id(client, tournament_id: int, season_name: str) -> tuple[Optional[int], Optional[str]]:
     """Devuelve (season_id, season_label) para un nombre de temporada dado.
 
     Consulta el endpoint de temporadas del torneo y busca la que
     contenga season_name en su nombre.
     """
+    fallback_id, fallback_label = get_fallback_season_id(tournament_id, season_name)
+    if fallback_id:
+        return fallback_id, fallback_label
+
     data = get_json(
-        driver,
-        f"https://api.sofascore.com/api/v1/unique-tournament/{tournament_id}/seasons",
+        client,
+        _api_url("unique-tournament", tournament_id, "seasons"),
     )
     possible_names = _season_lookup_keys(season_name)
 
@@ -248,22 +463,23 @@ def get_reference_season_id(
 ) -> tuple[Optional[int], Optional[str]]:
     """Resolve SofaScore season_id from the local master reference table."""
     ref_path = PROJECT_ROOT / "data" / "reference" / "source_reference_ids.csv"
-    if not ref_path.exists():
-        return None, None
-    with ref_path.open("r", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            if (
-                row.get("source") == "sofascore"
-                and row.get("competition") == competition_name
-                and row.get("season") == season_name
-                and str(row.get("competition_id")) == str(tournament_id)
-                and row.get("season_id")
-            ):
-                return int(row["season_id"]), row.get("season") or season_name
-    return None, None
+    if ref_path.exists():
+        candidates = _season_lookup_keys(season_name)
+        with ref_path.open("r", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                row_season = row.get("season", "")
+                if (
+                    row.get("source") == "sofascore"
+                    and row.get("competition") == competition_name
+                    and str(row.get("competition_id")) == str(tournament_id)
+                    and row.get("season_id")
+                    and (_season_lookup_keys(row_season) & candidates)
+                ):
+                    return int(row["season_id"]), row_season or season_name
+    return get_fallback_season_id(tournament_id, season_name)
 
 
-def get_matches(driver: webdriver.Chrome, tournament_id: int, season_id: int) -> list[dict]:
+def get_matches(client, tournament_id: int, season_id: int) -> list[dict]:
     """Devuelve todos los partidos de una temporada paginando el endpoint.
 
     El endpoint devuelve hasta ~20 partidos por pÃ¡gina.
@@ -272,11 +488,11 @@ def get_matches(driver: webdriver.Chrome, tournament_id: int, season_id: int) ->
     events = []
     page   = 0
     while True:
-        url  = (
-            f"https://api.sofascore.com/api/v1/unique-tournament/{tournament_id}"
-            f"/season/{season_id}/events/last/{page}"
+        url = _api_url(
+            "unique-tournament", tournament_id,
+            "season", season_id, "events", "last", page,
         )
-        data  = get_json(driver, url)
+        data = get_json(client, url)
         batch = data.get("events", [])
         if not batch:
             break
@@ -326,18 +542,15 @@ def _get_match_date(match: dict) -> "date | None":
 
 
 def get_match_shots(client, match_id: int) -> dict:
-    """Devuelve el JSON crudo del mapa de tiros de un partido."""
-    return get_json(client, f"https://api.sofascore.com/api/v1/event/{match_id}/shotmap")
+    return get_json(client, _api_url("event", match_id, "shotmap"))
 
 
 def get_match_events(client, match_id: int) -> dict:
-    """Devuelve el JSON crudo de los incidentes de un partido."""
-    return get_json(client, f"https://api.sofascore.com/api/v1/event/{match_id}/incidents")
+    return get_json(client, _api_url("event", match_id, "incidents"))
 
 
 def get_match_lineups(client, match_id: int) -> dict:
-    """Devuelve el JSON crudo de las alineaciones de un partido."""
-    return get_json(client, f"https://api.sofascore.com/api/v1/event/{match_id}/lineups")
+    return get_json(client, _api_url("event", match_id, "lineups"))
 
 
 def get_scraped_sofascore_match_ids() -> set[int]:
@@ -361,26 +574,79 @@ def get_scraped_sofascore_match_ids() -> set[int]:
 
 # ── ORCHESTRATOR ──────────────────────────────────────────────────────────────
 
+def _auto_select_api_base(session, tournament_id: int, season_id: int) -> None:
+    """Si la API oficial devuelve 403, cambia al mirror sin esperar al fallo en bulk."""
+    global _PREFERRED_API_BASE
+    if _PREFERRED_API_BASE or os.getenv("SOFASCORE_DISABLE_MIRROR", "").lower() in ("1", "true", "yes"):
+        return
+    probe = f"{SOFASCORE_API.rstrip('/')}/unique-tournament/{tournament_id}/season/{season_id}/events/last/0"
+    try:
+        resp = session.get(probe, timeout=12)
+        if resp.status_code in {403, 401, 429}:
+            raise SofaScoreBlockedError(f"probe HTTP {resp.status_code}")
+        resp.raise_for_status()
+        _validate_sofascore_payload(resp.json(), probe)
+        return
+    except Exception:
+        mirror = os.getenv("SOFASCORE_MIRROR_API", SOFASCORE_MIRROR_API).rstrip("/")
+        _PREFERRED_API_BASE = mirror
+        print(f"  [INFO] API oficial bloqueada; usando mirror {mirror}")
+
+
 def _sofascore_blocked_help(detail: Exception) -> str:
     return (
-        "SofaScore sigue devolviendo challenge/403 incluso con Chrome. "
-        "Esto normalmente indica bloqueo del origen/IP. Ejecuta desde una IP residencial "
-        "o define SOFASCORE_PROXY con un proxy residencial/sticky válido. "
-        f"Detalle original: {detail}"
+        "SofaScore bloquea la API oficial y el mirror alternativo también falló. "
+        "Prueba SOFASCORE_MIRROR_FIRST=1, SOFASCORE_CHROME_PROFILE con tu perfil de Chrome, "
+        "o SOFASCORE_PROXY con un proxy residencial. "
+        f"Detalle: {detail}"
     )
+
+
+def _challenge_wait_seconds() -> int:
+    raw = os.getenv("SOFASCORE_CHALLENGE_WAIT_SEC", "90")
+    try:
+        return max(15, int(raw))
+    except ValueError:
+        return 90
+
+
+def _wait_for_browser_access(driver: webdriver.Chrome, probe_url: str) -> bool:
+    """Espera a que el usuario resuelva captcha/challenge en Chrome visible."""
+    wait_sec = _challenge_wait_seconds()
+    print(
+        f"  [INFO] Chrome abierto. Si ves captcha, resuélvelo en la ventana de SofaScore.\n"
+        f"         Esperando hasta {wait_sec}s a que la API responda..."
+    )
+    deadline = time.time() + wait_sec
+    while time.time() < deadline:
+        for attempt_url in _alternate_api_urls(probe_url):
+            try:
+                _browser_fetch_json(driver, attempt_url, timeout_ms=8000)
+                print("  [OK] Acceso a la API confirmado desde el navegador.")
+                return True
+            except Exception:
+                pass
+        time.sleep(3)
+    return False
 
 
 def _ensure_selenium_client(
     client,
     driver: webdriver.Chrome | None,
-) -> tuple[webdriver.Chrome, webdriver.Chrome]:
-    """Abre Chrome visible y reutiliza cookies si HTTP ya fue bloqueado."""
+    probe_url: str | None = None,
+) -> tuple[object, webdriver.Chrome]:
+    """Abre Chrome visible, calienta cookies y opcionalmente espera al usuario."""
     if driver is not None:
         return driver, driver
     print("  [INFO] Reintentando con Chrome visible para resolver cookies/challenge...")
     driver = create_driver(headless=False)
     driver.get(SOFASCORE_WEB)
-    time.sleep(5)
+    time.sleep(4)
+    if probe_url and not _wait_for_browser_access(driver, probe_url):
+        print("  [WARN] Timeout esperando challenge; se intentará igualmente con fetch del navegador.")
+    if _is_http_session(client):
+        _sync_driver_cookies_to_session(driver, client)
+        return client, driver
     return driver, driver
 
 
@@ -395,7 +661,10 @@ def _get_season_id_with_fallback(
         return season_id, season_label, client, driver
     except SofaScoreBlockedError as e:
         print(f"  [WARN] Cliente HTTP bloqueado al resolver temporada: {e}")
-        driver, client = _ensure_selenium_client(client, driver)
+        driver, client = _ensure_selenium_client(
+            client, driver,
+            probe_url=_api_url("unique-tournament", tournament_id, "seasons"),
+        )
         try:
             season_id, season_label = get_season_id(client, tournament_id, season_name)
             return season_id, season_label, client, driver
@@ -414,7 +683,10 @@ def _get_matches_with_fallback(
         return matches, client, driver
     except SofaScoreBlockedError as e:
         print(f"  [WARN] Cliente HTTP bloqueado al descargar partidos: {e}")
-        driver, client = _ensure_selenium_client(client, driver)
+        driver, client = _ensure_selenium_client(
+            client, driver,
+            probe_url=_api_url("unique-tournament", tournament_id, "season", season_id, "events", "last", 0),
+        )
         try:
             matches = get_matches(client, tournament_id, season_id)
             return matches, client, driver
@@ -430,6 +702,7 @@ def scrape_sofascore(
     full_refresh: bool = False,
 ) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
     """Orquestador principal."""
+    global _PREFERRED_API_BASE
     print(f"  [INFO] Iniciando scrape_sofascore para {competition_name} ({season_name or 'actual'})...")
     
     if season_name is None:
@@ -441,7 +714,8 @@ def scrape_sofascore(
         print(f"  [FILTER] Descargando solo partidos desde: {from_date}")
     
     print("  [INFO] Iniciando sesión HTTP con SofaScore...")
-    
+    _print_throttle_config()
+
     from utils.batch import generate_batch_id
     batch_id = generate_batch_id()
 
@@ -464,6 +738,13 @@ def scrape_sofascore(
         if season_id is None:
             raise ValueError(f"Temporada '{season_name}' no encontrada en SofaScore")
 
+        _PREFERRED_API_BASE = None
+        if os.getenv("SOFASCORE_MIRROR_FIRST", "").lower() in ("1", "true", "yes"):
+            _PREFERRED_API_BASE = os.getenv("SOFASCORE_MIRROR_API", SOFASCORE_MIRROR_API).rstrip("/")
+            print(f"  [INFO] SOFASCORE_MIRROR_FIRST activo -> {_PREFERRED_API_BASE}")
+        elif _is_http_session(client):
+            _auto_select_api_base(client, tournament_id, season_id)
+
         print(f"\n[SEASON] Temporada: {season_label}  (id={season_id})")
         matches, client, driver = _get_matches_with_fallback(
             client, driver, tournament_id, season_id,
@@ -477,7 +758,7 @@ def scrape_sofascore(
             try:
                 from wizard.competitions import COMPETITIONS
                 for key, config in COMPETITIONS.items():
-                    if config.get("sources", {}).get("sofascore", {}).get("id") == tournament_id:
+                    if config.get("sources", {}).get("sofascore", {}).get("tournament_id") == tournament_id:
                         resolved_comp = key
                         break
             except Exception:
@@ -541,6 +822,8 @@ def scrape_sofascore(
             match_dir = base_path / "matches" / str(match_id)
             match_dir.mkdir(parents=True, exist_ok=True)
 
+            match_blocked = False
+
             # Tiros
             try:
                 shots_raw = get_match_shots(client, match_id)
@@ -552,6 +835,9 @@ def scrape_sofascore(
                     s["_home_team_id_ss"] = m.get("homeTeam", {}).get("id")
                     s["_away_team_id_ss"] = m.get("awayTeam", {}).get("id")
                 all_shots.extend(shots_raw.get("shotmap", []))
+            except SofaScoreBlockedError as e:
+                match_blocked = True
+                log.warning("Shots failed match %d: %s", match_id, e)
             except Exception as e:
                 log.warning("Shots failed match %d: %s", match_id, e)
 
@@ -563,6 +849,9 @@ def scrape_sofascore(
                     ev["_match_id_ss"]  = match_id
                     ev["_season_label"] = season_label
                 all_events.extend(events_raw.get("incidents", []))
+            except SofaScoreBlockedError as e:
+                match_blocked = True
+                log.warning("Events failed match %d: %s", match_id, e)
             except Exception as e:
                 log.warning("Events failed match %d: %s", match_id, e)
 
@@ -571,8 +860,15 @@ def scrape_sofascore(
                 lineups_raw = get_match_lineups(client, match_id)
                 _save_json(lineups_raw, match_dir / "lineups.json")
                 all_lineups.append({"match_id": match_id, "data": lineups_raw})
+            except SofaScoreBlockedError as e:
+                match_blocked = True
+                log.warning("Lineups failed match %d: %s", match_id, e)
             except Exception as e:
                 log.warning("Fallo general en partido %d: %s", match_id, e)
+
+            if match_blocked:
+                _throttle_after_block()
+            _throttle_between_matches()
 
     finally:
         if driver is not None:
@@ -632,19 +928,27 @@ def transform_matches(matches: list[dict]) -> pd.DataFrame:
             venue = m.get("venue") or {}
             attendance = venue.get("attendance")
 
+        # Referee (puede ser None en muchos partidos sin oficial publicado)
+        ref = m.get("referee") or {}
+        ref_country = (ref.get("country") or {}).get("name") if isinstance(ref.get("country"), dict) \
+                      else ref.get("country")
+
         rows.append({
-            "id_sofascore":    m.get("id"),
-            "match_date":      _ss_timestamp_to_date(m.get("startTimestamp")),
-            "competition":     m.get("tournament", {}).get("name"),
-            "season":          m.get("season", {}).get("name"),
-            "home_team_id_ss": m.get("homeTeam", {}).get("id"),
-            "away_team_id_ss": m.get("awayTeam", {}).get("id"),
-            "home_team_name":  m.get("homeTeam", {}).get("name"),
-            "away_team_name":  m.get("awayTeam", {}).get("name"),
-            "home_score":      m.get("homeScore", {}).get("current"),
-            "away_score":      m.get("awayScore", {}).get("current"),
-            "attendance":      attendance,
-            "data_source":     "sofascore",
+            "id_sofascore":     m.get("id"),
+            "match_date":       _ss_timestamp_to_date(m.get("startTimestamp")),
+            "competition":      m.get("tournament", {}).get("name"),
+            "season":           m.get("season", {}).get("name"),
+            "home_team_id_ss":  m.get("homeTeam", {}).get("id"),
+            "away_team_id_ss":  m.get("awayTeam", {}).get("id"),
+            "home_team_name":   m.get("homeTeam", {}).get("name"),
+            "away_team_name":   m.get("awayTeam", {}).get("name"),
+            "home_score":       m.get("homeScore", {}).get("current"),
+            "away_score":       m.get("awayScore", {}).get("current"),
+            "attendance":       attendance,
+            "referee_id_ss":    ref.get("id"),
+            "referee_name":     ref.get("name"),
+            "referee_country":  ref_country,
+            "data_source":      "sofascore",
         })
     return pd.DataFrame(rows)
 
@@ -825,14 +1129,14 @@ def main():
     # Resuelve el tournament_id de la competición elegida.
     tournament_id = TOURNAMENT_ID
     try:
-        from wizard.competitions import COMPETITIONS, get_competition
+        from wizard.competitions import get_competition
         cfg = get_competition(args.competition) if args.competition else None
         if cfg:
-            tournament_id = cfg.get("sources", {}).get("sofascore", {}).get("id", TOURNAMENT_ID)
+            tournament_id = cfg.get("sources", {}).get("sofascore", {}).get("tournament_id", TOURNAMENT_ID)
     except Exception:
         pass
 
-    seasons = args.seasons or SEASON_NAMES
+    seasons = args.seasons or default_seasons_for_competition(args.competition or "La Liga")
 
     print("=" * 55)
     print(f"  SofaScore scraper — {args.competition} — {len(seasons)} temporada(s)")

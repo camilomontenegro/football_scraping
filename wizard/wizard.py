@@ -347,6 +347,11 @@ def _reference_has_source(competition: str, season: str, source: str) -> bool:
     return False
 
 
+def _sofascore_season_available(competition: str, season: str) -> bool:
+    from scrapers.sofascore_seasons import sofascore_season_available
+    return sofascore_season_available(competition, season)
+
+
 def _available_sources_for(comp_conf: Dict[str, Any], competition: str, season: str) -> List[str]:
     """Devuelve la lista de fuentes con datos para esta competición."""
     sources_map = comp_conf.get("sources", {})
@@ -357,7 +362,10 @@ def _available_sources_for(comp_conf: Dict[str, Any], competition: str, season: 
         available.append("transfermarkt")
 
     sf = sources_map.get("sofascore", {})
-    if sf.get("tournament_id") is not None and _reference_has_source(competition, season, "sofascore"):
+    if sf.get("tournament_id") is not None and (
+        _reference_has_source(competition, season, "sofascore")
+        or _sofascore_season_available(competition, season)
+    ):
         available.append("sofascore")
 
     # Understat — sólo para ligas nacionales.  No tiene datos fiables
