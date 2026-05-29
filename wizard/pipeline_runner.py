@@ -324,6 +324,11 @@ def _reference_has_source(competition: str, season: str, source: str) -> bool:
     return False
 
 
+def _sofascore_season_available(competition: str, season: str) -> bool:
+    from scrapers.sofascore_seasons import sofascore_season_available
+    return sofascore_season_available(competition, season)
+
+
 # ─────────────────────────────────────────────────────────────────────
 # Competiciones registradas en la base de datos (dim_competition)
 # ─────────────────────────────────────────────────────────────────────
@@ -418,7 +423,10 @@ def available_sources_for_competition(
         available.append("transfermarkt")
 
     sf = sources_map.get("sofascore", {})
-    if sf.get("tournament_id") is not None and _reference_has_source(competition, season, "sofascore"):
+    if sf.get("tournament_id") is not None and (
+        _reference_has_source(competition, season, "sofascore")
+        or _sofascore_season_available(competition, season)
+    ):
         available.append("sofascore")
 
     us = sources_map.get("understat", {})

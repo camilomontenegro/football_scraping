@@ -38,29 +38,7 @@ STATSBOMB_COMPETITIONS_URL = (
 )
 _SS_DRIVER = None
 
-SOFASCORE_SEASON_FALLBACKS: dict[int, dict[str, int]] = {
-    # Verified against SofaScore seasons API on 2026-05-08.
-    8: {
-        "2018/2019": 18020, "2019/2020": 24127, "2020/2021": 32501,
-        "2021/2022": 37223, "2022/2023": 42409, "2023/2024": 52376,
-        "2024/2025": 61643, "2025/2026": 77559,
-    },
-    17: {
-        "2018/2019": 17359, "2019/2020": 23776, "2020/2021": 29415,
-        "2021/2022": 37036, "2022/2023": 41886, "2023/2024": 52186,
-        "2024/2025": 61627, "2025/2026": 76986,
-    },
-    18: {
-        "2018/2019": 17473, "2019/2020": 23976, "2020/2021": 29438,
-        "2021/2022": 37154, "2022/2023": 42401, "2023/2024": 52367,
-        "2024/2025": 61961, "2025/2026": 77347,
-    },
-    34: {
-        "2018/2019": 17279, "2019/2020": 23872, "2020/2021": 28222,
-        "2021/2022": 37167, "2022/2023": 42273, "2023/2024": 52571,
-        "2024/2025": 61736, "2025/2026": 77356,
-    },
-}
+from scrapers.sofascore_seasons import SOFASCORE_SEASON_IDS
 
 
 def _get_json(url: str) -> dict | list:
@@ -123,7 +101,7 @@ def _sofascore_seasons(tournament_id: int) -> dict[str, dict]:
             seasons[f"20{a}/20{b}"] = item
         if name:
             seasons[name] = item
-    for season, season_id in SOFASCORE_SEASON_FALLBACKS.get(tournament_id, {}).items():
+    for season, season_id in SOFASCORE_SEASON_IDS.get(tournament_id, {}).items():
         short = _short_season(season)
         item = {"id": season_id, "name": short, "year": short}
         seasons.setdefault(season, item)
