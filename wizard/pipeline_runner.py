@@ -505,8 +505,7 @@ def run_scraping(
     season_start = get_season_start_year(season)
 
     if from_date:
-        logger.info("[INFO] from_date=%s — informativo (los scrapers genéricos "
-                    "descargan toda la temporada).", from_date)
+        logger.info("[INFO] Mantenimiento desde fecha %s (partidos >= fecha).", from_date)
     if full_refresh:
         logger.info("[INFO] full_refresh=True — se ignorará la caché local.")
 
@@ -626,6 +625,8 @@ def run_scraping(
             scrape_whoscored(
                 season=season,
                 competition=competition or "La Liga",
+                from_date=from_date,
+                full_refresh=full_refresh,
             )
         except Exception as e:
             logger.warning("WhoScored falló: %s", e)
@@ -694,11 +695,21 @@ def run_pipeline(
             return
 
         if update:
-            logger.info("── MODO INCREMENTAL: buscando última fecha en BD ────")
+            logger.info("── MODO MANTENIMIENTO: última fecha en BD ───────────")
             last_date = get_last_match_date(competition or "La Liga", season)
             if last_date:
-                from_date = last_date
-                logger.info("   Último partido en BD: %s → scraping desde esa fecha", from_date)
+                # Mantener fecha manual del wizard si es más reciente que la BD.
+                if from_date and str(from_date) > str(last_date):
+                    logger.info(
+                        "   Fecha manual %s (más reciente que BD %s) → se usa la manual",
+                        from_date, last_date,
+                    )
+                else:
+                    from_date = last_date
+                    logger.info(
+                        "   Último partido en BD: %s → scrapers desde esa fecha",
+                        from_date,
+                    )
                 current_season = get_current_season()
                 if current_season != season:
                     logger.info(
@@ -727,7 +738,7 @@ def run_pipeline(
                     season=season,
                     match_ids=match_ids,
                     from_date=from_date,
-                    full_refresh=scrape,
+                    full_refresh=scrape and not update,
                     cancel_event=cancel_event,
                 )
             except PipelineCancelled:

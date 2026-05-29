@@ -40,13 +40,16 @@ Mitigaciones anti-bot:
   - Delays altos entre peticiones (DELAY_MIN..DELAY_MAX).
 """
 
+import csv
 import json
 import re
 import sys
 import time
 import random
 import logging
+from datetime import date, datetime
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 from bs4 import BeautifulSoup
@@ -286,7 +289,12 @@ TOGGLE_STALE_LIMIT = 3
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-from utils.data_paths import save_clean_csv, normalize_season as _norm_season, raw_dir as _raw_dir  # noqa: E402
+from utils.data_paths import (  # noqa: E402
+    clean_dir,
+    save_clean_csv,
+    normalize_season as _norm_season,
+    raw_dir as _raw_dir,
+)
 
 
 def _save_json(data, path: Path) -> None:
@@ -1046,7 +1054,95 @@ def _stage_label_from_url(url: str) -> str:
     return f"stage {m.group(1)}" if m else "stage ?"
 
 
-def scrape_whoscored(season=None, competition: str = "La Liga"):
+def get_scraped_whoscored_match_ids() -> set[str]:
+    """Partidos WhoScored que ya tienen eventos cargados en fact_events."""
+    try:
+        from sqlalchemy import text
+        from loaders.common import engine
+        query = """
+            SELECT DISTINCT m.id_whoscored
+            FROM dim_match m
+            JOIN fact_events e ON m.match_id = e.match_id
+            WHERE m.id_whoscored IS NOT NULL
+        """
+        with engine.connect() as conn:
+            rows = conn.execute(text(query)).fetchall()
+            return {str(r[0]) for r in rows}
+    except Exception as e:
+        log.warning("No se pudo consultar BD (caché WhoScored): %s", e)
+        return set()
+
+
+def _parse_iso_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def _enrich_whoscored_match_dates(competition: str, matches: list[dict]) -> None:
+    """Rellena match_date desde clean/matches.csv o raw/matches/*/match_meta.json."""
+    by_season: dict[str, list[dict]] = {}
+    for m in matches:
+        by_season.setdefault(m["season"], []).append(m)
+
+    for season_ws, rows in by_season.items():
+        folder = _folder_season(season_ws)
+        dates: dict[str, str] = {}
+        csv_path = clean_dir(competition, folder, "whoscored") / "matches.csv"
+        if csv_path.exists():
+            with csv_path.open(encoding="utf-8-sig") as f:
+                for row in csv.DictReader(f):
+                    mid = str(row.get("whoscored_match_id") or "")
+                    if mid and row.get("match_date"):
+                        dates[mid] = str(row["match_date"])[:10]
+        raw_base = _season_raw_dir(competition, season_ws) / "matches"
+        for m in rows:
+            if m.get("match_date"):
+                continue
+            mid = str(m["whoscored_match_id"])
+            if mid in dates:
+                m["match_date"] = dates[mid]
+                continue
+            meta = raw_base / mid / "match_meta.json"
+            if meta.exists():
+                try:
+                    meta_d = json.loads(meta.read_text(encoding="utf-8"))
+                    if meta_d.get("match_date"):
+                        m["match_date"] = str(meta_d["match_date"])[:10]
+                except (json.JSONDecodeError, OSError):
+                    pass
+
+
+def _collect_whoscored_events_from_raw(competition: str, season_ws: str) -> list[dict]:
+    """Reconstruye eventos desde match_centre.json (todas las pasadas en disco)."""
+    events: list[dict] = []
+    base = _season_raw_dir(competition, season_ws) / "matches"
+    if not base.is_dir():
+        return events
+    for match_dir in base.iterdir():
+        if not match_dir.is_dir():
+            continue
+        centre = match_dir / "match_centre.json"
+        if not centre.exists() or centre.stat().st_size < 100:
+            continue
+        try:
+            data = json.loads(centre.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as e:
+            log.debug("match_centre omitido %s: %s", match_dir.name, e)
+            continue
+        events.extend(extract_events(data))
+    return events
+
+
+def scrape_whoscored(
+    season=None,
+    competition: str = "La Liga",
+    from_date: Optional[str] = None,
+    full_refresh: bool = True,
+):
     """Descarga partidos de la liga indicada.
 
     Args:
@@ -1055,6 +1151,9 @@ def scrape_whoscored(season=None, competition: str = "La Liga"):
         competition: Nombre de la competición tal como aparece en
             scripts/competitions.py. Por defecto "La Liga" para mantener
             compatibilidad con código antiguo.
+        from_date: Si se indica (YYYY-MM-DD), solo descarga eventos de partidos
+            con fecha conocida >= from_date (mantenimiento incremental).
+        full_refresh: Si False, omite partidos que ya tienen eventos en BD.
     """
     available_for_comp = get_seasons_for_competition(competition)
     if not available_for_comp:
@@ -1163,9 +1262,41 @@ def scrape_whoscored(season=None, competition: str = "La Liga"):
             log.warning("[!] No se encontraron partidos.")
             return (pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame())
 
+        from_date_obj = None
+        if from_date:
+            from_date_obj = datetime.strptime(from_date, "%Y-%m-%d").date()
+            log.info("[FILTER] Mantenimiento WhoScored desde %s", from_date)
+
+        _enrich_whoscored_match_dates(competition, all_matches)
+        scraped_ids = get_scraped_whoscored_match_ids() if not full_refresh else set()
+        to_scrape: list[dict] = []
+        skipped_db = skipped_date = unknown_date = 0
+        for match in all_matches:
+            mid = str(match["whoscored_match_id"])
+            if not full_refresh and mid in scraped_ids:
+                skipped_db += 1
+                continue
+            md = _parse_iso_date(match.get("match_date"))
+            if from_date_obj and md and md < from_date_obj:
+                skipped_date += 1
+                continue
+            if from_date_obj and not md:
+                unknown_date += 1
+            to_scrape.append(match)
+
+        log.info(
+            "[FILTER] Descargar eventos: %d partidos "
+            "(omitidos BD=%d, anteriores a %s=%d, sin fecha=%d)",
+            len(to_scrape),
+            skipped_db,
+            from_date or "—",
+            skipped_date,
+            unknown_date if from_date_obj else 0,
+        )
+
         # Fase 2: descargar eventos de cada partido (todas las stages).
         fail_streak = 0
-        for i, match in enumerate(all_matches, 1):
+        for i, match in enumerate(to_scrape, 1):
             if i > 1 and (i - 1) % DRIVER_RESTART_EVERY == 0:
                 log.info(
                     "[ANTI-BOT] %d partidos procesados — reinicio preventivo del driver",
@@ -1175,7 +1306,7 @@ def scrape_whoscored(season=None, competition: str = "La Liga"):
 
             season_name = match["season"]
             mid = match["whoscored_match_id"]
-            log.info("  [%d/%d] Partido %s", i, len(all_matches), mid)
+            log.info("  [%d/%d] Partido %s", i, len(to_scrape), mid)
             match_data = get_match_data(driver, mid, season_name)
 
             if not match_data or "events" not in match_data:
@@ -1214,10 +1345,10 @@ def scrape_whoscored(season=None, competition: str = "La Liga"):
             if i % 10 == 0:
                 log.info(
                     "  -> %d/%d partidos | eventos: %d | último raw: %s",
-                    i, len(all_matches), len(all_events), raw_path.parent,
+                    i, len(to_scrape), len(all_events), raw_path.parent,
                 )
 
-        log.info("  Descarga completa: %d partidos", len(all_matches))
+        log.info("  Descarga de eventos: %d partidos procesados", len(to_scrape))
 
     except Exception as e:
         log.error("Error fatal: %s", e)
@@ -1262,7 +1393,14 @@ def scrape_whoscored(season=None, competition: str = "La Liga"):
 
     for s in seasons_to_write:
         s_matches = [m for m in all_matches if m.get("season") == s]
-        s_events  = [e for e in all_events if e.get("season") == s]
+        s_events = _collect_whoscored_events_from_raw(competition, s)
+        if not s_events:
+            s_events = [e for e in all_events if e.get("season") == s]
+        else:
+            log.info(
+                "  %s: %d eventos desde raw (%d partidos en memoria)",
+                s, len(s_events), len([e for e in all_events if e.get("season") == s]),
+            )
         s_players = [p for p in all_players if p.get("season") == s]
         s_teams   = [t for t in all_teams if t.get("season") == s]
         _write_clean_season(competition, s, s_matches, s_events, s_players, s_teams)

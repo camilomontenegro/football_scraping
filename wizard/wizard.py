@@ -268,7 +268,7 @@ def choose_operation() -> str:
         "¿Qué quieres hacer?",
         [
             "Descargar temporada completa",
-            "Actualizar datos con juegos nuevos",
+            "Actualizar desde última fecha en BD",
             "Descargar estadios por temporada",
         ],
         default="Descargar temporada completa",
@@ -484,7 +484,7 @@ def _print_summary(state: Dict[str, Any]) -> None:
     elif state["full_scrape"]:
         op = "Descarga completa"
     else:
-        op = "Actualización incremental"
+        op = "Mantenimiento (desde última fecha en BD)"
 
     print("\n" + "=" * 60)
     print("  RESUMEN DE LA OPERACION")

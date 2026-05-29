@@ -44,7 +44,8 @@ try:
     from curl_cffi import requests as tls_requests
 except ImportError:  # dependencia opcional; queda documentada en requirements.txt
     tls_requests = None
-from datetime import datetime, date
+from datetime import datetime, date, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Optional, Dict
 
@@ -85,6 +86,17 @@ MATCH_DELAY_SEC = _env_float("SOFASCORE_MATCH_DELAY_SEC", 4.0)       # tras cada
 JITTER_SEC = _env_float("SOFASCORE_JITTER_SEC", 0.8)                 # aleatorio extra por petición
 BLOCK_COOLDOWN_SEC = _env_float("SOFASCORE_BLOCK_COOLDOWN_SEC", 45.0)  # tras 403/429
 DELAY_SEC = REQUEST_DELAY_SEC  # alias legacy (reintentos internos)
+MAX_HTTP_RETRIES = int(_env_float("SOFASCORE_MAX_RETRIES", 3))
+
+# Perfiles curl_cffi (rotación ante 403 — patrón tunjayoff/sofascore_scraper)
+CURL_IMPERSONATE_PROFILES = [
+    "chrome136",
+    "chrome124",
+    "chrome120",
+    "chrome110",
+    "edge101",
+    "safari17_0",
+]
 
 _last_request_at: float = 0.0
 
@@ -127,9 +139,36 @@ def _print_throttle_config() -> None:
     print(
         f"  [INFO] Pausas SofaScore: {REQUEST_DELAY_SEC:.1f}s/petición, "
         f"{MATCH_DELAY_SEC:.1f}s/partido, jitter ±{JITTER_SEC:.1f}s, "
-        f"cooldown 403: {BLOCK_COOLDOWN_SEC:.0f}s "
+        f"cooldown 403: {BLOCK_COOLDOWN_SEC:.0f}s, reintentos: {MAX_HTTP_RETRIES} "
         f"(env: SOFASCORE_DELAY_SEC, SOFASCORE_MATCH_DELAY_SEC, …)"
     )
+
+
+def _parse_retry_after_seconds(retry_after: str | None, default_wait: float) -> float:
+    """Interpreta cabecera Retry-After (segundos o fecha HTTP)."""
+    if not retry_after:
+        return default_wait
+    try:
+        return max(1.0, float(retry_after))
+    except ValueError:
+        try:
+            dt = parsedate_to_datetime(retry_after)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return max(1.0, min(120.0, (dt - datetime.now(timezone.utc)).total_seconds()))
+        except (TypeError, ValueError):
+            return default_wait
+
+
+def _backoff_seconds(status_code: int, attempt: int, retry_after: str | None = None) -> float:
+    """Espera exponencial en 403/429/503 (inspirado en tunjayoff/sofascore_scraper)."""
+    if status_code == 403:
+        base = min(120.0, 10.0 * (2 ** attempt))
+    elif status_code in {429, 503}:
+        base = min(60.0, 5.0 * (2 ** attempt))
+    else:
+        base = DELAY_SEC * (attempt + 2)
+    return _parse_retry_after_seconds(retry_after, base)
 
 
 PROJECT_ROOT  = Path(__file__).resolve().parent.parent
@@ -227,10 +266,21 @@ def _api_bases() -> list[str]:
     mirror = os.getenv("SOFASCORE_MIRROR_API", SOFASCORE_MIRROR_API).rstrip("/")
     disable_mirror = os.getenv("SOFASCORE_DISABLE_MIRROR", "").lower() in ("1", "true", "yes")
     mirror_first = os.getenv("SOFASCORE_MIRROR_FIRST", "").lower() in ("1", "true", "yes")
+    try_official = os.getenv("SOFASCORE_TRY_OFFICIAL", "").lower() in ("1", "true", "yes")
+
+    # Si el probe ya marcó el mirror como única base viable, no quemar 3×403 en oficial.
+    if (
+        _PREFERRED_API_BASE
+        and mirror
+        and _PREFERRED_API_BASE.rstrip("/") == mirror
+        and not try_official
+        and not mirror_first
+    ):
+        return [mirror]
 
     bases: list[str] = []
     if _PREFERRED_API_BASE:
-        bases.append(_PREFERRED_API_BASE)
+        bases.append(_PREFERRED_API_BASE.rstrip("/"))
     if mirror_first and mirror and mirror not in bases:
         bases.append(mirror)
     if primary and primary not in bases:
@@ -309,7 +359,7 @@ def _browser_fetch_json(driver: webdriver.Chrome, url: str, timeout_ms: int = 30
     return _validate_sofascore_payload(data, url)
 
 
-def create_http_session():
+def create_http_session(impersonate: str | None = None):
     """Crea una sesión HTTP con cabeceras de navegador para SofaScore.
 
     Si está instalado `curl_cffi`, se usa con impersonación de Chrome porque
@@ -317,7 +367,11 @@ def create_http_session():
     sean correctos. Si no está disponible, se usa `requests` estándar.
     """
     if tls_requests is not None:
-        session = tls_requests.Session(impersonate="chrome136")
+        profile = impersonate or os.getenv("SOFASCORE_IMPERSONATE") or random.choice(
+            CURL_IMPERSONATE_PROFILES
+        )
+        session = tls_requests.Session(impersonate=profile)
+        log.debug("curl_cffi impersonate=%s", profile)
     else:
         session = requests.Session()
     session.headers.update(SOFASCORE_HEADERS)
@@ -355,38 +409,84 @@ def _validate_sofascore_payload(data: dict, url: str) -> dict:
 
 def _get_json_http(session: requests.Session, url: str) -> dict:
     """Obtiene JSON vía HTTP probando bases alternativas (oficial → mirror)."""
-    last_blocked: Exception | None = None
-    for attempt_url in _alternate_api_urls(url):
-        last_exc: Exception | None = None
-        for attempt in range(3):
+    timeout = int(_env_float("SOFASCORE_REQUEST_TIMEOUT", 25))
+    fast_fail = os.getenv("SOFASCORE_FAST_FAILOVER", "1").lower() in ("1", "true", "yes")
+    official_base = SOFASCORE_API.rstrip("/")
+    attempt_urls = _alternate_api_urls(url)
+    last_exc: Exception | None = None
+
+    for base_idx, attempt_url in enumerate(attempt_urls):
+        is_official = attempt_url.startswith(official_base)
+        has_mirror_left = base_idx < len(attempt_urls) - 1
+
+        for attempt in range(MAX_HTTP_RETRIES):
             try:
-                resp = session.get(attempt_url, timeout=25)
-                if resp.status_code in {403, 401, 429}:
-                    raise SofaScoreBlockedError(
+                resp = session.get(attempt_url, timeout=timeout)
+
+                if resp.status_code in {403, 401, 429, 503}:
+                    wait = _backoff_seconds(
+                        resp.status_code, attempt, resp.headers.get("Retry-After")
+                    )
+                    if is_official and has_mirror_left and fast_fail:
+                        log.debug(
+                            "HTTP %s en API oficial; failover al mirror sin más reintentos",
+                            resp.status_code,
+                        )
+                        last_exc = SofaScoreBlockedError(
+                            f"SofaScore bloquea {attempt_url}: HTTP {resp.status_code}"
+                        )
+                        break
+                    log.warning(
+                        "HTTP %s en %s (intento %d/%d); espera %.0fs",
+                        resp.status_code,
+                        attempt_url,
+                        attempt + 1,
+                        MAX_HTTP_RETRIES,
+                        wait,
+                    )
+                    time.sleep(wait)
+                    if attempt < MAX_HTTP_RETRIES - 1:
+                        continue
+                    last_exc = SofaScoreBlockedError(
                         f"SofaScore bloquea {attempt_url}: HTTP {resp.status_code}"
                     )
-                if resp.status_code >= 500 and attempt < 2:
-                    time.sleep(DELAY_SEC * (attempt + 2))
-                    continue
+                    break
+
+                if resp.status_code == 404:
+                    log.warning("Recurso no encontrado en %s (404)", attempt_url)
+                    last_exc = RuntimeError(f"No encontrado: {attempt_url}")
+                    break
+
+                if resp.status_code >= 500:
+                    if attempt < MAX_HTTP_RETRIES - 1:
+                        time.sleep(_backoff_seconds(resp.status_code, attempt))
+                        continue
+                    last_exc = RuntimeError(
+                        f"Error servidor {resp.status_code} en {attempt_url}"
+                    )
+                    break
+
                 resp.raise_for_status()
                 data = resp.json()
                 _remember_working_base(attempt_url)
                 return _validate_sofascore_payload(data, attempt_url)
+
             except SofaScoreBlockedError as e:
-                last_blocked = e
                 last_exc = e
                 break
             except (Exception, ValueError) as e:
                 last_exc = e
-                if attempt < 2:
+                if attempt < MAX_HTTP_RETRIES - 1:
                     time.sleep(DELAY_SEC * (attempt + 1))
                     continue
                 break
-        if last_blocked and attempt_url != _alternate_api_urls(url)[-1]:
-            log.debug("SofaScore bloqueado en %s; probando base alternativa...", attempt_url)
+
+        if base_idx < len(attempt_urls) - 1:
+            log.debug("Probando siguiente base API tras fallo en %s", attempt_url)
             continue
-    if last_blocked:
-        raise last_blocked
+
+    if isinstance(last_exc, SofaScoreBlockedError):
+        raise last_exc
     raise RuntimeError(f"No se pudo leer JSON de SofaScore en {url}: {last_exc}")
 
 
@@ -551,6 +651,142 @@ def get_match_events(client, match_id: int) -> dict:
 
 def get_match_lineups(client, match_id: int) -> dict:
     return get_json(client, _api_url("event", match_id, "lineups"))
+
+
+def _collect_shots_from_raw(matches_dir: Path) -> list[dict]:
+    """Reconstruye tiros desde data/raw/.../matches/*/shots.json (no pierde pasadas anteriores)."""
+    shots: list[dict] = []
+    if not matches_dir.is_dir():
+        return shots
+    for match_dir in matches_dir.iterdir():
+        if not match_dir.is_dir() or not match_dir.name.isdigit():
+            continue
+        path = match_dir / "shots.json"
+        if not path.exists() or path.stat().st_size < 50:
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as e:
+            log.debug("shots.json omitido %s: %s", match_dir.name, e)
+            continue
+        mid = int(match_dir.name)
+        for row in data.get("shotmap", []):
+            item = dict(row)
+            item.setdefault("_match_id_ss", mid)
+            shots.append(item)
+    return shots
+
+
+def _collect_events_from_raw(matches_dir: Path) -> list[dict]:
+    """Reconstruye incidentes desde data/raw/.../matches/*/events.json."""
+    events: list[dict] = []
+    if not matches_dir.is_dir():
+        return events
+    for match_dir in matches_dir.iterdir():
+        if not match_dir.is_dir() or not match_dir.name.isdigit():
+            continue
+        path = match_dir / "events.json"
+        if not path.exists() or path.stat().st_size < 50:
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as e:
+            log.debug("events.json omitido %s: %s", match_dir.name, e)
+            continue
+        mid = int(match_dir.name)
+        for row in data.get("incidents", []):
+            item = dict(row)
+            item.setdefault("_match_id_ss", mid)
+            events.append(item)
+    return events
+
+
+def _is_match_finished(match: dict) -> bool:
+    """True si el partido ya terminó (FETCH_ONLY_FINISHED)."""
+    status = match.get("status") or {}
+    if not isinstance(status, dict):
+        return False
+    if str(status.get("type", "")).lower() == "finished":
+        return True
+    return status.get("code") in (100, "100")
+
+
+def _match_dir_has_events(match_dir: Path) -> bool:
+    path = match_dir / "events.json"
+    return path.exists() and path.stat().st_size > 200
+
+
+def _local_match_ids_with_events(matches_dir: Path) -> set[int]:
+    ids: set[int] = set()
+    if not matches_dir.is_dir():
+        return ids
+    for d in matches_dir.iterdir():
+        if d.is_dir() and d.name.isdigit() and _match_dir_has_events(d):
+            ids.add(int(d.name))
+    return ids
+
+
+def _select_matches_to_scrape(
+    matches: list[dict],
+    base_path: Path,
+    scraped_ids: set[int],
+    full_refresh: bool,
+    from_date_obj: date | None,
+) -> tuple[list[dict], dict[str, int]]:
+    """Filtra partidos a descargar (BD + raw local + fecha + opcional solo finalizados)."""
+    only_finished = os.getenv("SOFASCORE_ONLY_FINISHED", "").lower() in ("1", "true", "yes")
+    local_ids = _local_match_ids_with_events(base_path / "matches")
+    all_ids = {int(m["id"]) for m in matches if m.get("id") is not None}
+
+    to_fetch: list[dict] = []
+    stats = {
+        "skipped_db": 0,
+        "skipped_local": 0,
+        "skipped_date": 0,
+        "skipped_not_finished": 0,
+    }
+
+    for m in matches:
+        match_id = int(m["id"])
+        md = _get_match_date(m)
+        match_dir = base_path / "matches" / str(match_id)
+
+        if only_finished and not _is_match_finished(m):
+            stats["skipped_not_finished"] += 1
+            continue
+        if from_date_obj and md and md < from_date_obj:
+            stats["skipped_date"] += 1
+            continue
+
+        if not full_refresh:
+            in_db = match_id in scraped_ids
+            has_local = _match_dir_has_events(match_dir)
+            # Mantenimiento: re-descargar partidos recientes aunque estén en BD.
+            refresh_recent = bool(from_date_obj and md and md >= from_date_obj)
+            if in_db and has_local and not refresh_recent:
+                stats["skipped_db"] += 1
+                continue
+            if has_local and not in_db and not refresh_recent:
+                stats["skipped_local"] += 1
+                continue
+
+        to_fetch.append(m)
+
+    print(
+        f"  [INFO] Cobertura fixtures={len(all_ids)} | BD+eventos={len(scraped_ids & all_ids)} "
+        f"| raw events={len(local_ids)} | pendientes descarga={len(to_fetch)}"
+    )
+    missing_db = len(all_ids - scraped_ids)
+    missing_raw = len(all_ids - local_ids)
+    if missing_db or missing_raw:
+        print(
+            f"  [INFO] Huecos: sin eventos en BD={missing_db} | sin events.json en raw={missing_raw}"
+        )
+    if stats["skipped_db"] or stats["skipped_local"]:
+        print(
+            f"  [INFO] Omitidos: BD+raw OK={stats['skipped_db']} | solo raw OK={stats['skipped_local']}"
+        )
+    return to_fetch, stats
 
 
 def get_scraped_sofascore_match_ids() -> set[int]:
@@ -739,17 +975,19 @@ def scrape_sofascore(
             raise ValueError(f"Temporada '{season_name}' no encontrada en SofaScore")
 
         _PREFERRED_API_BASE = None
+        mirror = os.getenv("SOFASCORE_MIRROR_API", SOFASCORE_MIRROR_API).rstrip("/")
         if os.getenv("SOFASCORE_MIRROR_FIRST", "").lower() in ("1", "true", "yes"):
-            _PREFERRED_API_BASE = os.getenv("SOFASCORE_MIRROR_API", SOFASCORE_MIRROR_API).rstrip("/")
+            _PREFERRED_API_BASE = mirror
             print(f"  [INFO] SOFASCORE_MIRROR_FIRST activo -> {_PREFERRED_API_BASE}")
         elif _is_http_session(client):
             _auto_select_api_base(client, tournament_id, season_id)
+            if _PREFERRED_API_BASE and _PREFERRED_API_BASE.rstrip("/") == mirror:
+                print(
+                    f"  [INFO] API oficial bloqueada; usando solo mirror {_PREFERRED_API_BASE} "
+                    f"(SOFASCORE_TRY_OFFICIAL=1 para forzar oficial)"
+                )
 
         print(f"\n[SEASON] Temporada: {season_label}  (id={season_id})")
-        matches, client, driver = _get_matches_with_fallback(
-            client, driver, tournament_id, season_id,
-        )
-        print(f"  [+] {len(matches)} partidos encontrados")
 
         # Resolución de competition_name: si llegó vacío intentamos por
         # tournament_id contra wizard.competitions. Cae a "La Liga" por defecto.
@@ -780,9 +1018,20 @@ def scrape_sofascore(
         season_raw_dir = raw_dir(resolved_comp, folder_season, "sofascore")
         season_raw_dir.mkdir(parents=True, exist_ok=True)
         base_path = season_raw_dir
+        fixtures_path = base_path / "fixtures.json"
 
-        # Listado crudo de partidos de la temporada
-        _save_json(matches, base_path / "fixtures.json")
+        details_only = os.getenv("SOFASCORE_DETAILS_ONLY", "").lower() in ("1", "true", "yes")
+        if details_only and fixtures_path.exists():
+            print("  [INFO] SOFASCORE_DETAILS_ONLY: reutilizo fixtures.json local")
+            with fixtures_path.open(encoding="utf-8") as f:
+                payload = json.load(f)
+            matches = payload if isinstance(payload, list) else payload.get("events", [])
+        else:
+            matches, client, driver = _get_matches_with_fallback(
+                client, driver, tournament_id, season_id,
+            )
+            _save_json(matches, fixtures_path)
+        print(f"  [+] {len(matches)} partidos en fixtures")
 
         # Filtrar por fecha si se especifica from_date.
         # Diagnóstico: distinguir entre "sin fecha extraíble" y "anteriores"
@@ -803,20 +1052,17 @@ def scrape_sofascore(
                 f"(descartados: {before} anteriores, {no_date} sin fecha)"
             )
 
-        # Caché de DB
         scraped_ids = get_scraped_sofascore_match_ids() if not full_refresh else set()
-        skipped_matches = 0
+        to_fetch, _skip_stats = _select_matches_to_scrape(
+            matches, base_path, scraped_ids, full_refresh, from_date_obj,
+        )
 
-        for i, m in enumerate(matches, 1):
+        for i, m in enumerate(to_fetch, 1):
             match_id = m["id"]
             home     = m.get("homeTeam", {}).get("name", "?")
             away     = m.get("awayTeam", {}).get("name", "?")
-            
-            if not full_refresh and match_id in scraped_ids:
-                skipped_matches += 1
-                continue
-                
-            print(f"  [{i}/{len(matches)}] Match {match_id}: {home} vs {away}")
+
+            print(f"  [{i}/{len(to_fetch)}] Match {match_id}: {home} vs {away}")
 
             # raw/<comp>/<season>/sofascore/matches/<match_id>/{shots,events,lineups}.json
             match_dir = base_path / "matches" / str(match_id)
@@ -874,10 +1120,18 @@ def scrape_sofascore(
         if driver is not None:
             driver.quit()
 
-    if not full_refresh:
-        print(f"\n  [INFO] Partidos omitidos (ya en DB): {skipped_matches}")
-
     if matches:
+        # CSV de hechos desde todo el raw acumulado (evita pisar con solo esta pasada).
+        matches_dir = base_path / "matches"
+        all_shots = _collect_shots_from_raw(matches_dir)
+        all_events = _collect_events_from_raw(matches_dir)
+        ev_matches = len({e.get("_match_id_ss") for e in all_events})
+        sh_matches = len({s.get("_match_id_ss") for s in all_shots})
+        print(
+            f"  [INFO] Hechos desde raw: {len(all_events)} eventos ({ev_matches} partidos), "
+            f"{len(all_shots)} tiros ({sh_matches} partidos)"
+        )
+
         df_matches = transform_matches(matches)
         df_shots   = transform_shots(all_shots)
         df_events  = transform_events(all_events)
