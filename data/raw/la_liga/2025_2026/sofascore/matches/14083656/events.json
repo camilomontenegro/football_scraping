@@ -1,35 +1,61 @@
 {
+  "away": {
+    "playerColor": {
+      "number": "050505",
+      "outline": "b8d4f2",
+      "primary": "b8d4f2",
+      "fancyNumber": "222226"
+    },
+    "goalkeeperColor": {
+      "number": "ffbf00",
+      "outline": "00ccaa",
+      "primary": "00ccaa",
+      "fancyNumber": "ffffff"
+    }
+  },
+  "home": {
+    "playerColor": {
+      "number": "0d0d0d",
+      "outline": "ff0000",
+      "primary": "ff0000",
+      "fancyNumber": "ffffff"
+    },
+    "goalkeeperColor": {
+      "number": "f7f7f7",
+      "outline": "46368d",
+      "primary": "46368d",
+      "fancyNumber": "ffffff"
+    }
+  },
   "incidents": [
     {
       "text": "FT",
-      "homeScore": 1,
-      "awayScore": 1,
-      "isLive": false,
       "time": 90,
+      "isLive": false,
       "addedTime": 999,
+      "awayScore": 1,
+      "homeScore": 1,
       "timeSeconds": 5400,
-      "reversedPeriodTime": 1,
-      "reversedPeriodTimeSeconds": 0,
+      "incidentType": "period",
       "periodTimeSeconds": 2700,
-      "incidentType": "period"
+      "reversedPeriodTime": 1,
+      "reversedPeriodTimeSeconds": 0
     },
     {
+      "id": 126242329,
+      "time": 90,
+      "injury": false,
+      "isHome": false,
       "playerIn": {
+        "id": 158615,
         "name": "Matías Vecino",
         "slug": "matias-vecino",
-        "shortName": "M. Vecino",
-        "position": "M",
-        "jerseyNumber": "15",
-        "height": 187,
-        "userCount": 1450,
         "gender": "M",
-        "id": 158615,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 682992000,
-        "proposedMarketValueRaw": {
-          "value": 1600000,
-          "currency": "EUR"
-        },
+        "height": 187,
+        "position": "M",
+        "shortName": "M. Vecino",
+        "userCount": 1462,
+        "jerseyNumber": "15",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "ماتياس فيسينو",
@@ -41,24 +67,25 @@
             "bn": "মি. ভেকিনো",
             "hi": "एम. वेसिनो"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 682992000,
+        "proposedMarketValueRaw": {
+          "value": 1600000,
+          "currency": "EUR"
         }
       },
+      "addedTime": 1,
       "playerOut": {
+        "id": 1526628,
         "name": "Fer López",
         "slug": "fer-lopez",
-        "shortName": "F. López",
-        "position": "M",
-        "jerseyNumber": "8",
-        "height": 186,
-        "userCount": 1262,
         "gender": "M",
-        "id": 1526628,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 1085356800,
-        "proposedMarketValueRaw": {
-          "value": 17500000,
-          "currency": "EUR"
-        },
+        "height": 186,
+        "position": "M",
+        "shortName": "F. López",
+        "userCount": 1234,
+        "jerseyNumber": "8",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "فير لوبيز"
@@ -66,43 +93,42 @@
           "shortNameTranslation": {
             "ar": "ف. لوبيز"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 1085356800,
+        "proposedMarketValueRaw": {
+          "value": 17500000,
+          "currency": "EUR"
         }
       },
-      "id": 126242329,
-      "time": 90,
-      "addedTime": 1,
-      "injury": false,
-      "isHome": false,
+      "incidentType": "substitution",
       "incidentClass": "regular",
-      "reversedPeriodTime": 1,
-      "incidentType": "substitution"
+      "reversedPeriodTime": 1
     },
     {
-      "length": 5,
       "time": 90,
+      "length": 5,
       "addedTime": 0,
-      "reversedPeriodTime": 1,
-      "incidentType": "injuryTime"
+      "incidentType": "injuryTime",
+      "reversedPeriodTime": 1
     },
     {
+      "id": 126242266,
+      "time": 86,
+      "injury": false,
+      "isHome": true,
       "playerIn": {
-        "name": "Urko Izeta",
-        "firstName": "Urko Izeta",
-        "lastName": "",
-        "slug": "urko-izeta",
-        "shortName": "U. Izeta",
-        "position": "F",
-        "jerseyNumber": "25",
-        "height": 175,
-        "userCount": 444,
-        "gender": "M",
         "id": 1430667,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 938563200,
-        "proposedMarketValueRaw": {
-          "value": 1600000,
-          "currency": "EUR"
-        },
+        "name": "Urko Izeta",
+        "slug": "urko-izeta",
+        "gender": "M",
+        "height": 175,
+        "lastName": "",
+        "position": "F",
+        "firstName": "Urko Izeta",
+        "shortName": "U. Izeta",
+        "userCount": 437,
+        "jerseyNumber": "25",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "أوركو إيزيتا"
@@ -110,27 +136,27 @@
           "shortNameTranslation": {
             "ar": "أ. إيزيتا"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 938563200,
+        "proposedMarketValueRaw": {
+          "value": 1600000,
+          "currency": "EUR"
         }
       },
       "playerOut": {
-        "name": "Iñaki Williams",
-        "firstName": "Inaki",
-        "lastName": "Williams",
-        "slug": "inaki-williams",
-        "shortName": "I. Williams",
-        "position": "M",
-        "jerseyNumber": "9",
-        "height": 186,
-        "userCount": 20533,
-        "gender": "M",
-        "sofascoreId": "IñakiWill",
         "id": 783374,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 771638400,
-        "proposedMarketValueRaw": {
-          "value": 9100000,
-          "currency": "EUR"
-        },
+        "name": "Iñaki Williams",
+        "slug": "inaki-williams",
+        "gender": "M",
+        "height": 186,
+        "lastName": "Williams",
+        "position": "M",
+        "firstName": "Inaki",
+        "shortName": "I. Williams",
+        "userCount": 20446,
+        "sofascoreId": "IñakiWill",
+        "jerseyNumber": "9",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "إيناكي ويليامز",
@@ -142,35 +168,35 @@
             "bn": "আই. উইলিয়ামস",
             "hi": "आई. विलियम्स"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 771638400,
+        "proposedMarketValueRaw": {
+          "value": 9100000,
+          "currency": "EUR"
         }
       },
-      "id": 126242266,
-      "time": 86,
-      "injury": false,
-      "isHome": true,
+      "incidentType": "substitution",
       "incidentClass": "regular",
-      "reversedPeriodTime": 5,
-      "incidentType": "substitution"
+      "reversedPeriodTime": 5
     },
     {
+      "id": 126242218,
+      "time": 82,
+      "injury": false,
+      "isHome": true,
       "playerIn": {
-        "name": "Nico Serrano",
-        "firstName": "",
-        "lastName": "",
-        "slug": "nico-serrano",
-        "shortName": "N. Serrano",
-        "position": "M",
-        "jerseyNumber": "22",
-        "height": 178,
-        "userCount": 479,
-        "gender": "M",
         "id": 1019318,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 1046822400,
-        "proposedMarketValueRaw": {
-          "value": 1600000,
-          "currency": "EUR"
-        },
+        "name": "Nico Serrano",
+        "slug": "nico-serrano",
+        "gender": "M",
+        "height": 178,
+        "lastName": "",
+        "position": "M",
+        "firstName": "",
+        "shortName": "N. Serrano",
+        "userCount": 476,
+        "jerseyNumber": "22",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "نيكو سيرانو",
@@ -182,26 +208,26 @@
             "bn": "এন. সেরানো",
             "hi": "एन. सेरानो"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 1046822400,
+        "proposedMarketValueRaw": {
+          "value": 1600000,
+          "currency": "EUR"
         }
       },
       "playerOut": {
-        "name": "Álex Berenguer",
-        "firstName": "Alex",
-        "lastName": "Berenguer",
-        "slug": "alex-berenguer",
-        "shortName": "Á. Berenguer",
-        "position": "M",
-        "jerseyNumber": "7",
-        "height": 175,
-        "userCount": 2039,
-        "gender": "M",
         "id": 592012,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 804816000,
-        "proposedMarketValueRaw": {
-          "value": 5200000,
-          "currency": "EUR"
-        },
+        "name": "Álex Berenguer",
+        "slug": "alex-berenguer",
+        "gender": "M",
+        "height": 175,
+        "lastName": "Berenguer",
+        "position": "M",
+        "firstName": "Alex",
+        "shortName": "Á. Berenguer",
+        "userCount": 2048,
+        "jerseyNumber": "7",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "أليكس بيرينغير",
@@ -213,33 +239,33 @@
             "bn": "এ. বেরেঙ্গুয়ার",
             "hi": "ए. बेरेंगुएर"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 804816000,
+        "proposedMarketValueRaw": {
+          "value": 5200000,
+          "currency": "EUR"
         }
       },
-      "id": 126242218,
+      "incidentType": "substitution",
+      "incidentClass": "regular",
+      "reversedPeriodTime": 9
+    },
+    {
+      "id": 126242217,
       "time": 82,
       "injury": false,
       "isHome": true,
-      "incidentClass": "regular",
-      "reversedPeriodTime": 9,
-      "incidentType": "substitution"
-    },
-    {
       "playerIn": {
+        "id": 1520799,
         "name": "Maroan Sannadi",
         "slug": "maroan-sannadi",
-        "shortName": "M. Sannadi",
-        "position": "F",
-        "jerseyNumber": "21",
-        "height": 192,
-        "userCount": 5318,
         "gender": "M",
-        "id": 1520799,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 980985600,
-        "proposedMarketValueRaw": {
-          "value": 4700000,
-          "currency": "EUR"
-        },
+        "height": 192,
+        "position": "F",
+        "shortName": "M. Sannadi",
+        "userCount": 5325,
+        "jerseyNumber": "21",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "سنادي، مروان",
@@ -251,26 +277,26 @@
             "bn": "এম. সন্নাদি",
             "hi": "एम. सन्नाडी"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 980985600,
+        "proposedMarketValueRaw": {
+          "value": 4700000,
+          "currency": "EUR"
         }
       },
       "playerOut": {
-        "name": "Gorka Guruzeta",
-        "firstName": "Gorka",
-        "lastName": "Guruzeta",
-        "slug": "gorka-guruzeta",
-        "shortName": "G. Guruzeta",
-        "position": "F",
-        "jerseyNumber": "11",
-        "height": 188,
-        "userCount": 2845,
-        "gender": "M",
         "id": 605672,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 842486400,
-        "proposedMarketValueRaw": {
-          "value": 4600000,
-          "currency": "EUR"
-        },
+        "name": "Gorka Guruzeta",
+        "slug": "gorka-guruzeta",
+        "gender": "M",
+        "height": 188,
+        "lastName": "Guruzeta",
+        "position": "F",
+        "firstName": "Gorka",
+        "shortName": "G. Guruzeta",
+        "userCount": 2840,
+        "jerseyNumber": "11",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "غوركا غوروزيتا",
@@ -282,34 +308,34 @@
             "bn": "জি. গুরুজেতা",
             "hi": "जी. गुरुजेटा"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 842486400,
+        "proposedMarketValueRaw": {
+          "value": 4600000,
+          "currency": "EUR"
         }
       },
-      "id": 126242217,
-      "time": 82,
-      "injury": false,
-      "isHome": true,
+      "incidentType": "substitution",
       "incidentClass": "regular",
-      "reversedPeriodTime": 9,
-      "incidentType": "substitution"
+      "reversedPeriodTime": 9
     },
     {
+      "id": 126242087,
+      "time": 74,
+      "injury": false,
+      "isHome": false,
       "playerIn": {
-        "name": "Hugo Álvarez",
-        "firstName": "Hugo Álvarez",
-        "slug": "hugo-alvarez",
-        "shortName": "H. Álvarez",
-        "position": "M",
-        "jerseyNumber": "23",
-        "height": 176,
-        "userCount": 816,
-        "gender": "M",
         "id": 1154935,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 1057104000,
-        "proposedMarketValueRaw": {
-          "value": 7800000,
-          "currency": "EUR"
-        },
+        "name": "Hugo Álvarez",
+        "slug": "hugo-alvarez",
+        "gender": "M",
+        "height": 176,
+        "position": "M",
+        "firstName": "Hugo Álvarez",
+        "shortName": "H. Álvarez",
+        "userCount": 817,
+        "jerseyNumber": "23",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "هوغو ألفاريز",
@@ -321,24 +347,24 @@
             "bn": "এইচ. আলভারেজ",
             "hi": "एच. अल्वारेज़"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 1057104000,
+        "proposedMarketValueRaw": {
+          "value": 7800000,
+          "currency": "EUR"
         }
       },
       "playerOut": {
+        "id": 1126779,
         "name": "Williot Swedberg",
         "slug": "williot-swedberg",
-        "shortName": "W. Swedberg",
-        "position": "M",
-        "jerseyNumber": "19",
-        "height": 185,
-        "userCount": 4556,
         "gender": "M",
-        "id": 1126779,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 1075593600,
-        "proposedMarketValueRaw": {
-          "value": 14000000,
-          "currency": "EUR"
-        },
+        "height": 185,
+        "position": "M",
+        "shortName": "W. Swedberg",
+        "userCount": 4521,
+        "jerseyNumber": "19",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "ويليوت سويدبرغ",
@@ -350,35 +376,35 @@
             "bn": "ডব্লিউ. সুইডবার্গ",
             "hi": "डब्लू. स्वेडबर्ग"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 1075593600,
+        "proposedMarketValueRaw": {
+          "value": 14000000,
+          "currency": "EUR"
         }
       },
-      "id": 126242087,
-      "time": 74,
-      "injury": false,
-      "isHome": false,
+      "incidentType": "substitution",
       "incidentClass": "regular",
-      "reversedPeriodTime": 17,
-      "incidentType": "substitution"
+      "reversedPeriodTime": 17
     },
     {
+      "id": 126242042,
+      "time": 71,
+      "injury": false,
+      "isHome": true,
       "playerIn": {
-        "name": "Alejandro Rego Mora",
-        "firstName": "Alejandro",
-        "lastName": "Rego Mora",
-        "slug": "alejandro-rego-mora",
-        "shortName": "A. Rego Mora",
-        "position": "M",
-        "jerseyNumber": "30",
-        "height": 192,
-        "userCount": 657,
-        "gender": "M",
         "id": 2110897,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 1055289600,
-        "proposedMarketValueRaw": {
-          "value": 3300000,
-          "currency": "EUR"
-        },
+        "name": "Alejandro Rego Mora",
+        "slug": "alejandro-rego-mora",
+        "gender": "M",
+        "height": 192,
+        "lastName": "Rego Mora",
+        "position": "M",
+        "firstName": "Alejandro",
+        "shortName": "A. Rego Mora",
+        "userCount": 661,
+        "jerseyNumber": "30",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "أليخاندرو ريجو مورا"
@@ -386,26 +412,26 @@
           "shortNameTranslation": {
             "ar": "أ. مورا"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 1055289600,
+        "proposedMarketValueRaw": {
+          "value": 3300000,
+          "currency": "EUR"
         }
       },
       "playerOut": {
-        "name": "Mikel Jauregizar",
-        "firstName": "",
-        "lastName": "",
-        "slug": "mikel-jauregizar",
-        "shortName": "M. Jauregizar",
-        "position": "M",
-        "jerseyNumber": "18",
-        "height": 177,
-        "userCount": 1812,
-        "gender": "M",
         "id": 1495844,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 1068681600,
-        "proposedMarketValueRaw": {
-          "value": 36000000,
-          "currency": "EUR"
-        },
+        "name": "Mikel Jauregizar",
+        "slug": "mikel-jauregizar",
+        "gender": "M",
+        "height": 177,
+        "lastName": "",
+        "position": "M",
+        "firstName": "",
+        "shortName": "M. Jauregizar",
+        "userCount": 1813,
+        "jerseyNumber": "18",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "ميكيل جوريجيزار",
@@ -417,36 +443,35 @@
             "bn": "এম. জওরেগিজার",
             "hi": "एम. जौरेगिज़ार"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 1068681600,
+        "proposedMarketValueRaw": {
+          "value": 36000000,
+          "currency": "EUR"
         }
       },
-      "id": 126242042,
-      "time": 71,
-      "injury": false,
-      "isHome": true,
+      "incidentType": "substitution",
       "incidentClass": "regular",
-      "reversedPeriodTime": 20,
-      "incidentType": "substitution"
+      "reversedPeriodTime": 20
     },
     {
+      "id": 125205535,
+      "time": 68,
+      "isHome": true,
       "player": {
-        "name": "Aymeric Laporte",
-        "firstName": "Aymeric",
-        "lastName": "Laporte",
-        "slug": "aymeric-laporte",
-        "shortName": "A. Laporte",
-        "position": "D",
-        "jerseyNumber": "14",
-        "height": 191,
-        "userCount": 10609,
-        "gender": "M",
-        "sofascoreId": "laporte27",
         "id": 149734,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 769996800,
-        "proposedMarketValueRaw": {
-          "value": 9400000,
-          "currency": "EUR"
-        },
+        "name": "Aymeric Laporte",
+        "slug": "aymeric-laporte",
+        "gender": "M",
+        "height": 191,
+        "lastName": "Laporte",
+        "position": "D",
+        "firstName": "Aymeric",
+        "shortName": "A. Laporte",
+        "userCount": 10525,
+        "sofascoreId": "laporte27",
+        "jerseyNumber": "14",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "إيميريك لابورت",
@@ -458,36 +483,37 @@
             "bn": "এ. ল্যাপোর্টে",
             "hi": "ए. लापोर्टे"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 769996800,
+        "proposedMarketValueRaw": {
+          "value": 9400000,
+          "currency": "EUR"
         }
       },
-      "playerName": "Aymeric Laporte",
       "reason": "Foul",
       "rescinded": false,
-      "id": 125205535,
-      "time": 68,
-      "isHome": true,
+      "playerName": "Aymeric Laporte",
+      "incidentType": "card",
       "incidentClass": "yellow",
-      "reversedPeriodTime": 23,
-      "incidentType": "card"
+      "reversedPeriodTime": 23
     },
     {
+      "id": 126241906,
+      "time": 59,
+      "injury": false,
+      "isHome": false,
       "playerIn": {
+        "id": 19356,
         "name": "Iago Aspas",
         "slug": "iago-aspas",
-        "shortName": "I. Aspas",
-        "position": "F",
-        "jerseyNumber": "10",
-        "height": 176,
-        "userCount": 5339,
         "gender": "M",
+        "height": 176,
+        "position": "F",
+        "shortName": "I. Aspas",
+        "userCount": 5329,
         "sofascoreId": "i.aspas10",
-        "id": 19356,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 554774400,
-        "proposedMarketValueRaw": {
-          "value": 1700000,
-          "currency": "EUR"
-        },
+        "jerseyNumber": "10",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "إياغو أسباس",
@@ -499,26 +525,26 @@
             "bn": "আই. আসপাস",
             "hi": "आई. अस्पास"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 554774400,
+        "proposedMarketValueRaw": {
+          "value": 1700000,
+          "currency": "EUR"
         }
       },
       "playerOut": {
-        "name": "Borja Iglesias",
-        "firstName": "Borja",
-        "lastName": "Iglesias",
-        "slug": "borja-iglesias",
-        "shortName": "B. Iglesias",
-        "position": "F",
-        "jerseyNumber": "7",
-        "height": 187,
-        "userCount": 5037,
-        "gender": "M",
         "id": 785989,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 727228800,
-        "proposedMarketValueRaw": {
-          "value": 3100000,
-          "currency": "EUR"
-        },
+        "name": "Borja Iglesias",
+        "slug": "borja-iglesias",
+        "gender": "M",
+        "height": 187,
+        "lastName": "Iglesias",
+        "position": "F",
+        "firstName": "Borja",
+        "shortName": "B. Iglesias",
+        "userCount": 4937,
+        "jerseyNumber": "7",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "بورخا إيغليسياس",
@@ -530,34 +556,34 @@
             "bn": "বি. ইগলেসিয়াস",
             "hi": "बी. इग्लेसियस"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 727228800,
+        "proposedMarketValueRaw": {
+          "value": 3100000,
+          "currency": "EUR"
         }
       },
-      "id": 126241906,
+      "incidentType": "substitution",
+      "incidentClass": "regular",
+      "reversedPeriodTime": 32
+    },
+    {
+      "id": 126241913,
       "time": 59,
       "injury": false,
       "isHome": false,
-      "incidentClass": "regular",
-      "reversedPeriodTime": 32,
-      "incidentType": "substitution"
-    },
-    {
       "playerIn": {
-        "name": "Pablo Durán",
-        "firstName": "Pablo Durán",
-        "slug": "pablo-duran",
-        "shortName": "P. Durán",
-        "position": "F",
-        "jerseyNumber": "18",
-        "height": 176,
-        "userCount": 806,
-        "gender": "M",
         "id": 1398524,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 990748800,
-        "proposedMarketValueRaw": {
-          "value": 4099999,
-          "currency": "EUR"
-        },
+        "name": "Pablo Durán",
+        "slug": "pablo-duran",
+        "gender": "M",
+        "height": 176,
+        "position": "F",
+        "firstName": "Pablo Durán",
+        "shortName": "P. Durán",
+        "userCount": 807,
+        "jerseyNumber": "18",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "بابلو دوران",
@@ -569,24 +595,24 @@
             "bn": "পি. ডুরান",
             "hi": "पी. दुरान"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 990748800,
+        "proposedMarketValueRaw": {
+          "value": 4099999,
+          "currency": "EUR"
         }
       },
       "playerOut": {
+        "id": 949962,
         "name": "Ferran Jutglà",
         "slug": "ferran-jutgla",
-        "shortName": "F. Jutglà",
-        "position": "F",
-        "jerseyNumber": "9",
-        "height": 175,
-        "userCount": 4195,
         "gender": "M",
-        "id": 949962,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 917827200,
-        "proposedMarketValueRaw": {
-          "value": 7500000,
-          "currency": "EUR"
-        },
+        "height": 175,
+        "position": "F",
+        "shortName": "F. Jutglà",
+        "userCount": 4212,
+        "jerseyNumber": "9",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "فيران جوتغلا",
@@ -598,38 +624,35 @@
             "bn": "এফ. জুটগ্লা",
             "hi": "एफ. जुटगला"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 917827200,
+        "proposedMarketValueRaw": {
+          "value": 7500000,
+          "currency": "EUR"
         }
       },
-      "id": 126241913,
-      "time": 59,
-      "injury": false,
-      "isHome": false,
+      "incidentType": "substitution",
       "incidentClass": "regular",
-      "reversedPeriodTime": 32,
-      "incidentType": "substitution"
+      "reversedPeriodTime": 32
     },
     {
-      "homeScore": 1,
-      "awayScore": 1,
+      "id": 348833919,
+      "time": 52,
+      "isHome": true,
       "player": {
-        "name": "Iñaki Williams",
-        "firstName": "Inaki",
-        "lastName": "Williams",
-        "slug": "inaki-williams",
-        "shortName": "I. Williams",
-        "position": "M",
-        "jerseyNumber": "9",
-        "height": 186,
-        "userCount": 20533,
-        "gender": "M",
-        "sofascoreId": "IñakiWill",
         "id": 783374,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 771638400,
-        "proposedMarketValueRaw": {
-          "value": 9100000,
-          "currency": "EUR"
-        },
+        "name": "Iñaki Williams",
+        "slug": "inaki-williams",
+        "gender": "M",
+        "height": 186,
+        "lastName": "Williams",
+        "position": "M",
+        "firstName": "Inaki",
+        "shortName": "I. Williams",
+        "userCount": 20446,
+        "sofascoreId": "IñakiWill",
+        "jerseyNumber": "9",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "إيناكي ويليامز",
@@ -641,24 +664,24 @@
             "bn": "আই. উইলিয়ামস",
             "hi": "आई. विलियम्स"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 771638400,
+        "proposedMarketValueRaw": {
+          "value": 9100000,
+          "currency": "EUR"
         }
       },
       "assist1": {
+        "id": 84531,
         "name": "Yuri Berchiche",
         "slug": "yuri-berchiche",
-        "shortName": "Y. Berchiche",
-        "position": "D",
-        "jerseyNumber": "17",
-        "height": 181,
-        "userCount": 1217,
         "gender": "M",
-        "id": 84531,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 634608000,
-        "proposedMarketValueRaw": {
-          "value": 1100000,
-          "currency": "EUR"
-        },
+        "height": 181,
+        "position": "D",
+        "shortName": "Y. Berchiche",
+        "userCount": 1238,
+        "jerseyNumber": "17",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "يوري بيرتشيش",
@@ -670,28 +693,35 @@
             "bn": "ওয়াই. বারচিচে",
             "hi": "वाई. बेरचिचे"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 634608000,
+        "proposedMarketValueRaw": {
+          "value": 1100000,
+          "currency": "EUR"
         }
       },
+      "awayScore": 1,
+      "homeScore": 1,
+      "incidentType": "goal",
+      "incidentClass": "regular",
+      "reversedPeriodTime": 39,
       "footballPassingNetworkAction": [
         {
+          "time": 52,
+          "isHome": true,
           "player": {
-            "name": "Gorka Guruzeta",
-            "firstName": "Gorka",
-            "lastName": "Guruzeta",
-            "slug": "gorka-guruzeta",
-            "shortName": "G. Guruzeta",
-            "position": "F",
-            "jerseyNumber": "11",
-            "height": 188,
-            "userCount": 2845,
-            "gender": "M",
             "id": 605672,
-            "marketValueCurrency": "EUR",
-            "dateOfBirthTimestamp": 842486400,
-            "proposedMarketValueRaw": {
-              "value": 4600000,
-              "currency": "EUR"
-            },
+            "name": "Gorka Guruzeta",
+            "slug": "gorka-guruzeta",
+            "gender": "M",
+            "height": 188,
+            "lastName": "Guruzeta",
+            "position": "F",
+            "firstName": "Gorka",
+            "shortName": "G. Guruzeta",
+            "userCount": 2840,
+            "jerseyNumber": "11",
             "fieldTranslations": {
               "nameTranslation": {
                 "ar": "غوركا غوروزيتا",
@@ -703,37 +733,37 @@
                 "bn": "জি. গুরুজেতা",
                 "hi": "जी. गुरुजेटा"
               }
+            },
+            "marketValueCurrency": "EUR",
+            "dateOfBirthTimestamp": 842486400,
+            "proposedMarketValueRaw": {
+              "value": 4600000,
+              "currency": "EUR"
             }
           },
           "eventType": "pass",
-          "time": 52,
           "playerCoordinates": {
-            "x": 63.2,
-            "y": 74
+            "x": 59.3,
+            "y": 85.7
           },
           "passEndCoordinates": {
-            "x": 54.1,
-            "y": 73
-          },
-          "isHome": true
+            "x": 53.6,
+            "y": 82.9
+          }
         },
         {
+          "time": 52,
+          "isHome": true,
           "player": {
+            "id": 96365,
             "name": "Iñigo Ruiz de Galarreta",
             "slug": "inigo-ruiz-de-galarreta",
-            "shortName": "I. R. d. Galarreta",
-            "position": "M",
-            "jerseyNumber": "16",
-            "height": 174,
-            "userCount": 991,
             "gender": "M",
-            "id": 96365,
-            "marketValueCurrency": "EUR",
-            "dateOfBirthTimestamp": 744595200,
-            "proposedMarketValueRaw": {
-              "value": 2300000,
-              "currency": "EUR"
-            },
+            "height": 174,
+            "position": "M",
+            "shortName": "I. R. d. Galarreta",
+            "userCount": 989,
+            "jerseyNumber": "16",
             "fieldTranslations": {
               "nameTranslation": {
                 "ar": "إينيغو رويز دي غالاريتا",
@@ -745,39 +775,39 @@
                 "bn": "আই. আর. ডি. গ্যালারেটা",
                 "hi": "आई.आर.डी गैलारेटा"
               }
+            },
+            "marketValueCurrency": "EUR",
+            "dateOfBirthTimestamp": 744595200,
+            "proposedMarketValueRaw": {
+              "value": 2300000,
+              "currency": "EUR"
             }
           },
           "eventType": "pass",
-          "time": 52,
           "playerCoordinates": {
-            "x": 54.1,
-            "y": 75.2
+            "x": 53.6,
+            "y": 82.9
           },
           "passEndCoordinates": {
-            "x": 66.5,
-            "y": 94.4
-          },
-          "isHome": true
+            "x": 61.3,
+            "y": 93.2
+          }
         },
         {
+          "time": 52,
+          "isHome": true,
           "player": {
-            "name": "Robert Navarro",
-            "firstName": "",
-            "lastName": "",
-            "slug": "robert-navarro",
-            "shortName": "R. Navarro",
-            "position": "M",
-            "jerseyNumber": "23",
-            "height": 178,
-            "userCount": 949,
-            "gender": "M",
             "id": 944165,
-            "marketValueCurrency": "EUR",
-            "dateOfBirthTimestamp": 1018569600,
-            "proposedMarketValueRaw": {
-              "value": 6500000,
-              "currency": "EUR"
-            },
+            "name": "Robert Navarro",
+            "slug": "robert-navarro",
+            "gender": "M",
+            "height": 178,
+            "lastName": "",
+            "position": "M",
+            "firstName": "",
+            "shortName": "R. Navarro",
+            "userCount": 948,
+            "jerseyNumber": "23",
             "fieldTranslations": {
               "nameTranslation": {
                 "ar": "روبرت نافارو",
@@ -789,39 +819,39 @@
                 "bn": "আর. নাভারো",
                 "hi": "आर. नवारो"
               }
+            },
+            "marketValueCurrency": "EUR",
+            "dateOfBirthTimestamp": 1018569600,
+            "proposedMarketValueRaw": {
+              "value": 6500000,
+              "currency": "EUR"
             }
           },
           "eventType": "ball-movement",
-          "time": 52,
           "playerCoordinates": {
-            "x": 66.5,
-            "y": 94.4
+            "x": 61.3,
+            "y": 93.2
           },
           "passEndCoordinates": {
             "x": 74.5,
             "y": 63
-          },
-          "isHome": true
+          }
         },
         {
+          "time": 52,
+          "isHome": true,
           "player": {
-            "name": "Robert Navarro",
-            "firstName": "",
-            "lastName": "",
-            "slug": "robert-navarro",
-            "shortName": "R. Navarro",
-            "position": "M",
-            "jerseyNumber": "23",
-            "height": 178,
-            "userCount": 949,
-            "gender": "M",
             "id": 944165,
-            "marketValueCurrency": "EUR",
-            "dateOfBirthTimestamp": 1018569600,
-            "proposedMarketValueRaw": {
-              "value": 6500000,
-              "currency": "EUR"
-            },
+            "name": "Robert Navarro",
+            "slug": "robert-navarro",
+            "gender": "M",
+            "height": 178,
+            "lastName": "",
+            "position": "M",
+            "firstName": "",
+            "shortName": "R. Navarro",
+            "userCount": 948,
+            "jerseyNumber": "23",
             "fieldTranslations": {
               "nameTranslation": {
                 "ar": "روبرت نافارو",
@@ -833,10 +863,15 @@
                 "bn": "আর. নাভারো",
                 "hi": "आर. नवारो"
               }
+            },
+            "marketValueCurrency": "EUR",
+            "dateOfBirthTimestamp": 1018569600,
+            "proposedMarketValueRaw": {
+              "value": 6500000,
+              "currency": "EUR"
             }
           },
           "eventType": "pass",
-          "time": 52,
           "playerCoordinates": {
             "x": 82,
             "y": 81.8
@@ -844,26 +879,21 @@
           "passEndCoordinates": {
             "x": 74.5,
             "y": 63
-          },
-          "isHome": true
+          }
         },
         {
+          "time": 52,
+          "isHome": true,
           "player": {
+            "id": 96365,
             "name": "Iñigo Ruiz de Galarreta",
             "slug": "inigo-ruiz-de-galarreta",
-            "shortName": "I. R. d. Galarreta",
-            "position": "M",
-            "jerseyNumber": "16",
-            "height": 174,
-            "userCount": 991,
             "gender": "M",
-            "id": 96365,
-            "marketValueCurrency": "EUR",
-            "dateOfBirthTimestamp": 744595200,
-            "proposedMarketValueRaw": {
-              "value": 2300000,
-              "currency": "EUR"
-            },
+            "height": 174,
+            "position": "M",
+            "shortName": "I. R. d. Galarreta",
+            "userCount": 989,
+            "jerseyNumber": "16",
             "fieldTranslations": {
               "nameTranslation": {
                 "ar": "إينيغو رويز دي غالاريتا",
@@ -875,10 +905,15 @@
                 "bn": "আই. আর. ডি. গ্যালারেটা",
                 "hi": "आई.आर.डी गैलारेटा"
               }
+            },
+            "marketValueCurrency": "EUR",
+            "dateOfBirthTimestamp": 744595200,
+            "proposedMarketValueRaw": {
+              "value": 2300000,
+              "currency": "EUR"
             }
           },
           "eventType": "pass",
-          "time": 52,
           "playerCoordinates": {
             "x": 75.8,
             "y": 64.9
@@ -886,26 +921,21 @@
           "passEndCoordinates": {
             "x": 96.9,
             "y": 70.3
-          },
-          "isHome": true
+          }
         },
         {
+          "time": 52,
+          "isHome": true,
           "player": {
+            "id": 84531,
             "name": "Yuri Berchiche",
             "slug": "yuri-berchiche",
-            "shortName": "Y. Berchiche",
-            "position": "D",
-            "jerseyNumber": "17",
-            "height": 181,
-            "userCount": 1217,
             "gender": "M",
-            "id": 84531,
-            "marketValueCurrency": "EUR",
-            "dateOfBirthTimestamp": 634608000,
-            "proposedMarketValueRaw": {
-              "value": 1100000,
-              "currency": "EUR"
-            },
+            "height": 181,
+            "position": "D",
+            "shortName": "Y. Berchiche",
+            "userCount": 1238,
+            "jerseyNumber": "17",
             "fieldTranslations": {
               "nameTranslation": {
                 "ar": "يوري بيرتشيش",
@@ -917,41 +947,41 @@
                 "bn": "ওয়াই. বারচিচে",
                 "hi": "वाई. बेरचिचे"
               }
+            },
+            "marketValueCurrency": "EUR",
+            "dateOfBirthTimestamp": 634608000,
+            "proposedMarketValueRaw": {
+              "value": 1100000,
+              "currency": "EUR"
             }
           },
-          "eventType": "pass",
           "isAssist": true,
-          "time": 52,
+          "eventType": "pass",
           "playerCoordinates": {
             "x": 96.9,
             "y": 70.3
           },
           "passEndCoordinates": {
-            "x": 96.7,
-            "y": 55.8
-          },
-          "isHome": true
+            "x": 97.4,
+            "y": 53
+          }
         },
         {
+          "time": 52,
+          "isHome": true,
           "player": {
-            "name": "Iñaki Williams",
-            "firstName": "Inaki",
-            "lastName": "Williams",
-            "slug": "inaki-williams",
-            "shortName": "I. Williams",
-            "position": "M",
-            "jerseyNumber": "9",
-            "height": 186,
-            "userCount": 20533,
-            "gender": "M",
-            "sofascoreId": "IñakiWill",
             "id": 783374,
-            "marketValueCurrency": "EUR",
-            "dateOfBirthTimestamp": 771638400,
-            "proposedMarketValueRaw": {
-              "value": 9100000,
-              "currency": "EUR"
-            },
+            "name": "Iñaki Williams",
+            "slug": "inaki-williams",
+            "gender": "M",
+            "height": 186,
+            "lastName": "Williams",
+            "position": "M",
+            "firstName": "Inaki",
+            "shortName": "I. Williams",
+            "userCount": 20446,
+            "sofascoreId": "IñakiWill",
+            "jerseyNumber": "9",
             "fieldTranslations": {
               "nameTranslation": {
                 "ar": "إيناكي ويليامز",
@@ -963,45 +993,29 @@
                 "bn": "আই. উইলিয়ামস",
                 "hi": "आई. विलियम्स"
               }
+            },
+            "marketValueCurrency": "EUR",
+            "dateOfBirthTimestamp": 771638400,
+            "proposedMarketValueRaw": {
+              "value": 9100000,
+              "currency": "EUR"
             }
           },
-          "eventType": "goal",
           "bodyPart": "right-foot",
-          "time": 52,
-          "playerCoordinates": {
-            "x": 96.7,
-            "y": 55.8
-          },
-          "gkCoordinates": {
-            "x": 99,
-            "y": 53.6
-          },
-          "goalShotCoordinates": {
-            "x": 100,
-            "y": 48.2
-          },
-          "goalMouthCoordinates": {
-            "x": 59.68,
-            "y": 94.67
-          },
+          "goalType": "regular",
+          "eventType": "goal",
           "goalkeeper": {
-            "name": "Ionuț Radu",
-            "firstName": "Ionut",
-            "lastName": "Radu",
-            "slug": "ionut-radu",
-            "shortName": "I. Radu",
-            "position": "G",
-            "jerseyNumber": "13",
-            "height": 188,
-            "userCount": 4548,
-            "gender": "M",
             "id": 815202,
-            "marketValueCurrency": "EUR",
-            "dateOfBirthTimestamp": 864777600,
-            "proposedMarketValueRaw": {
-              "value": 7800000,
-              "currency": "EUR"
-            },
+            "name": "Ionuț Radu",
+            "slug": "ionut-radu",
+            "gender": "M",
+            "height": 188,
+            "lastName": "Radu",
+            "position": "G",
+            "firstName": "Ionut",
+            "shortName": "I. Radu",
+            "userCount": 4544,
+            "jerseyNumber": "13",
             "fieldTranslations": {
               "nameTranslation": {
                 "ar": "إيونوت رادو",
@@ -1013,38 +1027,50 @@
                 "bn": "আই. রাদু",
                 "hi": "आई. राडू"
               }
+            },
+            "marketValueCurrency": "EUR",
+            "dateOfBirthTimestamp": 864777600,
+            "proposedMarketValueRaw": {
+              "value": 7800000,
+              "currency": "EUR"
             }
           },
-          "isHome": true,
-          "goalType": "regular"
+          "gkCoordinates": {
+            "x": 99.8,
+            "y": 52.7
+          },
+          "playerCoordinates": {
+            "x": 97.4,
+            "y": 53
+          },
+          "goalShotCoordinates": {
+            "x": 100,
+            "y": 48.2
+          },
+          "goalMouthCoordinates": {
+            "x": 59.68,
+            "y": 94.67
+          }
         }
-      ],
-      "id": 348833919,
-      "time": 52,
-      "isHome": true,
-      "incidentClass": "regular",
-      "reversedPeriodTime": 39,
-      "incidentType": "goal"
+      ]
     },
     {
+      "id": 126241752,
+      "time": 46,
+      "injury": false,
+      "isHome": false,
       "playerIn": {
-        "name": "Óscar Mingueza",
-        "firstName": "Oscar",
-        "lastName": "Mingueza",
-        "slug": "oscar-mingueza",
-        "shortName": "Ó. Mingueza",
-        "position": "M",
-        "jerseyNumber": "3",
-        "height": 184,
-        "userCount": 3901,
-        "gender": "M",
         "id": 859773,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 926553600,
-        "proposedMarketValueRaw": {
-          "value": 18700000,
-          "currency": "EUR"
-        },
+        "name": "Óscar Mingueza",
+        "slug": "oscar-mingueza",
+        "gender": "M",
+        "height": 184,
+        "lastName": "Mingueza",
+        "position": "M",
+        "firstName": "Oscar",
+        "shortName": "Ó. Mingueza",
+        "userCount": 3894,
+        "jerseyNumber": "3",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "أوسكار مينغويزا",
@@ -1056,24 +1082,24 @@
             "bn": "ও. মিঙ্গুয়েজা",
             "hi": "ओ. मिन्गुएज़ा"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 926553600,
+        "proposedMarketValueRaw": {
+          "value": 18700000,
+          "currency": "EUR"
         }
       },
       "playerOut": {
+        "id": 1008259,
         "name": "Javier Rueda",
         "slug": "javier-rueda",
-        "shortName": "J. Rueda",
-        "position": "D",
-        "jerseyNumber": "17",
-        "height": 176,
-        "userCount": 466,
         "gender": "M",
-        "id": 1008259,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 1020816000,
-        "proposedMarketValueRaw": {
-          "value": 4099999,
-          "currency": "EUR"
-        },
+        "height": 176,
+        "position": "D",
+        "shortName": "J. Rueda",
+        "userCount": 457,
+        "jerseyNumber": "17",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "هافيير روييدا"
@@ -1081,35 +1107,35 @@
           "shortNameTranslation": {
             "ar": "ه. روييدا"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 1020816000,
+        "proposedMarketValueRaw": {
+          "value": 4099999,
+          "currency": "EUR"
         }
       },
-      "id": 126241752,
-      "time": 46,
-      "injury": false,
-      "isHome": false,
+      "incidentType": "substitution",
       "incidentClass": "regular",
-      "reversedPeriodTime": 45,
-      "incidentType": "substitution"
+      "reversedPeriodTime": 45
     },
     {
+      "id": 126241749,
+      "time": 46,
+      "injury": false,
+      "isHome": true,
       "playerIn": {
-        "name": "Robert Navarro",
-        "firstName": "",
-        "lastName": "",
-        "slug": "robert-navarro",
-        "shortName": "R. Navarro",
-        "position": "M",
-        "jerseyNumber": "23",
-        "height": 178,
-        "userCount": 949,
-        "gender": "M",
         "id": 944165,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 1018569600,
-        "proposedMarketValueRaw": {
-          "value": 6500000,
-          "currency": "EUR"
-        },
+        "name": "Robert Navarro",
+        "slug": "robert-navarro",
+        "gender": "M",
+        "height": 178,
+        "lastName": "",
+        "position": "M",
+        "firstName": "",
+        "shortName": "R. Navarro",
+        "userCount": 948,
+        "jerseyNumber": "23",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "روبرت نافارو",
@@ -1121,24 +1147,24 @@
             "bn": "আর. নাভারো",
             "hi": "आर. नवारो"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 1018569600,
+        "proposedMarketValueRaw": {
+          "value": 6500000,
+          "currency": "EUR"
         }
       },
       "playerOut": {
+        "id": 1391375,
         "name": "Unai Gómez",
         "slug": "unai-gomez",
-        "shortName": "U. Gómez",
-        "position": "M",
-        "jerseyNumber": "20",
-        "height": 183,
-        "userCount": 846,
         "gender": "M",
-        "id": 1391375,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 1053820800,
-        "proposedMarketValueRaw": {
-          "value": 5200000,
-          "currency": "EUR"
-        },
+        "height": 183,
+        "position": "M",
+        "shortName": "U. Gómez",
+        "userCount": 839,
+        "jerseyNumber": "20",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "أوناي جوميز",
@@ -1150,55 +1176,54 @@
             "bn": "ইউ. গোমেজ",
             "hi": "यू. गोमेज़"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 1053820800,
+        "proposedMarketValueRaw": {
+          "value": 5200000,
+          "currency": "EUR"
         }
       },
-      "id": 126241749,
-      "time": 46,
-      "injury": false,
-      "isHome": true,
+      "incidentType": "substitution",
       "incidentClass": "regular",
-      "reversedPeriodTime": 45,
-      "incidentType": "substitution"
+      "reversedPeriodTime": 45
     },
     {
       "text": "HT",
-      "homeScore": 0,
-      "awayScore": 1,
+      "time": 45,
       "isLive": false,
-      "time": 45,
       "addedTime": 999,
+      "awayScore": 1,
+      "homeScore": 0,
       "timeSeconds": 2700,
-      "reversedPeriodTime": 1,
-      "reversedPeriodTimeSeconds": 0,
+      "incidentType": "period",
       "periodTimeSeconds": 2700,
-      "incidentType": "period"
-    },
-    {
-      "length": 5,
-      "time": 45,
-      "addedTime": 0,
       "reversedPeriodTime": 1,
-      "incidentType": "injuryTime"
+      "reversedPeriodTimeSeconds": 0
     },
     {
+      "time": 45,
+      "length": 5,
+      "addedTime": 0,
+      "incidentType": "injuryTime",
+      "reversedPeriodTime": 1
+    },
+    {
+      "id": 125205230,
+      "time": 42,
+      "isHome": false,
       "player": {
-        "name": "Ionuț Radu",
-        "firstName": "Ionut",
-        "lastName": "Radu",
-        "slug": "ionut-radu",
-        "shortName": "I. Radu",
-        "position": "G",
-        "jerseyNumber": "13",
-        "height": 188,
-        "userCount": 4548,
-        "gender": "M",
         "id": 815202,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 864777600,
-        "proposedMarketValueRaw": {
-          "value": 7800000,
-          "currency": "EUR"
-        },
+        "name": "Ionuț Radu",
+        "slug": "ionut-radu",
+        "gender": "M",
+        "height": 188,
+        "lastName": "Radu",
+        "position": "G",
+        "firstName": "Ionut",
+        "shortName": "I. Radu",
+        "userCount": 4544,
+        "jerseyNumber": "13",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "إيونوت رادو",
@@ -1210,35 +1235,35 @@
             "bn": "আই. রাদু",
             "hi": "आई. राडू"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 864777600,
+        "proposedMarketValueRaw": {
+          "value": 7800000,
+          "currency": "EUR"
         }
       },
-      "playerName": "Ionuț Radu",
       "reason": "Time wasting",
       "rescinded": false,
-      "id": 125205230,
-      "time": 42,
-      "isHome": false,
+      "playerName": "Ionuț Radu",
+      "incidentType": "card",
       "incidentClass": "yellow",
-      "reversedPeriodTime": 4,
-      "incidentType": "card"
+      "reversedPeriodTime": 4
     },
     {
+      "id": 125205167,
+      "time": 38,
+      "isHome": true,
       "player": {
+        "id": 84531,
         "name": "Yuri Berchiche",
         "slug": "yuri-berchiche",
-        "shortName": "Y. Berchiche",
-        "position": "D",
-        "jerseyNumber": "17",
-        "height": 181,
-        "userCount": 1217,
         "gender": "M",
-        "id": 84531,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 634608000,
-        "proposedMarketValueRaw": {
-          "value": 1100000,
-          "currency": "EUR"
-        },
+        "height": 181,
+        "position": "D",
+        "shortName": "Y. Berchiche",
+        "userCount": 1238,
+        "jerseyNumber": "17",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "يوري بيرتشيش",
@@ -1250,35 +1275,35 @@
             "bn": "ওয়াই. বারচিচে",
             "hi": "वाई. बेरचिचे"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 634608000,
+        "proposedMarketValueRaw": {
+          "value": 1100000,
+          "currency": "EUR"
         }
       },
-      "playerName": "Yuri Berchiche",
       "reason": "Foul",
       "rescinded": false,
-      "id": 125205167,
-      "time": 38,
-      "isHome": true,
+      "playerName": "Yuri Berchiche",
+      "incidentType": "card",
       "incidentClass": "yellow",
-      "reversedPeriodTime": 8,
-      "incidentType": "card"
+      "reversedPeriodTime": 8
     },
     {
+      "id": 125204903,
+      "time": 10,
+      "isHome": false,
       "player": {
+        "id": 1008259,
         "name": "Javier Rueda",
         "slug": "javier-rueda",
-        "shortName": "J. Rueda",
-        "position": "D",
-        "jerseyNumber": "17",
-        "height": 176,
-        "userCount": 466,
         "gender": "M",
-        "id": 1008259,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 1020816000,
-        "proposedMarketValueRaw": {
-          "value": 4099999,
-          "currency": "EUR"
-        },
+        "height": 176,
+        "position": "D",
+        "shortName": "J. Rueda",
+        "userCount": 457,
+        "jerseyNumber": "17",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "هافيير روييدا"
@@ -1286,37 +1311,35 @@
           "shortNameTranslation": {
             "ar": "ه. روييدا"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 1020816000,
+        "proposedMarketValueRaw": {
+          "value": 4099999,
+          "currency": "EUR"
         }
       },
-      "playerName": "Javier Rueda",
       "reason": "Foul",
       "rescinded": false,
-      "id": 125204903,
-      "time": 10,
-      "isHome": false,
+      "playerName": "Javier Rueda",
+      "incidentType": "card",
       "incidentClass": "yellow",
-      "reversedPeriodTime": 36,
-      "incidentType": "card"
+      "reversedPeriodTime": 36
     },
     {
-      "homeScore": 0,
-      "awayScore": 1,
+      "id": 348825884,
+      "time": 4,
+      "isHome": false,
       "player": {
+        "id": 1126779,
         "name": "Williot Swedberg",
         "slug": "williot-swedberg",
-        "shortName": "W. Swedberg",
-        "position": "M",
-        "jerseyNumber": "19",
-        "height": 185,
-        "userCount": 4556,
         "gender": "M",
-        "id": 1126779,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 1075593600,
-        "proposedMarketValueRaw": {
-          "value": 14000000,
-          "currency": "EUR"
-        },
+        "height": 185,
+        "position": "M",
+        "shortName": "W. Swedberg",
+        "userCount": 4521,
+        "jerseyNumber": "19",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "ويليوت سويدبرغ",
@@ -1328,25 +1351,25 @@
             "bn": "ডব্লিউ. সুইডবার্গ",
             "hi": "डब्लू. स्वेडबर्ग"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 1075593600,
+        "proposedMarketValueRaw": {
+          "value": 14000000,
+          "currency": "EUR"
         }
       },
       "assist1": {
+        "id": 962890,
         "name": "Ilaix Moriba",
         "slug": "ilaix-moriba",
-        "shortName": "I. Moriba",
-        "position": "M",
-        "jerseyNumber": "6",
-        "height": 183,
-        "userCount": 6786,
         "gender": "M",
+        "height": 183,
+        "position": "M",
+        "shortName": "I. Moriba",
+        "userCount": 6752,
         "sofascoreId": "ilaixmk",
-        "id": 962890,
-        "marketValueCurrency": "EUR",
-        "dateOfBirthTimestamp": 1042934400,
-        "proposedMarketValueRaw": {
-          "value": 9200000,
-          "currency": "EUR"
-        },
+        "jerseyNumber": "6",
         "fieldTranslations": {
           "nameTranslation": {
             "ar": "إيلايش موريبا",
@@ -1358,27 +1381,34 @@
             "bn": "আই. মোরিবা",
             "hi": "आई. मोरिबा"
           }
+        },
+        "marketValueCurrency": "EUR",
+        "dateOfBirthTimestamp": 1042934400,
+        "proposedMarketValueRaw": {
+          "value": 9200000,
+          "currency": "EUR"
         }
       },
+      "awayScore": 1,
+      "homeScore": 0,
+      "incidentType": "goal",
+      "incidentClass": "regular",
+      "reversedPeriodTime": 42,
       "footballPassingNetworkAction": [
         {
+          "time": 4,
+          "isHome": false,
           "player": {
+            "id": 962890,
             "name": "Ilaix Moriba",
             "slug": "ilaix-moriba",
-            "shortName": "I. Moriba",
-            "position": "M",
-            "jerseyNumber": "6",
-            "height": 183,
-            "userCount": 6786,
             "gender": "M",
+            "height": 183,
+            "position": "M",
+            "shortName": "I. Moriba",
+            "userCount": 6752,
             "sofascoreId": "ilaixmk",
-            "id": 962890,
-            "marketValueCurrency": "EUR",
-            "dateOfBirthTimestamp": 1042934400,
-            "proposedMarketValueRaw": {
-              "value": 9200000,
-              "currency": "EUR"
-            },
+            "jerseyNumber": "6",
             "fieldTranslations": {
               "nameTranslation": {
                 "ar": "إيلايش موريبا",
@@ -1390,34 +1420,34 @@
                 "bn": "আই. মোরিবা",
                 "hi": "आई. मोरिबा"
               }
+            },
+            "marketValueCurrency": "EUR",
+            "dateOfBirthTimestamp": 1042934400,
+            "proposedMarketValueRaw": {
+              "value": 9200000,
+              "currency": "EUR"
             }
           },
           "eventType": "tackle",
-          "time": 4,
           "playerCoordinates": {
             "x": 38.9,
             "y": 66.6
-          },
-          "isHome": false
+          }
         },
         {
+          "time": 4,
+          "isHome": false,
           "player": {
+            "id": 962890,
             "name": "Ilaix Moriba",
             "slug": "ilaix-moriba",
-            "shortName": "I. Moriba",
-            "position": "M",
-            "jerseyNumber": "6",
-            "height": 183,
-            "userCount": 6786,
             "gender": "M",
+            "height": 183,
+            "position": "M",
+            "shortName": "I. Moriba",
+            "userCount": 6752,
             "sofascoreId": "ilaixmk",
-            "id": 962890,
-            "marketValueCurrency": "EUR",
-            "dateOfBirthTimestamp": 1042934400,
-            "proposedMarketValueRaw": {
-              "value": 9200000,
-              "currency": "EUR"
-            },
+            "jerseyNumber": "6",
             "fieldTranslations": {
               "nameTranslation": {
                 "ar": "إيلايش موريبا",
@@ -1429,38 +1459,38 @@
                 "bn": "আই. মোরিবা",
                 "hi": "आई. मोरिबा"
               }
+            },
+            "marketValueCurrency": "EUR",
+            "dateOfBirthTimestamp": 1042934400,
+            "proposedMarketValueRaw": {
+              "value": 9200000,
+              "currency": "EUR"
             }
           },
-          "eventType": "pass",
           "isAssist": true,
-          "time": 4,
+          "eventType": "pass",
           "playerCoordinates": {
-            "x": 28.9,
-            "y": 55.2
+            "x": 28.3,
+            "y": 53.7
           },
           "passEndCoordinates": {
-            "x": 14.8,
-            "y": 38
-          },
-          "isHome": false
+            "x": 10.9,
+            "y": 36.4
+          }
         },
         {
+          "time": 5,
+          "isHome": false,
           "player": {
+            "id": 1126779,
             "name": "Williot Swedberg",
             "slug": "williot-swedberg",
-            "shortName": "W. Swedberg",
-            "position": "M",
-            "jerseyNumber": "19",
-            "height": 185,
-            "userCount": 4556,
             "gender": "M",
-            "id": 1126779,
-            "marketValueCurrency": "EUR",
-            "dateOfBirthTimestamp": 1075593600,
-            "proposedMarketValueRaw": {
-              "value": 14000000,
-              "currency": "EUR"
-            },
+            "height": 185,
+            "position": "M",
+            "shortName": "W. Swedberg",
+            "userCount": 4521,
+            "jerseyNumber": "19",
             "fieldTranslations": {
               "nameTranslation": {
                 "ar": "ويليوت سويدبرغ",
@@ -1472,46 +1502,30 @@
                 "bn": "ডব্লিউ. সুইডবার্গ",
                 "hi": "डब्लू. स्वेडबर्ग"
               }
+            },
+            "marketValueCurrency": "EUR",
+            "dateOfBirthTimestamp": 1075593600,
+            "proposedMarketValueRaw": {
+              "value": 14000000,
+              "currency": "EUR"
             }
           },
-          "eventType": "goal",
           "bodyPart": "left-foot",
-          "time": 5,
-          "playerCoordinates": {
-            "x": 6.7,
-            "y": 34.2
-          },
-          "gkCoordinates": {
-            "x": 1.9,
-            "y": 44.4
-          },
-          "goalShotCoordinates": {
-            "x": 0,
-            "y": 52.8
-          },
-          "goalMouthCoordinates": {
-            "x": 65.05,
-            "y": 64.17
-          },
+          "goalType": "regular",
+          "eventType": "goal",
           "goalkeeper": {
-            "name": "Unai Simón",
-            "firstName": "Unai",
-            "lastName": "Simon",
-            "slug": "unai-simon",
-            "shortName": "U. Simón",
-            "position": "G",
-            "jerseyNumber": "1",
-            "height": 189,
-            "userCount": 7370,
-            "gender": "M",
-            "sofascoreId": "unai_simon",
             "id": 797291,
-            "marketValueCurrency": "EUR",
-            "dateOfBirthTimestamp": 865987200,
-            "proposedMarketValueRaw": {
-              "value": 24000000,
-              "currency": "EUR"
-            },
+            "name": "Unai Simón",
+            "slug": "unai-simon",
+            "gender": "M",
+            "height": 189,
+            "lastName": "Simon",
+            "position": "G",
+            "firstName": "Unai",
+            "shortName": "U. Simón",
+            "userCount": 7275,
+            "sofascoreId": "unai_simon",
+            "jerseyNumber": "1",
             "fieldTranslations": {
               "nameTranslation": {
                 "ar": "أوناي سيمون",
@@ -1523,46 +1537,32 @@
                 "bn": "ইউ. সাইমন",
                 "hi": "यू. सिमोन"
               }
+            },
+            "marketValueCurrency": "EUR",
+            "dateOfBirthTimestamp": 865987200,
+            "proposedMarketValueRaw": {
+              "value": 24000000,
+              "currency": "EUR"
             }
           },
-          "isHome": false,
-          "goalType": "regular"
+          "gkCoordinates": {
+            "x": 0.9,
+            "y": 46
+          },
+          "playerCoordinates": {
+            "x": 6.7,
+            "y": 34.2
+          },
+          "goalShotCoordinates": {
+            "x": 0,
+            "y": 52.8
+          },
+          "goalMouthCoordinates": {
+            "x": 65.05,
+            "y": 64.17
+          }
         }
-      ],
-      "id": 348825884,
-      "time": 4,
-      "isHome": false,
-      "incidentClass": "regular",
-      "reversedPeriodTime": 42,
-      "incidentType": "goal"
+      ]
     }
-  ],
-  "home": {
-    "goalkeeperColor": {
-      "primary": "46368d",
-      "number": "f7f7f7",
-      "outline": "46368d",
-      "fancyNumber": "ffffff"
-    },
-    "playerColor": {
-      "primary": "ff0000",
-      "number": "0d0d0d",
-      "outline": "ff0000",
-      "fancyNumber": "ffffff"
-    }
-  },
-  "away": {
-    "goalkeeperColor": {
-      "primary": "00ccaa",
-      "number": "ffbf00",
-      "outline": "00ccaa",
-      "fancyNumber": "ffffff"
-    },
-    "playerColor": {
-      "primary": "b8d4f2",
-      "number": "050505",
-      "outline": "b8d4f2",
-      "fancyNumber": "222226"
-    }
-  }
+  ]
 }
