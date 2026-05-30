@@ -43,7 +43,53 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # OUTPUT_DIR legacy. Las rutas reales se construyen via utils.data_paths.
 OUTPUT_DIR = PROJECT_ROOT / "data" / "raw" / "understat"
 
-from utils.data_paths import save_clean_csv, raw_dir  # noqa: E402
+from utils.data_paths import save_clean_csv, raw_dir, clean_csv_path  # noqa: E402
+
+
+def _merge_existing_csv(
+    path: "Path",
+    df_new: pd.DataFrame,
+    *,
+    key: Optional[str] = None,
+    replace_by: Optional[str] = None,
+) -> pd.DataFrame:
+    """
+    Mergea ``df_new`` con el CSV existente en ``path`` para preservar datos
+    previos durante un scraping incremental (``--from-date``).
+
+    Modos:
+      - ``key=<col>``: concat + drop_duplicates(subset=[col], keep="last").
+        El delta nuevo gana cuando colisiona con la versión antigua.
+      - ``replace_by=<col>``: borra del CSV antiguo todas las filas cuyo valor
+        en ``col`` aparece en ``df_new``, y luego concatena. Útil para tablas
+        sin clave única estable (p. ej. shots) cuando se quiere reemplazar al
+        completo el set asociado a esa "agrupación" (ej. por match_id).
+
+    Si ``path`` no existe o el CSV antiguo está vacío/corrupto, devuelve
+    ``df_new`` sin cambios (equivale al comportamiento legacy de sobrescribir).
+    """
+    if not path.exists():
+        return df_new
+    try:
+        df_old = pd.read_csv(path, encoding="utf-8-sig")
+    except Exception as e:
+        print(f"  [!] No se pudo leer CSV existente {path.name}: {e}. Sobrescribo.")
+        return df_new
+    if df_old.empty:
+        return df_new
+    if replace_by:
+        if replace_by in df_old.columns and replace_by in df_new.columns:
+            df_old = df_old[~df_old[replace_by].isin(df_new[replace_by])]
+        merged = pd.concat([df_old, df_new], ignore_index=True)
+        print(f"  [merge] {path.name}: {len(df_old)} antiguos + {len(df_new)} nuevos = {len(merged)}")
+        return merged
+    if key:
+        before = len(df_old)
+        merged = pd.concat([df_old, df_new], ignore_index=True)
+        merged = merged.drop_duplicates(subset=[key], keep="last").reset_index(drop=True)
+        print(f"  [merge] {path.name}: {before} antiguos + {len(df_new)} nuevos -> {len(merged)} tras dedup por '{key}'")
+        return merged
+    return df_new
 
 
 def _save_json(data, path: Path) -> None:
@@ -418,17 +464,42 @@ async def scrape_understat(
     df_teams       = extract_teams(df_matches)
 
     # Layout canónico: data/clean/<comp>/<season>/understat/<table>.csv
+    # En modo incremental (update=True), mergeamos con el CSV existente para
+    # no perder filas de partidos fuera del rango filtrado por --from-date.
 
+    if update:
+        df_matches = _merge_existing_csv(
+            clean_csv_path(competition_name, folder_season, "understat", "matches"),
+            df_matches, key="understat_match_id",
+        )
     matches_path = save_clean_csv(competition_name, folder_season, "understat",
                                   "matches", df_matches)
+
     shots_path = None
     if not df_shots_clean.empty:
+        if update:
+            df_shots_clean = _merge_existing_csv(
+                clean_csv_path(competition_name, folder_season, "understat", "shots"),
+                df_shots_clean, replace_by="understat_match_id",
+            )
         shots_path = save_clean_csv(competition_name, folder_season, "understat",
                                     "shots", df_shots_clean)
+
     if not df_players.empty:
+        if update:
+            df_players = _merge_existing_csv(
+                clean_csv_path(competition_name, folder_season, "understat", "players"),
+                df_players, key="understat_player_id",
+            )
         save_clean_csv(competition_name, folder_season, "understat",
                        "players", df_players)
+
     if not df_teams.empty:
+        if update:
+            df_teams = _merge_existing_csv(
+                clean_csv_path(competition_name, folder_season, "understat", "teams"),
+                df_teams, key="understat_team_id",
+            )
         save_clean_csv(competition_name, folder_season, "understat",
                        "teams", df_teams)
 
