@@ -1073,6 +1073,28 @@ def get_scraped_whoscored_match_ids() -> set[str]:
         return set()
 
 
+def get_existing_whoscored_match_ids() -> set[str]:
+    """Devuelve los IDs WhoScored presentes en dim_match (independientemente
+    de si tienen eventos cargados o no).
+
+    Diferencia con ``get_scraped_whoscored_match_ids``: este último solo
+    cuenta los partidos cuyas filas en fact_events ya existen. Esta función
+    es más laxa y útil para evitar re-scrapear matches ya catalogados aunque
+    no se hayan cargado sus eventos todavía.
+    """
+    try:
+        from sqlalchemy import text
+        from loaders.common import engine
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text("SELECT id_whoscored FROM dim_match WHERE id_whoscored IS NOT NULL")
+            ).fetchall()
+            return {str(r[0]) for r in rows}
+    except Exception as e:
+        log.warning("No se pudo consultar la BD para IDs existentes (¿DB apagada?): %s", e)
+        return set()
+
+
 def _parse_iso_date(value: str | None) -> date | None:
     if not value:
         return None

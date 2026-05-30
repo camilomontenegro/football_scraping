@@ -17,9 +17,28 @@ Uso:
 """
 from typing import Dict, Any, Optional
 
+__all__ = [
+    "COMPETITIONS",
+    "WORKING_COMPETITIONS",
+    "WORKING_COMPETITION_NAMES",
+    "TRANSFERMARKT_COMPETITION_SLUGS",
+    "get_competition",
+    "get_competition_by_country",
+    "get_source_ids",
+    "get_source_config",
+    "get_competition_slug_transfermarkt",
+    "get_season_start_year",
+    "get_available_seasons",
+    "list_competitions",
+    "get_all_sources",
+    # Legacy aliases kept for backwards compat with old scripts.competitions consumers.
+    "LALIGA",
+    "LALIGA_IDS",
+]
+
 TRANSFERMARKT_COMPETITION_SLUGS: Dict[str, str] = {
     "La Liga": "laliga",
-    "Segunda DivisiÃ³n": "laliga2",
+    "Segunda División": "laliga2",
     "Premier League": "premier-league",
     "Championship": "championship",
     "Bundesliga": "bundesliga",
@@ -853,3 +872,16 @@ def list_competitions() -> list[Dict[str, Any]]:
 def get_all_sources() -> list[str]:
     """Lista todas las fuentes de datos disponibles."""
     return ["transfermarkt", "sofascore", "understat", "statsbomb", "whoscored"]
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# COMPATIBILIDAD CON CÓDIGO LEGACY (scripts.competitions)
+# ═══════════════════════════════════════════════════════════════════════
+
+LALIGA = COMPETITIONS["La Liga"]
+LALIGA_IDS = {
+    "transfermarkt": LALIGA["sources"]["transfermarkt"]["league_code"],
+    "sofascore": LALIGA["sources"]["sofascore"]["tournament_id"],
+    "understat": LALIGA["sources"]["understat"]["league"],
+    "statsbomb": LALIGA["sources"]["statsbomb"]["competition_id"],
+}
