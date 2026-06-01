@@ -17,10 +17,13 @@ log = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-TM_SERIE_A = PROJECT_ROOT / "data" / "raw" / "transfermarkt" / "serie_a"
-WS_SERIE_A = PROJECT_ROOT / "data" / "raw" / "whoscored" / "serie_a"
-SS_SERIE_A = PROJECT_ROOT / "data" / "raw" / "sofascore" / "serie_a"
-US_SERIE_A = PROJECT_ROOT / "data" / "raw" / "understat" / "serie_a"
+from utils.data_paths import clean_dir
+_COMP = "Serie A"
+_SEASON = "2025_2026"
+TM_SERIE_A = clean_dir(_COMP, _SEASON, "transfermarkt")
+WS_SERIE_A = clean_dir(_COMP, _SEASON, "whoscored")
+SS_SERIE_A = clean_dir(_COMP, _SEASON, "sofascore")
+US_SERIE_A = clean_dir(_COMP, _SEASON, "understat")
 
 
 def _setup_logging(log_filename: str) -> None:

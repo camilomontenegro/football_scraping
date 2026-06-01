@@ -7,20 +7,23 @@ import logging
 from pathlib import Path
 from sqlalchemy import text
 from loaders.common import engine
+from utils.data_paths import clean_dir
 
 from loaders.player_loader_generico import load_players
 from loaders.team_loader_generico import load_teams
 from loaders.match_loader_generico import load_matches
 from loaders.fact_loader_generico import load_shots, load_events, load_injuries
-# getLogger a nivel de moódulo 
+# getLogger a nivel de moódulo
 log = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-TM_BUNDESLIGA = PROJECT_ROOT / "data" / "raw" / "transfermarkt" / "bundesliga"
-WS_BUNDESLIGA = PROJECT_ROOT / "data" / "raw" / "whoscored" / "bundesliga"
-SS_BUNDESLIGA = PROJECT_ROOT / "data" / "raw" / "sofascore" / "bundesliga"
-US_BUNDESLIGA = PROJECT_ROOT / "data" / "raw" / "understat" / "bundesliga"
+_COMP = "Bundesliga"
+_SEASON = "2025_2026"
+TM_BUNDESLIGA = clean_dir(_COMP, _SEASON, "transfermarkt")
+WS_BUNDESLIGA = clean_dir(_COMP, _SEASON, "whoscored")
+SS_BUNDESLIGA = clean_dir(_COMP, _SEASON, "sofascore")
+US_BUNDESLIGA = clean_dir(_COMP, _SEASON, "understat")
 
 
 def _setup_logging(log_filename: str) -> None:

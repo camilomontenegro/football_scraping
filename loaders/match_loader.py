@@ -252,7 +252,10 @@ def _load_from_sofascore(conn) -> int:
                 continue
 
             match_date  = _ensure_date(row.get("match_date"))
-            competition = row.get("competition") or "La Liga"
+            # Sin default hardcoded: si el CSV no trae competition, lo dejamos
+            # NULL y backfill_competition_id se encargara luego de inferirlo
+            # desde la carpeta padre (data/clean/<comp_slug>/...).
+            competition = row.get("competition") if pd.notna(row.get("competition")) else None
             season      = normalize_season(row.get("season"))
             home_score  = row.get("home_score") if pd.notna(row.get("home_score")) else None
             away_score  = row.get("away_score") if pd.notna(row.get("away_score")) else None
@@ -618,11 +621,14 @@ def _load_from_whoscored(conn) -> int:
             )
             norm_season = normalize_season(ws_season) or ws_season
 
+            # OJO: a/b son neutros — el orden de .unique() no es fiable
+            # como home/away. Solo sirve para localizar el partido por
+            # par-de-equipos (cualquier orden) en dim_match.
             match_map[str(mid)] = {
-                "home_ws_id":  int(unique_teams[0]),
-                "away_ws_id":  int(unique_teams[1]),
-                "season":      norm_season,
-                "competition": comp_value,
+                "team_a_ws_id": int(unique_teams[0]),
+                "team_b_ws_id": int(unique_teams[1]),
+                "season":       norm_season,
+                "competition":  comp_value,
             }
 
     # Pre-cache id_whoscored -> canonical_id
@@ -635,10 +641,12 @@ def _load_from_whoscored(conn) -> int:
 
     resolve_comp_id = _competition_id_resolver(conn)
 
-    linked = inserted = updated_dates = skipped_no_team = skipped_duplicate = 0
+    linked = updated_dates = skipped_no_team = skipped_duplicate = 0
     for ws_mid, info in match_map.items():
-        hid = team_cache.get(info["home_ws_id"])
-        aid = team_cache.get(info["away_ws_id"])
+        # hid/aid son IDs canonicos pero NO se debe asumir home/away
+        # a partir de su orden. Las queries de abajo aceptan cualquier orden.
+        hid = team_cache.get(info["team_a_ws_id"])
+        aid = team_cache.get(info["team_b_ws_id"])
         if not hid or not aid:
             skipped_no_team += 1
             continue
@@ -670,11 +678,19 @@ def _load_from_whoscored(conn) -> int:
             linked += 1
             continue
 
+        # IMPORTANTE: el orden de `unique_teams` que produjo (hid, aid) NO
+        # garantiza home vs away — depende del orden de aparicion en el CSV
+        # de eventos. Por eso buscamos el partido aceptando cualquier orden
+        # y, si no existe en dim_match, lo MARCAMOS como skipped en vez de
+        # insertarlo con un orden inventado.
         existing = conn.execute(text("""
             SELECT match_id, match_date, id_whoscored FROM dim_match
-            WHERE home_team_id = :hid
-              AND away_team_id = :aid
-              AND season = :season
+            WHERE season = :season
+              AND (
+                  (home_team_id = :hid AND away_team_id = :aid)
+                  OR
+                  (home_team_id = :aid AND away_team_id = :hid)
+              )
             LIMIT 1
         """), {"hid": hid, "aid": aid, "season": info["season"]}).fetchone()
 
@@ -698,33 +714,17 @@ def _load_from_whoscored(conn) -> int:
                 """), {"d": m_date, "mid": ex_id})
                 updated_dates += 1
         else:
-            conn.execute(text("""
-                INSERT INTO dim_match
-                    (match_date, competition, season,
-                     home_team_id, away_team_id,
-                     competition_id, attendance,
-                     data_source, id_whoscored)
-                VALUES
-                    (:date, :comp, :season, :hid, :aid, :cid,
-                     :att, 'whoscored', :sid)
-                ON CONFLICT (id_whoscored) WHERE id_whoscored IS NOT NULL DO NOTHING
-            """), {
-                "date":   m_date,
-                "comp":   info["competition"],
-                "season": info["season"],
-                "hid":    hid,
-                "aid":    aid,
-                "cid":    comp_id,
-                "att":    m_att,
-                "sid":    ws_mid_int,
-            })
-            inserted += 1
+            # Sin partido en dim_match no podemos garantizar el orden home/away
+            # solo con eventos de WhoScored. Skip; cuando SofaScore u otra
+            # fuente con orden fiable cargue el partido, una corrida posterior
+            # lo enlazara por el bloque "existing" de arriba.
+            skipped_no_team += 1
 
     log.info(
-        "dim_match ← WhoScored: %d enlazados | %d insertados | %d fechas añadidas | %d sin equipos",
-        linked, inserted, updated_dates, skipped_no_team,
+        "dim_match ← WhoScored: %d enlazados | %d fechas añadidas | %d sin equipos | %d duplicados",
+        linked, updated_dates, skipped_no_team, skipped_duplicate,
     )
-    return linked + inserted
+    return linked
 
 
 # ── Transfermarkt attendance backfill ─────────────────────────────────────────

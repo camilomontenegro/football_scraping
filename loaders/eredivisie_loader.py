@@ -17,10 +17,13 @@ log = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-TM_EREDIVISIE = PROJECT_ROOT / "data" / "raw" / "transfermarkt" / "eredivisie"
-WS_EREDIVISIE = PROJECT_ROOT / "data" / "raw" / "whoscored" / "eredivisie"
-SS_EREDIVISIE = PROJECT_ROOT / "data" / "raw" / "sofascore" / "eredivisie"
-US_EREDIVISIE = PROJECT_ROOT / "data" / "raw" / "understat" / "eredivisie"
+from utils.data_paths import clean_dir
+_COMP = "Eredivisie"
+_SEASON = "2025_2026"
+TM_EREDIVISIE = clean_dir(_COMP, _SEASON, "transfermarkt")
+WS_EREDIVISIE = clean_dir(_COMP, _SEASON, "whoscored")
+SS_EREDIVISIE = clean_dir(_COMP, _SEASON, "sofascore")
+US_EREDIVISIE = clean_dir(_COMP, _SEASON, "understat")
 
 
 def _setup_logging(log_filename: str) -> None:

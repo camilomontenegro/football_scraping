@@ -36,7 +36,27 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from scrapers.understat_scraper import transform_shots, extract_teams  # noqa: E402
-from utils.data_paths import save_clean_csv  # noqa: E402
+from utils.data_paths import clean_csv_path, save_clean_csv  # noqa: E402
+
+
+def _merge_into_existing(path: Path, df_new: pd.DataFrame, *, key) -> pd.DataFrame:
+    """Fusiona con CSV destino si existe (keep='last' en duplicados)."""
+    if not path.exists():
+        return df_new
+    df_old = pd.read_csv(path)
+    if df_old.empty:
+        return df_new
+    if isinstance(key, str):
+        keys = [key]
+    else:
+        keys = list(key)
+    present = [k for k in keys if k in df_old.columns and k in df_new.columns]
+    if not present:
+        return pd.concat([df_old, df_new], ignore_index=True)
+    return (
+        pd.concat([df_old, df_new], ignore_index=True)
+        .drop_duplicates(subset=present, keep="last")
+    )
 
 
 # Cada entrada describe una liga importable:
@@ -44,6 +64,16 @@ from utils.data_paths import save_clean_csv  # noqa: E402
 #   - file_suffix:  sufijo de los ficheros (sin extensión)
 #   - competition:  nombre canónico (resuelto por wizard.competitions)
 EXTERNAL_LEAGUES = [
+    {
+        "external_dir": "la_liga",
+        "file_suffix":  "la_liga",
+        "competition":  "La Liga",
+    },
+    {
+        "external_dir": "premier_league",
+        "file_suffix":  "premier_league",
+        "competition":  "Premier League",
+    },
     {
         "external_dir": "bundesliga",
         "file_suffix":  "bundesliga",
@@ -107,8 +137,15 @@ def _reconstruct_shots_raw(
     return df
 
 
-def import_league(spec: dict, *, dry_run: bool = False) -> bool:
-    ext_dir = PROJECT_ROOT / "understat" / spec["external_dir"]
+def import_league(
+    spec: dict,
+    *,
+    dry_run: bool = False,
+    merge: bool = True,
+    source_root: Path | None = None,
+) -> bool:
+    root = source_root or (PROJECT_ROOT / "understat")
+    ext_dir = root / spec["external_dir"]
     if not ext_dir.is_dir():
         print(f"[!] Falta carpeta de origen: {ext_dir}")
         return False
@@ -145,10 +182,36 @@ def import_league(spec: dict, *, dry_run: bool = False) -> bool:
         print("  (dry-run: nada escrito)")
         return True
 
-    save_clean_csv(spec["competition"], SEASON, SOURCE, "matches", df_matches)
-    save_clean_csv(spec["competition"], SEASON, SOURCE, "players", df_players)
-    save_clean_csv(spec["competition"], SEASON, SOURCE, "shots",   df_shots_clean)
-    save_clean_csv(spec["competition"], SEASON, SOURCE, "teams",   df_teams)
+    comp = spec["competition"]
+    if merge:
+        df_matches = _merge_into_existing(
+            clean_csv_path(comp, SEASON, SOURCE, "matches"),
+            df_matches,
+            key="understat_match_id",
+        )
+        df_players = _merge_into_existing(
+            clean_csv_path(comp, SEASON, SOURCE, "players"),
+            df_players,
+            key="understat_player_id",
+        )
+        shot_key = "understat_shot_id"
+        if shot_key not in df_shots_clean.columns:
+            shot_key = ["understat_match_id", "understat_player_id", "minute"]
+        df_shots_clean = _merge_into_existing(
+            clean_csv_path(comp, SEASON, SOURCE, "shots"),
+            df_shots_clean,
+            key=shot_key,
+        )
+        df_teams = _merge_into_existing(
+            clean_csv_path(comp, SEASON, SOURCE, "teams"),
+            df_teams,
+            key="understat_team_id",
+        )
+
+    save_clean_csv(comp, SEASON, SOURCE, "matches", df_matches)
+    save_clean_csv(comp, SEASON, SOURCE, "players", df_players)
+    save_clean_csv(comp, SEASON, SOURCE, "shots",   df_shots_clean)
+    save_clean_csv(comp, SEASON, SOURCE, "teams",   df_teams)
     print(f"  OK  -> data/clean/<slug>/{SEASON}/{SOURCE}/")
     return True
 
@@ -168,6 +231,17 @@ def main():
         action="store_true",
         help="No escribe ficheros; solo informa lo que se haría.",
     )
+    parser.add_argument(
+        "--no-merge",
+        action="store_true",
+        help="Sobrescribe CSVs destino sin fusionar con datos existentes.",
+    )
+    parser.add_argument(
+        "--source-root",
+        type=Path,
+        default=None,
+        help="Carpeta raíz con subcarpetas por liga (default: <repo>/understat).",
+    )
     args = parser.parse_args()
 
     if args.league == "all":
@@ -175,7 +249,15 @@ def main():
     else:
         specs = [s for s in EXTERNAL_LEAGUES if s["competition"] == args.league]
 
-    results = [import_league(s, dry_run=args.dry_run) for s in specs]
+    results = [
+        import_league(
+            s,
+            dry_run=args.dry_run,
+            merge=not args.no_merge,
+            source_root=args.source_root,
+        )
+        for s in specs
+    ]
 
     print(f"\n=== {sum(results)}/{len(results)} ligas procesadas ===")
 

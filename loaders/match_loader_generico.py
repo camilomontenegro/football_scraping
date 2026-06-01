@@ -42,10 +42,24 @@ def _ensure_date(val) -> Optional[str]:
 
 
 def _safe_int(val) -> Optional[int]:
-    """Convierte un valor a entero de forma segura, devuelve None si falla."""
+    """Convierte un valor a entero de forma segura, devuelve None si falla.
+
+    Acepta floats serializados como string ("2.0") porque pandas suele
+    escribir asi los enteros opcionales en CSV.
+    """
+    if val is None:
+        return None
     try:
-        return int(val) if val is not None and str(val).strip() not in ("", "nan") else None
-    except (ValueError, TypeError):
+        if pd.isna(val):
+            return None
+    except (TypeError, ValueError):
+        pass
+    text_val = str(val).strip()
+    if text_val.lower() in ("", "nan", "none"):
+        return None
+    try:
+        return int(float(text_val))
+    except (TypeError, ValueError):
         return None
 
 
@@ -88,16 +102,16 @@ def _resolve_team_by_sb_id(conn, sb_id: str) -> Optional[int]:
 
 def _load_from_sofascore(conn, ss_path: Path, competition_id: int) -> int:
     """
-    Lee matches_clean.csv de SofaScore → upsert en dim_match.
+    Lee matches.csv de SofaScore → upsert en dim_match.
 
     Parámetros:
         conn:           conexión a la base de datos
         ss_path:        ruta a la carpeta de SofaScore de la competición
         competition_id: canonical_id de dim_competition para enlazar el partido
     """
-    files = list(ss_path.glob("**/matches_clean.csv"))
+    files = list(ss_path.glob("**/matches.csv"))
     if not files:
-        log.warning("match_loader: no se encontraron matches_clean.csv en %s", ss_path)
+        log.warning("match_loader: no se encontraron matches.csv en %s", ss_path)
         return 0
 
     all_rows: list[dict] = []
@@ -240,10 +254,18 @@ def _load_from_understat(conn, us_path: Path, competition_id: int) -> int:
         """), {"date": match_date, "hid": h_canonical, "aid": a_canonical, "comp_id": competition_id}).fetchone()
 
         if existing:
+            # Guard: si :uid ya existe en otra fila distinta, no asignar
+            # (violaria la UNIQUE en id_understat).
             conn.execute(text("""
                 UPDATE dim_match
                 SET id_understat = :uid
-                WHERE match_id = :mid AND id_understat IS NULL
+                WHERE match_id = :mid
+                  AND id_understat IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM dim_match m2
+                      WHERE m2.id_understat = :uid
+                        AND m2.match_id <> :mid
+                  )
             """), {"uid": int(us_mid), "mid": existing[0]})
             linked += 1
         else:
@@ -279,14 +301,14 @@ def _load_from_understat(conn, us_path: Path, competition_id: int) -> int:
 
 def _load_from_statsbomb(conn, sb_path: Path, competition_id: int) -> int:
     """
-    Lee matches_clean.csv de StatsBomb → añade id_statsbomb a partidos existentes.
+    Lee matches.csv de StatsBomb → añade id_statsbomb a partidos existentes.
 
     Parámetros:
         conn:           conexión a la base de datos
         sb_path:        ruta a la carpeta de StatsBomb de la competición
         competition_id: canonical_id de dim_competition para filtrar la búsqueda
     """
-    files = list(sb_path.glob("**/matches_clean.csv"))
+    files = list(sb_path.glob("**/matches.csv"))
     if not files:
         return 0
 
@@ -335,7 +357,13 @@ def _load_from_statsbomb(conn, sb_path: Path, competition_id: int) -> int:
                 conn.execute(text("""
                     UPDATE dim_match
                     SET id_statsbomb = :sid
-                    WHERE match_id = :mid AND id_statsbomb IS NULL
+                    WHERE match_id = :mid
+                      AND id_statsbomb IS NULL
+                      AND NOT EXISTS (
+                          SELECT 1 FROM dim_match m2
+                          WHERE m2.id_statsbomb = :sid
+                            AND m2.match_id <> :mid
+                      )
                 """), {"sid": str(sb_mid), "mid": existing[0]})
                 linked += 1
 
@@ -372,7 +400,11 @@ def _load_from_whoscored(conn, ws_path: Path, competition_id: int) -> int:
         log.error("Error leyendo eventos de WhoScored: %s", e)
         return 0
 
-    # mapear match_id → (home_ws_id, away_ws_id, season)
+    # mapear match_id → (team_a_ws_id, team_b_ws_id, season).
+    # OJO: los nombres a/b son intencionalmente neutros porque el orden
+    # de .unique() depende del orden de aparicion en el CSV; NO es fiable
+    # como home/away. Solo se usan para localizar el partido aceptando
+    # cualquier orden de equipos.
     match_map: dict[str, dict] = {}
     for mid, group in df.groupby("whoscored_match_id"):
         starts       = group[group["event_type"] == "Start"]
@@ -382,17 +414,17 @@ def _load_from_whoscored(conn, ws_path: Path, competition_id: int) -> int:
         if len(unique_teams) >= 2:
             ws_season = normalize_season(str(group["season"].iloc[0]))
             match_map[str(mid)] = {
-                "home_ws_id": int(unique_teams[0]),
-                "away_ws_id": int(unique_teams[1]),
-                "season":     ws_season,
+                "team_a_ws_id": int(unique_teams[0]),
+                "team_b_ws_id": int(unique_teams[1]),
+                "season":       ws_season,
             }
 
     linked = 0
     for ws_mid, info in match_map.items():
-        h_row = conn.execute(text("SELECT canonical_id FROM dim_team WHERE id_whoscored = :sid"), {"sid": info["home_ws_id"]}).fetchone()
-        a_row = conn.execute(text("SELECT canonical_id FROM dim_team WHERE id_whoscored = :sid"), {"sid": info["away_ws_id"]}).fetchone()
+        a_row = conn.execute(text("SELECT canonical_id FROM dim_team WHERE id_whoscored = :sid"), {"sid": info["team_a_ws_id"]}).fetchone()
+        b_row = conn.execute(text("SELECT canonical_id FROM dim_team WHERE id_whoscored = :sid"), {"sid": info["team_b_ws_id"]}).fetchone()
 
-        if not h_row or not a_row:
+        if not a_row or not b_row:
             continue
 
         existing = conn.execute(text("""
@@ -407,8 +439,8 @@ def _load_from_whoscored(conn, ws_path: Path, competition_id: int) -> int:
             )
             LIMIT 1
         """), {
-            "hid":     h_row[0],
-            "aid":     a_row[0],
+            "hid":     a_row[0],
+            "aid":     b_row[0],
             "season":  info["season"],
             "comp_id": competition_id,
         }).fetchone()

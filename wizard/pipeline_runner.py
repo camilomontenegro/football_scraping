@@ -66,10 +66,10 @@ def _ensure_loaders() -> None:
     if _loaders_loaded:
         return
     from loaders.common import engine
-    from loaders.team_loader import load_teams
-    from loaders.player_loader import load_players
-    from loaders.match_loader import load_matches
-    from loaders.fact_loader import load_shots, load_events, load_injuries
+    from loaders.team_loader_generico import load_teams
+    from loaders.player_loader_generico import load_players
+    from loaders.match_loader_generico import load_matches
+    from loaders.fact_loader_generico import load_shots, load_events, load_injuries
     _engine = engine
     _load_teams = load_teams
     _load_players = load_players
@@ -635,24 +635,80 @@ def run_scraping(
 # ─────────────────────────────────────────────────────────────────────
 # FASE DE CARGA
 # ─────────────────────────────────────────────────────────────────────
-def run_load(cancel_event: Optional[threading.Event] = None) -> None:
+def run_load(
+    competition: Optional[str] = None,
+    season: Optional[str] = None,
+    cancel_event: Optional[threading.Event] = None,
+) -> None:
+    """Carga la BD para la (competition, season) indicada.
+
+    Si `competition` es None, itera por WORKING_COMPETITION_NAMES. `season`
+    se normaliza al formato YYYY_YYYY que usan los paths data/clean.
+    """
     _ensure_loaders()
-    logger.info("── CARGANDO DIMENSIONES ────────────────────────────")
-    for name, fn in [("teams", _load_teams), ("players", _load_players), ("matches", _load_matches)]:
+
+    from sqlalchemy import text
+    from utils.data_paths import clean_dir, normalize_season
+
+    season_label = normalize_season(season) or season or "2025_2026"
+    targets = [competition] if competition else sorted(WORKING_COMPETITION_NAMES)
+
+    def _comp_id(conn, name: str) -> Optional[int]:
+        conf = get_competition(name)
+        if not conf:
+            return None
+        code = conf.get("sources", {}).get("transfermarkt", {}).get("league_code")
+        if not code:
+            return None
+        return conn.execute(
+            text("SELECT canonical_id FROM dim_competition WHERE id_transfermarkt = :c"),
+            {"c": code},
+        ).scalar()
+
+    for comp_name in targets:
         _raise_if_cancelled(cancel_event)
-        try:
-            with _engine.begin() as conn:
-                fn(conn)
-        except Exception as e:
-            logger.error("Error loading %s: %s", name, e, exc_info=True)
-    logger.info("── CARGANDO HECHOS (FACTS) ─────────────────────────")
-    for name, fn in [("shots", _load_shots), ("events", _load_events), ("injuries", _load_injuries)]:
-        _raise_if_cancelled(cancel_event)
-        try:
-            with _engine.begin() as conn:
-                fn(conn)
-        except Exception as e:
-            logger.error("Error loading %s: %s", name, e, exc_info=True)
+        paths = {
+            "ss": clean_dir(comp_name, season_label, "sofascore"),
+            "tm": clean_dir(comp_name, season_label, "transfermarkt"),
+            "ws": clean_dir(comp_name, season_label, "whoscored"),
+            "us": clean_dir(comp_name, season_label, "understat"),
+            "sb": clean_dir(comp_name, season_label, "statsbomb"),
+        }
+
+        with _engine.begin() as conn:
+            comp_id = _comp_id(conn, comp_name)
+        if not comp_id:
+            logger.warning(
+                "%s: sin competition_id en dim_competition (ejecuta load_competitions). Skip.",
+                comp_name,
+            )
+            continue
+
+        logger.info("── CARGANDO DIMENSIONES — %s ────────────", comp_name)
+        for name, fn, kwargs in [
+            ("teams",   _load_teams,   dict(ss_path=paths["ss"], tm_path=paths["tm"], ws_path=paths["ws"], us_path=paths["us"], sb_path=paths["sb"])),
+            ("players", _load_players, dict(tm_path=paths["tm"], ss_path=paths["ss"], ws_path=paths["ws"], us_path=paths["us"], sb_path=paths["sb"])),
+            ("matches", _load_matches, dict(ss_path=paths["ss"], competition_id=comp_id, ws_path=paths["ws"], us_path=paths["us"], sb_path=paths["sb"])),
+        ]:
+            _raise_if_cancelled(cancel_event)
+            try:
+                with _engine.begin() as conn:
+                    fn(conn, **kwargs)
+            except Exception as e:
+                logger.error("Error loading %s en %s: %s", name, comp_name, e, exc_info=True)
+
+        logger.info("── CARGANDO HECHOS — %s ─────────────────", comp_name)
+        for name, fn, kwargs in [
+            ("shots",    _load_shots,    dict(ss_path=paths["ss"], competition_id=comp_id, us_path=paths["us"])),
+            ("events",   _load_events,   dict(ss_path=paths["ss"], sb_path=paths["sb"], ws_path=paths["ws"])),
+            ("injuries", _load_injuries, dict(tm_path=paths["tm"])),
+        ]:
+            _raise_if_cancelled(cancel_event)
+            try:
+                with _engine.begin() as conn:
+                    fn(conn, **kwargs)
+            except Exception as e:
+                logger.error("Error loading %s en %s: %s", name, comp_name, e, exc_info=True)
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -751,7 +807,7 @@ def run_pipeline(
             _raise_if_cancelled(cancel_event)
             logger.info("── FASE 2/3: CARGA EN DB ────────────────────────────")
             try:
-                run_load(cancel_event=cancel_event)
+                run_load(competition=competition, season=season, cancel_event=cancel_event)
             except PipelineCancelled:
                 raise
             except Exception as e:

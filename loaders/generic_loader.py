@@ -26,20 +26,51 @@ Uso:
  
 import logging
 from pathlib import Path
- 
+
 from sqlalchemy import text
- 
+
 from loaders.common import engine
 from loaders.fact_loader_generico import load_events, load_injuries, load_shots
 from loaders.match_loader_generico import load_matches
 from loaders.player_loader_generico import load_players
 from loaders.team_loader_generico import load_teams
-from scripts.competitions import COMPETITIONS, get_competition, get_data_sources
- 
+from utils.data_paths import clean_dir
+from wizard.competitions import (
+    COMPETITIONS,
+    WORKING_COMPETITION_NAMES,
+    get_competition,
+)
+
 log = logging.getLogger(__name__)
 
 # forma el directorio raiz desde la ruta actual
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# Temporada por defecto del menu interactivo. Para historico cambiarla aqui.
+DEFAULT_SEASON = "2025_2026"
+
+
+def _competition_sources(competition_name: str) -> set[str]:
+    """Devuelve las fuentes configuradas para una competicion.
+
+    Se deriva del campo `sources` del diccionario COMPETITIONS: una fuente
+    cuenta como configurada si su entrada existe y tiene al menos un ID util
+    (league_code, tournament_id, league, competition_id...).
+    """
+    comp = get_competition(competition_name) or {}
+    sources_cfg = comp.get("sources", {}) or {}
+    out: set[str] = set()
+    if sources_cfg.get("transfermarkt", {}).get("league_code"):
+        out.add("transfermarkt")
+    if sources_cfg.get("sofascore", {}).get("tournament_id") is not None:
+        out.add("sofascore")
+    if sources_cfg.get("understat", {}).get("league"):
+        out.add("understat")
+    if sources_cfg.get("statsbomb", {}).get("competition_id") is not None:
+        out.add("statsbomb")
+    if sources_cfg.get("whoscored", {}).get("tournament_id") is not None:
+        out.add("whoscored")
+    return out
  
 def _setup_logging(competition_name: str) -> None:
     """
@@ -56,35 +87,23 @@ def _setup_logging(competition_name: str) -> None:
     logging.getLogger().addHandler(file_handler)
 # ── Helpers ───────────────────────────────────────────────────────────────────
  
-def _get_paths(competition_name: str) -> dict[str, Path]:
+def _get_paths(competition_name: str, season: str = DEFAULT_SEASON) -> dict[str, Path]:
     """
-    Construye las rutas a las carpetas de datos raw para cada fuente,
-    a partir del campo 'folder' definido en competitions.py.
+    Construye las rutas a las carpetas de `data/clean/<comp>/<season>/<source>/`
+    para cada fuente configurada.
 
-    Parámetros:
-        competition_name  (str):  nombre de la competicion 
-        
-    Devuelve un diccionario con claves 'ss', 'tm', 'ws', 'us'
-    y como valores objetos Path apuntando a las carpetas correspondientes (existan o no).
-    Ejemplo:
-        _get_paths("La Liga") → {
-            "ss": .../data/raw/sofascore/la_liga,
-            "tm": .../data/raw/transfermarkt/la_liga,
-            "ws": .../data/raw/whoscored/la_liga,
-            "us": .../data/raw/understat/la_liga,
-        }
+    Devuelve un diccionario con claves 'ss', 'tm', 'ws', 'us', 'sb'
+    apuntando al directorio CLEAN (existan o no en disco).
     """
-    comp = get_competition(competition_name)
-    folder = comp["folder"]
-    base = PROJECT_ROOT / "data" / "raw"
     return {
-        "ss": base / "sofascore"     / folder,
-        "tm": base / "transfermarkt" / folder,
-        "ws": base / "whoscored"     / folder,
-        "us": base / "understat"     / folder,
+        "ss": clean_dir(competition_name, season, "sofascore"),
+        "tm": clean_dir(competition_name, season, "transfermarkt"),
+        "ws": clean_dir(competition_name, season, "whoscored"),
+        "us": clean_dir(competition_name, season, "understat"),
+        "sb": clean_dir(competition_name, season, "statsbomb"),
     }
- 
- 
+
+
 def _get_competition_id(conn, competition_name: str) -> int:
     """
     Obtiene el canonical_id de la competición en dim_competition
@@ -96,14 +115,11 @@ def _get_competition_id(conn, competition_name: str) -> int:
         text("SELECT canonical_id FROM dim_competition WHERE id_transfermarkt = :code"),
         {"code": league_code},
     ).scalar()
- 
- 
+
+
 def _has_source(competition_name: str, source: str) -> bool:
-    """
-    Comprueba si una fuente está disponible para la competición.
-    Comprueba si en la lista devuelta por get_data_sources está una fuente concreta
-    """
-    return source in get_data_sources(competition_name)
+    """Comprueba si una fuente está configurada para la competición."""
+    return source in _competition_sources(competition_name)
  
  
 # ── Menú de hechos ────────────────────────────────────────────────────────────
@@ -281,12 +297,13 @@ def _menu_principal() -> None:
     Cuando se seleccciona una competicion llama a _menu_dimensions
 
     """
-    # List comprehension para obtener una lista con solo competiciones  que tienen folder y data_sources definidos 
-    # en el diccionario de competiciones COMPETITIONS  de competitions.py
+    # Competiciones que se consideran "soportadas" por el wizard. Filtramos
+    # ademas las que tienen al menos una fuente configurada en `sources`.
     competition_names = [
-        name for name, comp in COMPETITIONS.items()
-        if comp.get("folder") and comp.get("data_sources")
+        name for name in WORKING_COMPETITION_NAMES
+        if name in COMPETITIONS and _competition_sources(name)
     ]
+    competition_names.sort()
  
     while True:
         print("\n" + "=" * 50)

@@ -17,10 +17,13 @@ log = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-TM_PRIMEIRA_LIGA = PROJECT_ROOT / "data" / "raw" / "transfermarkt" / "primeira_liga"
-WS_PRIMEIRA_LIGA = PROJECT_ROOT / "data" / "raw" / "whoscored" / "primeira_liga"
-SS_PRIMEIRA_LIGA = PROJECT_ROOT / "data" / "raw" / "sofascore" / "primeira_liga"
-US_PRIMEIRA_LIGA = PROJECT_ROOT / "data" / "raw" / "understat" / "primeira_liga"
+from utils.data_paths import clean_dir
+_COMP = "Primeira Liga"
+_SEASON = "2025_2026"
+TM_PRIMEIRA_LIGA = clean_dir(_COMP, _SEASON, "transfermarkt")
+WS_PRIMEIRA_LIGA = clean_dir(_COMP, _SEASON, "whoscored")
+SS_PRIMEIRA_LIGA = clean_dir(_COMP, _SEASON, "sofascore")
+US_PRIMEIRA_LIGA = clean_dir(_COMP, _SEASON, "understat")
 
 
 def _setup_logging(log_filename: str) -> None:

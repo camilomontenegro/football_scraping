@@ -677,11 +677,44 @@ def _collect_shots_from_raw(matches_dir: Path) -> list[dict]:
     return shots
 
 
+def _load_team_id_map_from_fixtures(matches_dir: Path) -> dict[int, tuple[int, int]]:
+    """Construye {match_id: (home_team_id, away_team_id)} leyendo fixtures.json.
+
+    Los incidents de SofaScore solo traen `isHome` (bool), no `teamId`. Para
+    derivar `team_id_ss` necesitamos cruzar con la fixture del partido.
+    Devuelve dict vacio si no hay fixtures.json.
+    """
+    out: dict[int, tuple[int, int]] = {}
+    fixtures_path = matches_dir.parent / "fixtures.json"
+    if not fixtures_path.exists():
+        return out
+    try:
+        fixtures = json.loads(fixtures_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        log.warning("fixtures.json no parseable: %s", e)
+        return out
+    items = fixtures if isinstance(fixtures, list) else (
+        fixtures.get("events") or fixtures.get("matches") or []
+    )
+    for m in items:
+        mid = m.get("id")
+        h = (m.get("homeTeam") or {}).get("id")
+        a = (m.get("awayTeam") or {}).get("id")
+        if mid is not None and h is not None and a is not None:
+            out[int(mid)] = (int(h), int(a))
+    return out
+
+
 def _collect_events_from_raw(matches_dir: Path) -> list[dict]:
-    """Reconstruye incidentes desde data/raw/.../matches/*/events.json."""
+    """Reconstruye incidentes desde data/raw/.../matches/*/events.json.
+
+    A cada incident le anota `_match_id_ss`, `_home_team_id` y `_away_team_id`
+    para que `transform_events` pueda derivar `team_id_ss` desde `isHome`.
+    """
     events: list[dict] = []
     if not matches_dir.is_dir():
         return events
+    team_map = _load_team_id_map_from_fixtures(matches_dir)
     for match_dir in matches_dir.iterdir():
         if not match_dir.is_dir() or not match_dir.name.isdigit():
             continue
@@ -694,9 +727,14 @@ def _collect_events_from_raw(matches_dir: Path) -> list[dict]:
             log.debug("events.json omitido %s: %s", match_dir.name, e)
             continue
         mid = int(match_dir.name)
+        home_id, away_id = team_map.get(mid, (None, None))
         for row in data.get("incidents", []):
             item = dict(row)
             item.setdefault("_match_id_ss", mid)
+            if home_id is not None:
+                item.setdefault("_home_team_id", home_id)
+            if away_id is not None:
+                item.setdefault("_away_team_id", away_id)
             events.append(item)
     return events
 
@@ -1245,19 +1283,38 @@ def transform_shots(shots_raw: list[dict]) -> pd.DataFrame:
 def transform_events(events_raw: list[dict]) -> pd.DataFrame:
     """Adapta los incidentes crudos a las columnas de fact_events.
 
+    SofaScore NO incluye `teamId` en los incidents; solo trae `isHome` (bool).
+    `_collect_events_from_raw` anota `_home_team_id`/`_away_team_id` por
+    partido para que aqui podamos derivar `team_id_ss` correctamente.
+
+    Player puede venir como `player` (goals, cards) o `playerIn`/`playerOut`
+    (substitutions). Usamos el primero disponible para no perder eventos.
+
     Columnas generadas:
         match_id_ss, player_id_ss, player_name, team_id_ss,
         event_type, minute, x, y, outcome, data_source
     """
     rows = []
     for ev in events_raw:
-        player = ev.get("player", {})
+        # Player principal: `player` (goal, card, varDecision) o `playerIn`
+        # (substitution). Sin player, las filas como `period`/`injuryTime`
+        # quedan con player_id_ss=None pero conservan team via isHome.
+        player = ev.get("player") or ev.get("playerIn") or {}
+
+        # Derivar team_id_ss desde isHome + IDs anotados por match
+        is_home = ev.get("isHome")
+        team_id = None
+        if is_home is True:
+            team_id = ev.get("_home_team_id")
+        elif is_home is False:
+            team_id = ev.get("_away_team_id")
+
         point  = ev.get("incidentPoint") or {}
         rows.append({
             "match_id_ss":  ev.get("_match_id_ss"),
             "player_id_ss": player.get("id"),
             "player_name":  player.get("name"),
-            "team_id_ss":   ev.get("teamId"),
+            "team_id_ss":   team_id,
             "event_type":   ev.get("incidentType"),
             "minute":       ev.get("time"),
             "second":       None,           # SofaScore no expone segundos en incidentes

@@ -25,9 +25,13 @@ log = logging.getLogger(__name__)
 # Para la Champions, no hay datos en understat y statsbomb. 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-TM_CHAMPIONS = PROJECT_ROOT / "data" / "raw" / "transfermarkt" / "champions"
-WS_CHAMPIONS = PROJECT_ROOT / "data" / "raw" / "whoscored" / "champions"
-SS_CHAMPIONS = PROJECT_ROOT / "data" / "raw" / "sofascore" / "champions"
+
+from utils.data_paths import clean_dir
+_COMP = "Champions League"
+_SEASON = "2025_2026"
+TM_CHAMPIONS = clean_dir(_COMP, _SEASON, "transfermarkt")
+WS_CHAMPIONS = clean_dir(_COMP, _SEASON, "whoscored")
+SS_CHAMPIONS = clean_dir(_COMP, _SEASON, "sofascore")
 
 def _get_competition_id(conn) -> int:
     """Obtiene el canonical_id de la Champions League en dim_competition."""

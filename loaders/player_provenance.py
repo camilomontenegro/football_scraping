@@ -9,9 +9,29 @@ Permite distinguir homónimos ("Pedro") y auditar filas pobres en dim_player.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Optional
 
 from sqlalchemy import text
+
+
+_SAVEPOINT_SAFE_RE = re.compile(r"[^A-Za-z0-9_]")
+
+
+def _safe_savepoint_name(*parts: str) -> str:
+    """Construye un nombre de SAVEPOINT que cumple la sintaxis SQL.
+
+    PostgreSQL exige identifiers sin comillas con [A-Za-z_][A-Za-z0-9_$]*.
+    Cualquier caracter fuera de [A-Za-z0-9_] se reemplaza por '_'. Trunca a
+    50 chars dejando margen al prefijo. Usa byte-slicing tras ASCII-only
+    para evitar partir un multibyte UTF-8.
+    """
+    joined = "_".join(str(p) for p in parts)
+    cleaned = _SAVEPOINT_SAFE_RE.sub("_", joined)
+    cleaned = cleaned.strip("_")
+    if not cleaned or not cleaned[0].isalpha():
+        cleaned = "sp_" + cleaned
+    return cleaned[:50]
 
 log = logging.getLogger(__name__)
 
@@ -92,7 +112,7 @@ def upsert_player_provenance(
     tname = (team_name or "").strip() or None
     tid = str(team_id).strip() if team_id is not None and str(team_id).strip() else ""
 
-    sp = f"prov_{source_system}_{sid}"[:60]
+    sp = _safe_savepoint_name("prov", source_system, sid)
     try:
         conn.execute(text(f"SAVEPOINT {sp}"))
         conn.execute(

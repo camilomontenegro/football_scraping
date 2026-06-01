@@ -8,9 +8,9 @@ Se mantienen los loaders de dimensiones y hechos genericos, con metodos generico
 
 """
 import logging
-from pathlib import Path
 from sqlalchemy import text
 from loaders.common import engine
+from utils.data_paths import clean_dir
 
 
 from loaders.player_loader_generico import load_players
@@ -22,14 +22,12 @@ from loaders.fact_loader_generico  import load_shots,load_events, load_injuries
 
 log = logging.getLogger(__name__)
 
-# Para la Champions, no hay datos en understat y statsbomb. 
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-TM_PREMIER = PROJECT_ROOT / "data" / "raw" / "transfermarkt" / "premier_league"
-WS_PREMIER = PROJECT_ROOT / "data" / "raw" / "whoscored" / "premier_league"
-SS_PREMIER= PROJECT_ROOT / "data" / "raw" / "sofascore" / "premier_league"
-US_PREMIER= PROJECT_ROOT / "data" / "raw" / "understat" / "premier_league"
+_COMP = "Premier League"
+_SEASON = "2025_2026"
+TM_PREMIER = clean_dir(_COMP, _SEASON, "transfermarkt")
+WS_PREMIER = clean_dir(_COMP, _SEASON, "whoscored")
+SS_PREMIER = clean_dir(_COMP, _SEASON, "sofascore")
+US_PREMIER = clean_dir(_COMP, _SEASON, "understat")
 
 def _get_competition_id(conn) -> int:
     """Obtiene el canonical_id de la Premier League en dim_competition."""

@@ -149,13 +149,13 @@ def _load_from_sofascore(conn, ss_path: Path) -> int:
 
 
 def _load_from_transfermarkt(conn,tm_path: Path) -> int:
-    """Lee players_clean.csv de TM → añade country e id_transfermarkt a dim_team."""
-    
-    files = list(tm_path.glob("**/teams_clean.csv"))
-    
+    """Lee teams.csv de TM → añade country e id_transfermarkt a dim_team."""
+
+    files = list(tm_path.glob("**/teams.csv"))
+
 
     if not files:
-        log.info("team_loader: no hay teams_clean.csv de TM en %s", tm_path)
+        log.info("team_loader: no hay teams.csv de TM en %s", tm_path)
         return 0
 
     # Construir tabla única de equipos TM (team_slug, team_country)

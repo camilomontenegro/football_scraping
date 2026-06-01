@@ -22,9 +22,9 @@ fact_injuries -> transfermakrt fuente única
 
 
 import logging
-from pathlib import Path
 from sqlalchemy import text
 from loaders.common import engine
+from utils.data_paths import clean_dir
 
 from loaders.player_loader_generico import load_players
 from loaders.team_loader_generico import load_teams
@@ -33,12 +33,13 @@ from loaders.fact_loader_generico import load_shots, load_events, load_injuries
 
 log = logging.getLogger(__name__)
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-TM_LALIGA = PROJECT_ROOT / "data" / "raw" / "transfermarkt" / "la_liga"
-SS_LALIGA = PROJECT_ROOT / "data" / "raw" / "sofascore" / "la_liga"
-WS_LALIGA = PROJECT_ROOT / "data" / "raw" / "whoscored" / "la_liga"
-US_LALIGA = PROJECT_ROOT / "data" / "raw" / "understat" / "la_liga"
-SB_LALIGA = PROJECT_ROOT / "data" / "raw" / "statsbomb" / "la_liga"
+_COMP = "La Liga"
+_SEASON = "2025_2026"
+TM_LALIGA = clean_dir(_COMP, _SEASON, "transfermarkt")
+SS_LALIGA = clean_dir(_COMP, _SEASON, "sofascore")
+WS_LALIGA = clean_dir(_COMP, _SEASON, "whoscored")
+US_LALIGA = clean_dir(_COMP, _SEASON, "understat")
+SB_LALIGA = clean_dir(_COMP, _SEASON, "statsbomb")
 
 
 def _get_competition_id(conn) -> int:
