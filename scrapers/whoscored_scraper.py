@@ -55,11 +55,11 @@ import pandas as pd
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-from webdriver_manager.chrome import ChromeDriverManager
+
+from utils.chrome_driver import create_chrome_driver
 
 # Permitir import desde scripts.competitions
 sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -365,10 +365,7 @@ def create_driver() -> webdriver.Chrome:
         'AppleWebKit/537.36 (KHTML, like Gecko) '
         'Chrome/136.0.0.0 Safari/537.36'
     )
-    driver = webdriver.Chrome(
-        service=Service(ChromeDriverManager().install()),
-        options=options,
-    )
+    driver = create_chrome_driver(options)
     driver.execute_cdp_cmd(
         'Page.addScriptToEvaluateOnNewDocument',
         {'source': 'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'}
