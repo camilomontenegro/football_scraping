@@ -28,7 +28,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from dashboard import analytics, db, explore, scanner, wizard_view
+from dashboard import analytics, db, explore, player_detail, scanner, wizard_view
 
 st.set_page_config(
     page_title="Football Scraping Dashboard",
@@ -49,9 +49,9 @@ def _fmt(n) -> str:
     return f"{int(n):,}".replace(",", ".")
 
 
-(tab_explore, tab_teams, tab_gk, tab_players, tab_injuries,
+(tab_explore, tab_teams, tab_gk, tab_players, tab_player_detail, tab_injuries,
  tab_shot, tab_monitor, tab_wizard) = st.tabs(
-    ["Exploration", "Teams", "Goalkeepers", "Players",
+    ["Exploration", "Teams", "Goalkeepers", "Players", "Player Detail",
      "Injuries", "Shot Intelligence", "Pipeline monitoring", "Wizard"]
 )
 
@@ -323,7 +323,155 @@ with tab_players:
 
 
 # ════════════════════════════════════════════════════════════════════
-# TAB 5 — INJURIES
+# TAB 5 — PLAYER DETAIL
+# ════════════════════════════════════════════════════════════════════
+with tab_player_detail:
+    st.header("Player Detail")
+
+    # ── mplsoccer availability guard ─────────────────────────────
+    try:
+        from mplsoccer import VerticalPitch as _VPitch
+    except ImportError:
+        st.error("Install mplsoccer: pip install mplsoccer")
+        st.stop()
+
+    # ── Search ───────────────────────────────────────────────────
+    _pd_all = player_detail.get_all_players()
+    _pd_search = st.text_input("Search player", key="pd_search", placeholder="Type a name…")
+    _pd_filtered = _pd_all[
+        _pd_all["canonical_name"].str.contains(_pd_search, case=False, na=False)
+    ] if _pd_search else _pd_all
+    _pd_names = _pd_filtered["canonical_name"].tolist()
+
+    _pd_selected_name = st.selectbox(
+        "Select player", options=_pd_names if _pd_names else ["(no match)"],
+        key="pd_select",
+        disabled=not _pd_names,
+    )
+
+    _pd_row = (
+        _pd_filtered[_pd_filtered["canonical_name"] == _pd_selected_name]
+        if _pd_names else pd.DataFrame()
+    )
+
+    if not _pd_row.empty:
+        _pd = _pd_row.iloc[0]
+        _pd_cid = int(_pd["canonical_id"])
+
+        # ── Header card ──────────────────────────────────────────
+        st.subheader(_pd["canonical_name"])
+        _hc1, _hc2, _hc3 = st.columns(3)
+        with _hc1:
+            st.markdown(f"**Position:** {_pd['position'] or '—'}")
+        with _hc2:
+            st.markdown(f"**Nationality:** {_pd['nationality'] or '—'}")
+        with _hc3:
+            _bd = _pd["birth_date"]
+            st.markdown(f"**Born:** {_bd.strftime('%d %b %Y') if _bd else '—'}")
+
+        # Source coverage badges
+        _sources_map = {
+            "StatsBomb":    _pd["id_statsbomb"],
+            "Understat":    _pd["id_understat"],
+            "SofaScore":    _pd["id_sofascore"],
+            "Transfermarkt":_pd["id_transfermarkt"],
+            "WhoScored":    _pd["id_whoscored"],
+        }
+        _badge_parts = []
+        for _src, _sid in _sources_map.items():
+            _has = _sid is not None and str(_sid) not in ("", "None", "0")
+            _color = "green" if _has else "gray"
+            _badge_parts.append(
+                f'<span style="background:{_color};color:white;'
+                f'padding:2px 8px;border-radius:4px;margin-right:4px;font-size:0.8em">'
+                f'{_src}</span>'
+            )
+        st.markdown(" ".join(_badge_parts), unsafe_allow_html=True)
+        st.divider()
+
+        # ── MDM Identity panel ───────────────────────────────────
+        st.subheader("Source Identity (MDM)")
+        _mdm_df = player_detail.get_player_mdm(_pd_cid)
+        if _mdm_df.empty:
+            st.info("No source aliases recorded for this player.")
+        else:
+            _mdm_df.columns = ["Source", "Name used", "Source ID", "Score", "Resolved"]
+            st.dataframe(_mdm_df, width="stretch", hide_index=True)
+        st.divider()
+
+        # ── Shot map ─────────────────────────────────────────────
+        st.subheader("Shot Map")
+        _sm_seasons = ["All"] + player_detail.get_player_shot_seasons(_pd_cid)
+        _sm_sources = ["All"] + player_detail.get_player_shot_sources(_pd_cid)
+        _smc1, _smc2 = st.columns(2)
+        with _smc1:
+            _sm_season = st.selectbox("Season", _sm_seasons, key="pd_sm_season")
+        with _smc2:
+            _sm_source = st.selectbox("Source", _sm_sources, key="pd_sm_source")
+
+        _shots_df = player_detail.get_player_shots(_pd_cid, _sm_season, _sm_source)
+        if _shots_df.empty:
+            st.info("No shot data found for this selection.")
+        else:
+            _pitch = _VPitch(pitch_type="statsbomb", pitch_color="#1a472a", line_color="white", line_zorder=2)
+            _fig_sm, _ax_sm = _pitch.draw(figsize=(6, 8))
+            _fig_sm.patch.set_facecolor("#1a472a")
+
+            _x      = _shots_df["x"].to_numpy(dtype=float, na_value=np.nan)
+            _y      = _shots_df["y"].to_numpy(dtype=float, na_value=np.nan)
+            _xg_arr = _shots_df["xg"].fillna(0.05).to_numpy(dtype=float)
+            _sizes  = np.clip(_xg_arr * 300, 20, 200)
+            _is_goal = (_shots_df["result"] == "Goal").to_numpy()
+
+            _pitch.scatter(
+                _x[~_is_goal], _y[~_is_goal], s=_sizes[~_is_goal],
+                color="white", edgecolors="#cccccc", linewidths=0.4,
+                alpha=0.6, ax=_ax_sm, zorder=3, label="No goal",
+            )
+            _pitch.scatter(
+                _x[_is_goal], _y[_is_goal], s=_sizes[_is_goal],
+                color="red", edgecolors="white", linewidths=0.5,
+                alpha=0.9, ax=_ax_sm, zorder=4, label="Goal",
+            )
+            _ax_sm.legend(facecolor="#1a472a", labelcolor="white", loc="upper right", fontsize=8)
+            st.pyplot(_fig_sm)
+            plt.close(_fig_sm)
+
+            # Summary stats
+            _st1, _st2, _st3, _st4 = st.columns(4)
+            _total_shots = len(_shots_df)
+            _total_goals = int(_is_goal.sum())
+            _total_xg = round(float(_xg_arr.sum()), 2)
+            _g_minus_xg = round(_total_goals - _total_xg, 2)
+            _st1.metric("Shots", _total_shots)
+            _st2.metric("Goals", _total_goals)
+            _st3.metric("xG", _total_xg)
+            _st4.metric("Goals − xG", f"{_g_minus_xg:+.2f}")
+        st.divider()
+
+        # ── Seasonal stats ───────────────────────────────────────
+        st.subheader("Seasonal Stats")
+        _ss_df = player_detail.get_player_seasonal_stats(_pd_cid)
+        if _ss_df.empty:
+            st.info("No shot data available for this player.")
+        else:
+            _ss_df.columns = ["Season", "Competition", "Shots", "Goals", "xG"]
+            st.dataframe(_ss_df, width="stretch", hide_index=True)
+        st.divider()
+
+        # ── Injury history ───────────────────────────────────────
+        st.subheader("Injury History")
+        _inj_df = player_detail.get_player_injuries(_pd_cid)
+        if _inj_df.empty:
+            st.info("No injury records found for this player.")
+        else:
+            _inj_df.columns = ["Season", "Injury type", "Date from", "Date until",
+                                "Days absent", "Matches missed"]
+            st.dataframe(_inj_df, width="stretch", hide_index=True)
+
+
+# ════════════════════════════════════════════════════════════════════
+# TAB 6 — INJURIES
 # ════════════════════════════════════════════════════════════════════
 with tab_injuries:
     st.header("Injuries")
@@ -382,7 +530,7 @@ with tab_injuries:
 
 
 # ════════════════════════════════════════════════════════════════════
-# TAB 6 — SHOT INTELLIGENCE
+# TAB 7 — SHOT INTELLIGENCE
 # ════════════════════════════════════════════════════════════════════
 with tab_shot:
     st.header("Shot Intelligence")
@@ -573,7 +721,7 @@ with tab_shot:
 
 
 # ════════════════════════════════════════════════════════════════════
-# TAB 7 — PIPELINE MONITORING
+# TAB 8 — PIPELINE MONITORING
 # ════════════════════════════════════════════════════════════════════
 with tab_monitor:
     st.header("Pipeline monitoring")
@@ -690,7 +838,7 @@ with tab_monitor:
 
 
 # ════════════════════════════════════════════════════════════════════
-# TAB 8 — WIZARD (writes to the database — read-only exception)
+# TAB 9 — WIZARD (writes to the database — read-only exception)
 # ════════════════════════════════════════════════════════════════════
 with tab_wizard:
     wizard_view.render()

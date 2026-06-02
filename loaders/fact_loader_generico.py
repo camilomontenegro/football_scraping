@@ -176,16 +176,13 @@ def _load_shots_sofascore(conn, ss_path: Path, competition_id:int ) -> int:
         try:
             mid = _match_id_by_source(conn, "sofascore", _safe_int(row.get("match_id_ss")))
             pid = _player_id_by_source(conn, "sofascore", _safe_int(row.get("player_id_ss")))
-            #tid = _team_id_by_source(conn, "sofascore",   _safe_int(row.get("team_id_ss")))
+            tid = _team_id_by_source(conn, "sofascore", _safe_int(row.get("team_id_ss")))
 
-            #boolean indica si el partido se jugo en casa o fuera. 
-            #Se usa para extraer el id del equipo del jugador que realizó el tiro
             is_home = row.get("is_home")
-            
-            if is_home  is not None  and mid:
-                match_teams= matches_cache.get(mid)
-                if(match_teams):
-                    tid= match_teams[0] if is_home else match_teams[1]
+            if is_home is not None and mid:
+                match_teams = matches_cache.get(mid)
+                if match_teams:
+                    tid = match_teams[0] if is_home else match_teams[1]
 
             if not mid or not pid or not tid:
                 skipped += 1

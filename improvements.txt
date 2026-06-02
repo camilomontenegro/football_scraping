@@ -1,0 +1,69 @@
+PLAYER PROFILE PAGE — EXPLORATION NOTES
+========================================
+(Captured from explore session — answer the open questions below when ready)
+
+
+WHAT THE DATA GIVES YOU PER PLAYER
+-----------------------------------
+dim_player already carries:
+  - canonical_name, nationality, birth_date, position
+  - id_sofascore, id_understat, id_transfermarkt, id_statsbomb, id_whoscored
+    (NULL = not matched / not in that source)
+
+Across fact tables:
+  - fact_shots     → shot locations, xG, result, minute, situation, shot_type, per source
+  - fact_events    → passes, dribbles, tackles, etc., per source
+  - fact_injuries  → full injury timeline from Transfermarkt
+
+player_review has the alias names each source used + similarity scores.
+
+
+PROPOSED LAYOUT
+----------------
+Header card:
+  Canonical name · Position · Nationality · Birth date
+  Source coverage badges: [StatsBomb ✓] [Understat ✓] [SofaScore ✓] [Transfermarkt ✓] [WhoScored ✗]
+
+MDM / Identity panel — THE UNIQUE DIFFERENTIATOR:
+  Table: Source | Name used by that source | Source ID | Match type (exact/fuzzy/manual) | Score
+  No other stats site (FBref, Sofascore, WhoScored) exposes this.
+
+Shot map:
+  - mplsoccer VerticalPitch with individual shots scattered
+  - Color = result (goal=red, saved=blue), size/alpha = xG magnitude
+  - Filters: Season (All or specific), Source (All | Understat | SofaScore)
+  - Summary stats below: Shots / Goals / xG / Goals−xG
+
+Seasonal stats table:
+  Season | Competition | Shots | Goals | xG | Sources active that season
+
+Injury history (from Transfermarkt):
+  Season | Injury type | Date from | Date until | Days absent | Matches missed
+  Career totals row at the bottom
+
+
+ENTRY POINT OPTIONS
+--------------------
+Model A (recommended for v1): Standalone tab with a search/filter box
+  - User types player name → filtered selectbox → profile renders below
+  - Simple, predictable, works well as a lookup tool
+
+Model B: Drilldown from existing Players tab
+  - Clicking a player name in the Players tab sets session_state and switches to Profile tab
+  - More "app-like" but more Streamlit wiring needed
+  - Not mutually exclusive with Model A — can add this later
+
+
+OPEN QUESTIONS — ANSWER THESE BEFORE BUILDING
+-----------------------------------------------
+Q1. Search UX: pure Streamlit (text_input + selectbox filter) or third-party
+    component (st_searchbox for real typeahead)? Any preference?
+
+Q2. Events data scope: include pass map / touch heatmap for v1, or keep v1
+    to shots + identity + injuries only and add events in a second pass?
+
+Q3. Unresolved players: should the profile show a clean "not matched to
+    WhoScored yet" message, or link to a resolve/review action in the dashboard?
+
+Q4. Navigation wiring: should player names in the existing Players tab be
+    clickable (link to profile), or does the Profile tab stand alone for now?
