@@ -6,8 +6,7 @@ Script de migración para poner al día una base de datos desactualizada.
 Ejecuta todos los cambios de forma IDEMPOTENTE (se puede lanzar muchas
 veces sin romper nada). Cubre:
 
-    1. Tablas nuevas:  dim_competition, dim_stadium, player_review,
-                       player_scrape_provenance
+    1. Tablas nuevas:  dim_competition, dim_stadium, player_review
     2. Columnas nuevas en dim_match:  competition_id (FK), attendance,
                        temperature_c, humidity_pct, precipitation_mm,
                        wind_speed_kmh, weather_code
@@ -154,7 +153,14 @@ CREATE TABLE dim_stadium (
     capacity              INTEGER,
     capacity_intl         INTEGER,
     seats_total           INTEGER,
+    seats_covered         INTEGER,
+    seats_vip             INTEGER,
+    vip_boxes             SMALLINT,
+    seats_standing        INTEGER,
+    inaugurated_year      SMALLINT,
     built_year            SMALLINT,
+    refurbished_year      SMALLINT,
+    construction_cost     VARCHAR(120),
     owner                 VARCHAR(200),
     operator              VARCHAR(200),
     address               VARCHAR(300),
@@ -176,6 +182,7 @@ CREATE TABLE dim_stadium (
     roof_type             VARCHAR(20),
     wikipedia_url         VARCHAR(500),
     image_url             TEXT,
+    is_current            BOOLEAN DEFAULT TRUE,
     data_hash             CHAR(40),
     data_source           VARCHAR(50) DEFAULT 'transfermarkt',
     created_at            TIMESTAMP DEFAULT NOW(),
@@ -221,34 +228,12 @@ CREATE INDEX IF NOT EXISTS idx_player_review_unresolved
     ON player_review (resolved) WHERE resolved IS FALSE;
 """
 
-SQL_PLAYER_PROVENANCE = """
-CREATE TABLE player_scrape_provenance (
-    id               SERIAL PRIMARY KEY,
-    source_system    VARCHAR(50)  NOT NULL,
-    source_player_id VARCHAR(50)  NOT NULL,
-    scraped_name     VARCHAR(150) NOT NULL,
-    competition      VARCHAR(100) NOT NULL DEFAULT '',
-    season           VARCHAR(20)  NOT NULL DEFAULT '',
-    team_name        VARCHAR(150),
-    team_id          VARCHAR(50)  NOT NULL DEFAULT '',
-    canonical_id     INTEGER REFERENCES dim_player (canonical_id),
-    scraped_at       TIMESTAMP DEFAULT NOW(),
-    UNIQUE (source_system, source_player_id, competition, season, team_id)
-);
-CREATE INDEX IF NOT EXISTS idx_player_provenance_canonical
-    ON player_scrape_provenance (canonical_id);
-CREATE INDEX IF NOT EXISTS idx_player_provenance_name
-    ON player_scrape_provenance (LOWER(scraped_name));
-"""
-
-
 def step_create_tables(conn, log: MigrationLog):
     """Crea tablas que no existan."""
     tables = [
         ("dim_competition",          SQL_DIM_COMPETITION),
         ("dim_stadium",              SQL_DIM_STADIUM),
         ("player_review",            SQL_PLAYER_REVIEW),
-        ("player_scrape_provenance", SQL_PLAYER_PROVENANCE),
     ]
     for name, ddl in tables:
         if table_exists(conn, name):
@@ -428,7 +413,7 @@ def run(dry_run: bool = False):
             print("[1/5] Tablas nuevas...")
             for name, _ in [
                 ("dim_competition", None), ("dim_stadium", None),
-                ("player_review", None), ("player_scrape_provenance", None),
+                ("player_review", None),
             ]:
                 if table_exists(conn, name):
                     log.skip(f"Tabla {name} ya existe")

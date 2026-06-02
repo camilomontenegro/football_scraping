@@ -68,16 +68,6 @@ WORKING_COMPETITIONS: Dict[str, list[str]] = {
     "Torneos continentales": [
         "Champions League",
         "Europa League",
-        "Europa Conference League",
-        "European Championship",
-        "Copa America",
-    ],
-    "Torneos intercontinentales": [
-        "FIFA World Cup",
-        # "FIFA Club World Cup": retirado del wizard hasta que tengamos
-        # datos de esta competicion en el resto de fuentes (Sofascore,
-        # WhoScored, Understat, StatsBomb). Si se vuelve a habilitar,
-        # anadirlo aqui de nuevo.
     ],
 }
 

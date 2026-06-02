@@ -25,6 +25,7 @@ Uso:
   python db/migrate_data.py export --out-dir ruta/
   python db/migrate_data.py import --in-dir ruta/
   python db/migrate_data.py import --dry-run
+  python db/migrate_data.py import --in-dir ruta/ --merge   # actualiza filas existentes (image_url, QID, clima)
 """
 
 from __future__ import annotations
@@ -78,6 +79,14 @@ STADIUM_EXPORT_COLS = [
     "altitude_m", "timezone", "roof_type",
     "wikipedia_url", "image_url",
     "data_hash", "data_source",
+]
+
+# Campos de dim_stadium que se fusionan en filas ya existentes (--merge).
+STADIUM_MERGE_COLS = [
+    "wikidata_qid", "latitude", "longitude",
+    "altitude_m", "timezone", "wikipedia_url", "image_url",
+    "architect", "capacity", "seats_total", "built_year",
+    "city", "country", "surface", "owner", "operator", "address",
 ]
 
 # Columnas de enriquecimiento de dim_match + IDs de fuente para matching.
@@ -230,13 +239,41 @@ def _read_csv(path: Path) -> list[dict]:
         return rows
 
 
-def do_import(in_dir: Path, dry_run: bool = False):
+def _legacy_row_score(row: dict) -> int:
+    score = 0
+    if (row.get("image_url") or "").strip():
+        score += 100
+    if (row.get("wikidata_qid") or "").strip():
+        score += 20
+    if row.get("latitude") not in (None, ""):
+        score += 10
+    if (row.get("wikipedia_url") or "").strip():
+        score += 5
+    return score
+
+
+def _best_legacy_stadium_per_team(rows: list[dict]) -> dict[int, dict]:
+    """Una fila representativa por id_transfermarkt_team (la más completa)."""
+    by_team: dict[int, dict] = {}
+    for row in rows:
+        tm_id = _safe_int(row.get("id_transfermarkt_team"))
+        if not tm_id or tm_id < 0:
+            continue
+        prev = by_team.get(tm_id)
+        if not prev or _legacy_row_score(row) > _legacy_row_score(prev):
+            by_team[tm_id] = row
+    return by_team
+
+
+def do_import(in_dir: Path, dry_run: bool = False, merge: bool = False):
     engine = create_engine(URL)
     print("=" * 55)
     print(f"  IMPORT a {DB_NAME}@{DB_HOST}")
     print(f"  Fuente: {in_dir}")
     if dry_run:
         print("  *** MODO DRY-RUN: no se aplican cambios ***")
+    if merge:
+        print("  *** MERGE: rellena NULL en filas existentes (no inserta duplicados) ***")
     print("=" * 55)
 
     stadium_file = in_dir / "dim_stadium.csv"
@@ -251,7 +288,10 @@ def do_import(in_dir: Path, dry_run: bool = False):
         # ── dim_stadium ──
         if stadium_file.exists():
             print(f"\n[1/2] Importando dim_stadium...")
-            _import_stadiums(conn, stadium_file, dry_run)
+            if merge:
+                _merge_stadium_metadata(conn, stadium_file, dry_run)
+            else:
+                _import_stadiums(conn, stadium_file, dry_run)
         else:
             print(f"\n[1/2] dim_stadium.csv no encontrado, omitido")
 
@@ -332,6 +372,102 @@ def _import_stadiums(conn, path: Path, dry_run: bool):
 
     verb = "se insertarían" if dry_run else "insertadas"
     print(f"  dim_stadium: {inserted} {verb} | {skipped} ya existían | {no_team} sin equipo en dim_team")
+
+
+def _merge_stadium_metadata(conn, path: Path, dry_run: bool) -> None:
+    """Rellena image_url, wikidata_qid, coords, etc. en filas existentes por id_transfermarkt_team."""
+    rows = _read_csv(path)
+    if not rows:
+        print("  dim_stadium merge: CSV vacío")
+        return
+
+    dest_cols = [c for c in STADIUM_MERGE_COLS if c in _table_columns(conn, "dim_stadium")]
+    if not dest_cols:
+        print("  dim_stadium merge: sin columnas compatibles en BD")
+        return
+
+    by_team = _best_legacy_stadium_per_team(rows)
+    updated_rows = skipped = no_team = 0
+
+    _str_cols = set(dest_cols) - _INT_STADIUM_COLS - _FLOAT_STADIUM_COLS - _BOOL_STADIUM_COLS
+    set_parts = []
+    for col in dest_cols:
+        if col in _str_cols:
+            set_parts.append(
+                f"{col} = COALESCE(NULLIF(TRIM({col}::text), ''), :{col})",
+            )
+        elif col in _BOOL_STADIUM_COLS:
+            set_parts.append(f"{col} = COALESCE({col}, :{col})")
+        else:
+            set_parts.append(f"{col} = COALESCE({col}, :{col})")
+    set_clause = ", ".join(set_parts)
+
+    for tm_id, row in by_team.items():
+        r = conn.execute(
+            text("SELECT canonical_id FROM dim_team WHERE id_transfermarkt = :tid"),
+            {"tid": tm_id},
+        )
+        if not r.fetchone():
+            no_team += 1
+            continue
+
+        r = conn.execute(
+            text(
+                "SELECT COUNT(*) FROM dim_stadium WHERE id_transfermarkt_team = :tid",
+            ),
+            {"tid": tm_id},
+        )
+        if r.scalar() == 0:
+            skipped += 1
+            continue
+
+        if dry_run:
+            updated_rows += conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM dim_stadium WHERE id_transfermarkt_team = :tid",
+                ),
+                {"tid": tm_id},
+            ).scalar()
+            continue
+
+        params: dict = {"tid": tm_id}
+        for col in dest_cols:
+            params[col] = _coerce_stadium_value(col, row.get(col))
+
+        result = conn.execute(
+            text(f"""
+                UPDATE dim_stadium
+                SET {set_clause},
+                    updated_at = NOW()
+                WHERE id_transfermarkt_team = :tid
+            """),
+            params,
+        )
+        updated_rows += result.rowcount
+
+        # Propagar a filas sintéticas del mismo equipo (id TM negativo)
+        canon = conn.execute(
+            text("SELECT canonical_id FROM dim_team WHERE id_transfermarkt = :tid"),
+            {"tid": tm_id},
+        ).scalar()
+        if canon:
+            params_sib = {**params, "cid": canon}
+            conn.execute(
+                text(f"""
+                    UPDATE dim_stadium
+                    SET {set_clause},
+                        updated_at = NOW()
+                    WHERE canonical_team_id = :cid
+                      AND id_transfermarkt_team < 0
+                """),
+                params_sib,
+            )
+
+    verb = "filas se actualizarían" if dry_run else "filas actualizadas"
+    print(
+        f"  dim_stadium merge: {updated_rows} {verb} | "
+        f"{len(by_team)} equipos en CSV | {skipped} sin fila en BD | {no_team} sin dim_team",
+    )
 
 
 def _import_match_enrichment(conn, path: Path, dry_run: bool):
@@ -417,13 +553,15 @@ def main():
                      help=f"Carpeta con los CSVs (default: {DEFAULT_DIR})")
     imp.add_argument("--dry-run", action="store_true",
                      help="Muestra qué haría sin tocar la BD")
+    imp.add_argument("--merge", action="store_true",
+                     help="Fusiona metadata en dim_stadium existente (image_url, QID, coords)")
 
     args = parser.parse_args()
 
     if args.command == "export":
         do_export(args.out_dir)
     elif args.command == "import":
-        do_import(args.in_dir, dry_run=args.dry_run)
+        do_import(args.in_dir, dry_run=args.dry_run, merge=args.merge)
 
 
 if __name__ == "__main__":

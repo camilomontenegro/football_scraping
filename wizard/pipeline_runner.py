@@ -373,28 +373,25 @@ _CATEGORY_LABELS = {
 
 
 def grouped_db_competitions() -> List[tuple]:
-    """Lista de competiciones agrupadas por categoría, filtradas por `dim_competition`.
+    """Lista de competiciones agrupadas por categoría para el menú del wizard.
 
-    Sólo aparecen las competiciones que cumplen TODAS las condiciones:
-        • Existen en `dim_competition.canonical_name` (la BD manda).
-        • Tienen configuración en `COMPETITIONS` (necesaria para scrapear).
-
-    El orden dentro de cada grupo respeta el de `WORKING_COMPETITIONS`
-    cuando es posible y deja al final las competiciones de BD que no estén
-    listadas allí (ordenadas alfabéticamente).
+    Sólo aparecen las de `WORKING_COMPETITION_NAMES` que además estén en
+    `dim_competition` (hay que haber ejecutado `load_competitions` antes).
+    El catálogo amplio `COMPETITIONS` (27 entradas) no se muestra en el menú.
     """
-    valid_db = db_competition_names()
-    available = [name for name in valid_db if name in COMPETITIONS]
+    from wizard.competitions import WORKING_COMPETITION_NAMES
 
-    # Orden preferido según WORKING_COMPETITIONS
+    valid_db = db_competition_names()
+    available = [
+        name for name in WORKING_COMPETITION_NAMES
+        if name in valid_db and name in COMPETITIONS
+    ]
+
     ordered: list[str] = []
     for names in WORKING_COMPETITIONS.values():
         for name in names:
             if name in available and name not in ordered:
                 ordered.append(name)
-    for name in sorted(available):
-        if name not in ordered:
-            ordered.append(name)
 
     grouped: Dict[str, list[str]] = {}
     for name in ordered:

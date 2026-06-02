@@ -5,7 +5,6 @@
 -- ── Limpieza previa (idempotente) ─────────────────────────
 -- DROP en orden inverso de dependencias por las FKs.
 -- CASCADE elimina índices y constraints asociados.
-DROP TABLE IF EXISTS player_scrape_provenance CASCADE;
 DROP TABLE IF EXISTS fact_injuries   CASCADE;
 DROP TABLE IF EXISTS fact_events     CASCADE;
 DROP TABLE IF EXISTS fact_shots      CASCADE;
@@ -294,30 +293,6 @@ CREATE UNIQUE INDEX ux_injuries_unique ON fact_injuries (
 CREATE INDEX idx_injuries_player ON fact_injuries (player_id);
 
 
--- ── player_scrape_provenance ──────────────────────────────
--- Trazabilidad: de qué comp/temporada/equipo salió cada ID de jugador
--- en cada fuente. Clave para desambiguar homónimos ("Pedro", "Koke"…).
-CREATE TABLE player_scrape_provenance (
-    id               SERIAL PRIMARY KEY,
-    source_system    VARCHAR(50)  NOT NULL,
-    source_player_id VARCHAR(50)  NOT NULL,
-    scraped_name     VARCHAR(150) NOT NULL,
-    competition      VARCHAR(100) NOT NULL DEFAULT '',
-    season           VARCHAR(20)  NOT NULL DEFAULT '',
-    team_name        VARCHAR(150),
-    team_id          VARCHAR(50)  NOT NULL DEFAULT '',
-    canonical_id     INTEGER REFERENCES dim_player (canonical_id),
-    scraped_at       TIMESTAMP DEFAULT NOW(),
-    UNIQUE (source_system, source_player_id, competition, season, team_id)
-);
-
-CREATE INDEX idx_player_provenance_canonical
-    ON player_scrape_provenance (canonical_id);
-
-CREATE INDEX idx_player_provenance_name
-    ON player_scrape_provenance (LOWER(scraped_name));
-
-
 -- ══════════════════════════════════════════════════════════
 -- DIMENSIÓN: ESTADIOS
 -- ══════════════════════════════════════════════════════════
@@ -345,7 +320,14 @@ CREATE TABLE dim_stadium (
     capacity              INTEGER,
     capacity_intl         INTEGER,
     seats_total           INTEGER,
+    seats_covered         INTEGER,
+    seats_vip             INTEGER,
+    vip_boxes             SMALLINT,
+    seats_standing        INTEGER,
+    inaugurated_year      SMALLINT,
     built_year            SMALLINT,
+    refurbished_year      SMALLINT,
+    construction_cost     VARCHAR(120),
     owner                 VARCHAR(200),
     operator              VARCHAR(200),
     address               VARCHAR(300),
@@ -364,7 +346,12 @@ CREATE TABLE dim_stadium (
     wikidata_qid          VARCHAR(20),
     latitude              DECIMAL(9,6),
     longitude             DECIMAL(9,6),
+    altitude_m            INTEGER,
+    timezone              VARCHAR(64),
+    roof_type             VARCHAR(20),
+    wikipedia_url         VARCHAR(500),
     image_url             TEXT,
+    is_current            BOOLEAN DEFAULT TRUE,
 
     -- SHA1 hex de los campos comparables, para detectar cambios rápido
     data_hash             CHAR(40),

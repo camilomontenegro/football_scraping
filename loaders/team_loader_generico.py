@@ -220,7 +220,15 @@ def _load_from_understat(conn, us_path: Path) -> int:
 
     count = 0
     for _, row in df.iterrows():
-        us_id   = row.get("understat_team_id")
+        # Acepta tanto el formato canónico del repo:
+        #   understat_team_id,team_name
+        # como el formato externo:
+        #   team_id,team_name
+        us_id = (
+            row.get("understat_team_id")
+            if row.get("understat_team_id") is not None
+            else row.get("team_id")
+        )
         us_name = row.get("team_name")
 
          # proteccion por si del scrapper no vienen las entitidades html convertidas a sus caracteres reales 
