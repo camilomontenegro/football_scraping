@@ -27,7 +27,7 @@ logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s - %(
 log = logging.getLogger(__name__)
 
 # ruta base de los datos de SofaScore Champions
-SS_CHAMPIONS = Path("data/raw/sofascore/champions")
+SS_CHAMPIONS = Path("data/raw/sofascore/la_liga")
 
 
 def process_season(season_dir: Path) -> int:

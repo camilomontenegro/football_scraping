@@ -3,6 +3,9 @@ loaders/team_loader.py
 =======================
 Carga dim_team desde los archivos producidos por los scrapers.
 
+*Antes de ejecutar, hay que recorrer los csv de equipos y introducir manualmente en el diccionario _TEAM_ALIASES de utils/canonical_teams.py los nombres de equipos que no coincidan exactamente con el canonical_name de SofaScore. Pendiente de automaticazacion. ( de todos modos  aunque  se automatizase, hay nombres de equipos que no se pueden resolver y se requiere la inclusion manual  en el diccionario)
+*
+
 FUENTES (en orden de prioridad):
     1. SofaScore teams.csv  → nombre canónico + id_sofascore  (MASTER)
     2. Transfermarkt players_clean.csv → añade country + id_transfermarkt
@@ -20,13 +23,14 @@ Schema destino (dim_team):
 
 from __future__ import annotations
 
-import glob
+from importlib.resources import files
 import logging
-import os
 from pathlib import Path
 
 import pandas as pd
 from sqlalchemy import text
+# necesario para asegurar conversion entidades html de understat
+import html 
 
 from loaders.common import engine
 from utils.canonical_teams import normalize_team_name
@@ -44,6 +48,11 @@ _ALLOWED_ID_COLS = {
 
 def _upsert_team(conn, canonical_name: str, source_id_col: str, source_id) -> int:
     """Inserta o actualiza un equipo en dim_team.
+
+    1. Busca por ID de fuente → si existe devuelve el canonical_id
+    2. Busca por nombre normalizado → si existe devuelve el canonical_id
+    3. Si no existe → INSERT nuevo equipo
+    4. UPDATE id de la fuente si estaba NULL
 
     Returns:
         canonical_id del equipo.
@@ -143,9 +152,10 @@ def _load_from_transfermarkt(conn,tm_path: Path) -> int:
     """Lee players_clean.csv de TM → añade country e id_transfermarkt a dim_team."""
     
     files = list(tm_path.glob("**/teams_clean.csv"))
+    
 
     if not files:
-        log.info("team_loader: no hay players_clean.csv de TM")
+        log.info("team_loader: no hay teams_clean.csv de TM en %s", tm_path)
         return 0
 
     # Construir tabla única de equipos TM (team_slug, team_country)
@@ -158,6 +168,10 @@ def _load_from_transfermarkt(conn,tm_path: Path) -> int:
                 #slug    = row.get("team_slug")
                 name= row.get("team_name")
                 country = row.get("team_country") if "team_country" in df.columns else None
+                
+                # puede ocurrir que el campo country  en el csv tenga valor NAN. En esgte caso, se trata como NONE, para evitar excepcion en la inserccion en dim_team
+                if country and str(country).strip().lower() in ("nan", "none", ""):
+                    country = None
                 
                 #tm_id   = row.get("team_id_tm")
                 tm_id = row.get("team_id")
@@ -191,23 +205,30 @@ def _load_from_transfermarkt(conn,tm_path: Path) -> int:
 
 def _load_from_understat(conn, us_path: Path) -> int:
     """Lee understat_teams_laliga.csv → añade id_understat a dim_team."""
-    f = us_path / "teams_clean.csv"
-    
-    
-    if not f.exists():
-        log.info("team_loader: no hay understat_teams_laliga.csv")
+    # busca recursivamente cualquier CSV que tenga "teams" en el nombre dentro de us_path
+    files = list(us_path.glob("**/*teams*.csv"))
+    if not files:
+        log.info("team_loader: no hay archivos de teams de Understat en %s", us_path)
         return 0
-
     try:
-        df = pd.read_csv(f)
+        # recorre la lista de objetos path y lee cada csv en un dataframe. Luego los concatena en uno solo
+        dfs = [pd.read_csv(f) for f in files]
+        df = pd.concat(dfs, ignore_index=True)
     except Exception as e:
-        log.warning("Error leyendo %s: %s", f, e)
+        log.warning("Error leyendo archivos de Understat: %s", e)
         return 0
 
     count = 0
     for _, row in df.iterrows():
         us_id   = row.get("understat_team_id")
         us_name = row.get("team_name")
+
+         # proteccion por si del scrapper no vienen las entitidades html convertidas a sus caracteres reales 
+        # unescape convierte entidades html a caracteres reales. Si el string ya esta, limpio no hace nada 
+        #"Lewis O&#039;Brien" → "Lewis O'Brien"
+        if us_name:
+            us_name = html.unescape(us_name)
+
         if not us_id or not us_name:
             continue
 
@@ -220,6 +241,7 @@ def _load_from_understat(conn, us_path: Path) -> int:
 
 def _load_from_statsbomb(conn, sb_path: Path) -> int:
     """Lee teams.csv de StatsBomb → añade id_statsbomb a dim_team."""
+
     files = list(sb_path.glob("**/teams.csv"))
     if not files:
         log.info("team_loader: no hay teams.csv de StatsBomb")
@@ -248,17 +270,15 @@ def _load_from_statsbomb(conn, sb_path: Path) -> int:
 
 def _load_from_whoscored(conn, ws_path: Path) -> int:
 
-    """Lee whoscored_teams_laliga.csv → añade id_whoscored a dim_team."""
-    f = ws_path / "teams_clean.csv"
-
-    if not f.exists():
-        log.info("team_loader: no hay whoscored_teams_laliga.csv")
+    files = list(ws_path.glob("**/*teams*.csv"))
+    if not files:
+        log.info("team_loader: no hay archivos de teams de WhoScored en %s", ws_path)
         return 0
-
     try:
-        df = pd.read_csv(f)
+        dfs = [pd.read_csv(f) for f in files]
+        df = pd.concat(dfs, ignore_index=True)
     except Exception as e:
-        log.warning("Error leyendo %s: %s", f, e)
+        log.warning("Error leyendo archivos de WhoScored: %s", e)
         return 0
 
     count = 0
@@ -292,11 +312,16 @@ def load_teams(
         2. Transfermarkt → añade country e id_transfermarkt
         3. Understat  → añade id_understat
         4. StatsBomb  → añade id_statsbomb
+        5. whoScored  → añade id_whoscored
 
     Returns:
         Número total de equipos procesados.
+
     """
     log.info("[START] Cargando dim_team...")
+
+    # si en algun momento decido implementar la funcion enrich_team_aliases, esta se llamaria aqui, antes de cargar los datos de las fuentes.
+
     total = 0
     if ss_path:
         total += _load_from_sofascore(conn, ss_path)
