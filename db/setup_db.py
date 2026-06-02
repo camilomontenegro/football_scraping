@@ -1,14 +1,21 @@
 # db/setup_db.py
 # Crea la base de datos y carga el schema usando SQLAlchemy.
-#
+# Esta conexion  se utlzia solo para crear la base de datos 
 # Uso:
 #   pip install sqlalchemy psycopg2-binary python-dotenv
 #   python db/setup_db.py
 
 import os
+import sys
+from pathlib import Path
+
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError, ProgrammingError
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 load_dotenv()
 
@@ -71,6 +78,14 @@ try:
         conn.execute(text(sql))
 
     print(" Schema instalado correctamente\n")
+
+    print(" Sembrando dim_competition...")
+    from loaders.competition_loader import load_competitions
+
+    seed_engine = create_engine(url_football)
+    with seed_engine.begin() as conn:
+        inserted = load_competitions(conn)
+    print(f" dim_competition sembrada correctamente ({inserted} competiciones)\n")
 
 except FileNotFoundError:
     print(f" No se encuentra el archivo SQL en: {SQL_PATH}")

@@ -2,75 +2,105 @@
 utils/mdm_engine.py
 ====================
 Motor de resolución de entidades (MDM - Master Data Management).
-
+ 
 Funciones principales:
     resolve_team(conn, raw_name, source, source_id=None) → int | None
     resolve_player(conn, player_name, source, source_id=None) → int | None
-
+ 
 Estrategia de resolución:
-
+ 
     EQUIPOS (dim_team):
         1. Si source_id  → buscar por dim_team.id_{source} (match exacto)
         2. normalizar nombre con canonical_teams.normalize_team_name()
         3. Buscar por LOWER(canonical_name)
         4. Si no existe  → crear dim_team nueva
         5. Actualizar dim_team.id_{source} si era NULL
-
+ 
     JUGADORES (dim_player):
         1. Si source_id  → buscar por dim_player.id_{source} (match exacto)
-        2. Buscar por LOWER(canonical_name) exacto
+        2. Búsqueda por nombre exacto normalizado en caché
         3. Match exacto  → devolver canonical_id, actualizar id_{source}
-        4. Match fuzzy   → insertar en player_review (resolved=False)
+        4. Match fuzzy   → insertar en player_review si similitud ≥ threshold
         5. Sin match     → insertar en player_review para revisión manual
-
+ 
 IMPORTANTE:
     - dim_team NO tiene tabla de alias (se usa canonical_teams.py)
     - dim_player usa player_review para la desambiguación
     - No hay staging tables ni alias tables en el schema actual
 """
-
+ 
 from __future__ import annotations
-
+ 
 import logging
 import re
 import unicodedata
 from typing import Optional
-
+import html
 from sqlalchemy import text
-
+ 
 from utils.canonical_teams import normalize_team_name
 from utils.mdm_config import SOURCE_ID_FIELDS, DIM_PK, DIM_TABLE
-
+ 
 log = logging.getLogger(__name__)
-
-
+ 
+ 
 # ── Normalización interna ────────────────────────────────────────────────────
-
+ 
 def normalize(name: str) -> Optional[str]:
     """Normaliza un nombre para comparaciones:
     minúsculas · sin tildes · solo letras/dígitos/espacios · espacios simples.
-
     Devuelve None si el resultado está vacío o es un placeholder ('home', 'away').
+ 
+    Ejemplos:
+        "André"        → "andre"
+        "Ødegaard"     → "odegaard"
+        "Çalhanoğlu"   → "calhanoglu"
+        "O&#039;Brien" → "o brien"   (entidad HTML decodificada)
     """
     if not name:
         return None
+ 
+    # decodificar entidades HTML antes de normalizar
+    # convierte &#039; → ' , &amp; → & , &quot; → "  etc.
+    name = html.unescape(name)
+ 
     name = name.lower().strip()
     if name in ("home", "away", ""):
         return None
-    # Eliminar diacríticos
+ 
+    # Eliminar diacríticos (tildes, letras especiales de otros idiomas)
     name = unicodedata.normalize("NFKD", name)
     name = "".join(c for c in name if not unicodedata.combining(c))
-    # Solo letras, dígitos y espacios
+ 
+    # Solo letras, dígitos y espacios — elimina apóstrofes, guiones, puntos, etc.
     name = re.sub(r"[^a-z0-9 ]", " ", name)
     name = re.sub(r"\s+", " ", name).strip()
-    return name or None
-
-
+ 
+    # Diccionario de apodos — mapea nombres coloquiales al nombre normalizado
+    # Útil cuando una fuente usa el apodo y Transfermarkt usa el nombre oficial
+    ALIASES = {
+        "papakouli diop": "pape diop",
+        "joselu":         "jose luis mato",
+        "koke":           "jorge resurreccion",
+        "isco":           "francisco alarcon",
+        "pedri":          "pedro gonzalez",
+        "gavi":           "pablo martin paez gavira",
+        "rodri":          "rodrigo hernandez",
+        "vini jr":        "vinicius junior",
+        "pepe":           "kepler laveran",
+    }
+    return ALIASES.get(name, name) or None
+ 
+ 
 def _similarity_score(a: str, b: str) -> int:
     """Puntúa la similitud entre dos strings normalizados (0-100).
-
-    Algoritmo simple basado en palabras compartidas, suficiente para
-    nombres de jugadores donde la coincidencia suele ser alta o baja.
+ 
+    Aplica estrategias por orden de fiabilidad:
+    1. Subconjuntos completos — "lionel messi" vs "lionel andres messi cuccittini"
+    2. Peso al apellido — si coincide el apellido suma 50 puntos base
+    3. Iniciales — "l messi" vs "lionel messi" → 88
+    4. Jaccard index básico sobre palabras compartidas
+    5. SequenceMatcher para typos menores (solo si jaccard > 30 o misma inicial)
     """
     if not a or not b:
         return 0
@@ -78,14 +108,67 @@ def _similarity_score(a: str, b: str) -> int:
     words_b = set(b.split())
     if not words_a or not words_b:
         return 0
+ 
     intersection = words_a & words_b
     union        = words_a | words_b
-    # Jaccard index * 100
-    return int(100 * len(intersection) / len(union))
-
-
+ 
+    # 1. Subconjuntos (nombres largos vs cortos)
+    if len(intersection) == len(words_a) or len(intersection) == len(words_b):
+        # Comparten al menos 2 palabras completas → casi seguro
+        if len(intersection) >= 2:
+            return 95
+        # Uno de los nombres es de 1 sola palabra y está contenida en el otro
+        if len(words_a) == 1 or len(words_b) == 1:
+            return 90
+ 
+    # 2. Análisis estructural (nombre vs apellido)
+    score = 0
+    list_a = a.split()
+    list_b = b.split()
+ 
+    if len(list_a) >= 2 and len(list_b) >= 2:
+        last_a  = list_a[-1]
+        last_b  = list_b[-1]
+        first_a = list_a[0]
+        first_b = list_b[0]
+ 
+        if last_a == last_b:
+            # El apellido tiene mucho peso
+            score += 50
+            if first_a == first_b:
+                score += 45   # exacto → 95
+            elif first_a[0] == first_b[0]:
+                if len(first_a) == 1 or len(first_b) == 1:
+                    score += 38   # inicial compatible → 88
+                else:
+                    score += 15   # mismo apellido, distinto nombre → 65 (duda)
+            # else: mismo apellido, distinto nombre → 50 (duda/nuevo)
+        else:
+            # Apellidos distintos — ¿comparte el penúltimo?
+            # Ej: TM = "Alejandro Pozo Pozo", SS = "Alejandro Pozo"
+            if len(list_a) >= 3 and list_a[-2] == last_b:
+                score += 50
+            elif len(list_b) >= 3 and list_b[-2] == last_a:
+                score += 50
+ 
+    # 3. Jaccard index básico
+    jaccard = int(100 * len(intersection) / len(union))
+    score = max(score, jaccard)
+ 
+    # 4. SequenceMatcher para typos menores (ej: "mesi" vs "messi")
+    seq_match = 0
+    if jaccard > 30 or (a and b and a[0] == b[0]):
+        from difflib import SequenceMatcher
+        seq_match = int(SequenceMatcher(None, a, b).ratio() * 100)
+        # Cortafuegos: si difieren demasiado (ej: "Maximiliano Gomez" vs "Lovera" = 74%) descartar
+        if seq_match < 85:
+            seq_match = 0
+ 
+    return max(score, seq_match)
+ 
+ 
 # ── Resolución de EQUIPOS ────────────────────────────────────────────────────
-
+ 
 def resolve_team(
     conn,
     raw_name: str,
@@ -93,18 +176,20 @@ def resolve_team(
     source_id: Optional[int] = None,
 ) -> Optional[int]:
     """Resuelve un nombre de equipo a un canonical_id de dim_team.
-
+ 
     Args:
         conn:       Conexión SQLAlchemy activa.
         raw_name:   Nombre del equipo tal como viene de la fuente.
         source:     Fuente de datos ('sofascore', 'transfermarkt', etc.).
         source_id:  ID del equipo en la fuente (si se conoce).
-
+ 
     Returns:
         canonical_id de dim_team, o None si no se puede resolver.
     """
+    # obtiene el nombre del campo de dim_team que almacena el ID de la fuente
+    # ej: source="sofascore" → id_col="id_sofascore"
     id_col = SOURCE_ID_FIELDS.get(source, {}).get("team")
-
+ 
     # 1. Búsqueda por ID de fuente (más fiable)
     if source_id is not None and id_col:
         row = conn.execute(
@@ -113,20 +198,21 @@ def resolve_team(
         ).fetchone()
         if row:
             return row[0]
-
+ 
     # 2. Normalizar nombre con el diccionario canónico
     canonical_name = normalize_team_name(raw_name)
     if not canonical_name:
         log.warning("resolve_team: nombre vacío/inválido para '%s'", raw_name)
         return None
-
+ 
     # 3. Buscar por canonical_name en dim_team
-    #    Usamos canonical_name.lower() — mantiene tildes igual que LOWER() en PostgreSQL
+    #    canonical_name ya viene del diccionario con el nombre exacto de SofaScore
+    #    LOWER() en PostgreSQL mantiene tildes — funciona si dim_team tiene nombres de SofaScore
     row = conn.execute(
         text("SELECT canonical_id FROM dim_team WHERE LOWER(canonical_name) = :n LIMIT 1"),
         {"n": canonical_name.lower()},
     ).fetchone()
-
+ 
     if row:
         canonical_id = row[0]
         # Actualizar ID externo si no estaba registrado
@@ -136,31 +222,62 @@ def resolve_team(
                 {"sid": source_id, "cid": canonical_id},
             )
         return canonical_id
-
+ 
     # 4. No existe → crear entrada nueva en dim_team
     canonical_id = conn.execute(
-        text("""
-            INSERT INTO dim_team (canonical_name)
-            VALUES (:name)
-            RETURNING canonical_id
-        """),
+        text("INSERT INTO dim_team (canonical_name) VALUES (:name) RETURNING canonical_id"),
         {"name": canonical_name},
     ).scalar()
-
+ 
     log.info("resolve_team: creado nuevo equipo '%s' (canonical_id=%d)", canonical_name, canonical_id)
-
+ 
     # Guardar ID externo de la fuente
     if source_id is not None and id_col:
         conn.execute(
             text(f"UPDATE dim_team SET {id_col} = :sid WHERE canonical_id = :cid"),
             {"sid": source_id, "cid": canonical_id},
         )
-
+ 
     return canonical_id
-
-
+ 
+ 
+# ── Caché en memoria para JUGADORES ──────────────────────────────────────────
+ 
+_PLAYER_CACHE = None
+ 
+ 
+def clear_player_cache():
+    """Limpia la caché de jugadores (útil después de ingestas masivas)."""
+    global _PLAYER_CACHE
+    _PLAYER_CACHE = None
+ 
+ 
+def _get_player_cache(conn) -> list[dict]:
+    """Construye y devuelve la caché de jugadores normalizados.
+ 
+    Carga todos los jugadores de dim_player una sola vez y normaliza sus nombres.
+    Evita hacer queries SQL por cada jugador durante la búsqueda fuzzy — mucho más eficiente.
+    La caché persiste en memoria durante la sesión; llamar a clear_player_cache() para resetear.
+    """
+    global _PLAYER_CACHE
+    if _PLAYER_CACHE is None:
+        log.info("Construyendo caché de jugadores para resolución sin tildes...")
+        rows = conn.execute(text("SELECT canonical_id, canonical_name FROM dim_player")).fetchall()
+        _PLAYER_CACHE = []
+        for cid, cname in rows:
+            norm = normalize(cname)
+            if norm:
+                _PLAYER_CACHE.append({
+                    "id":   cid,
+                    "name": cname,
+                    "norm": norm,   # nombre normalizado (sin tildes, sin caracteres especiales)
+                })
+        log.info("Caché construida: %d jugadores", len(_PLAYER_CACHE))
+    return _PLAYER_CACHE
+ 
+ 
 # ── Resolución de JUGADORES ──────────────────────────────────────────────────
-
+ 
 def resolve_player(
     conn,
     player_name: str,
@@ -169,26 +286,34 @@ def resolve_player(
     similarity_threshold: int = 85,
 ) -> Optional[int]:
     """Resuelve un nombre de jugador a un canonical_id de dim_player.
-
+ 
     Estrategia:
         1. Búsqueda por ID externo → match definitivo
-        2. Búsqueda por nombre exacto (normalizado)
-        3. Búsqueda fuzzy → insertar en player_review si similitud ≥ threshold
+        2. Búsqueda por nombre exacto normalizado en caché
+        3. Búsqueda fuzzy en caché → insertar en player_review si similitud ≥ threshold
         4. Sin match → insertar en player_review para revisión manual
-
+ 
+    La búsqueda usa caché en memoria para evitar queries SQL por cada jugador.
+    normalize() elimina tildes y entidades HTML en ambos lados, resolviendo el
+    problema de comparar nombres normalizados contra nombres con acentos en la BD.
+ 
     Args:
         conn:                 Conexión SQLAlchemy activa.
         player_name:          Nombre del jugador tal como viene de la fuente.
         source:               Fuente de datos ('sofascore', 'transfermarkt', etc.).
         source_id:            ID del jugador en la fuente (si se conoce).
         similarity_threshold: Mínimo de similitud (0-100) para match fuzzy.
-
+ 
     Returns:
         canonical_id de dim_player si se resuelve con certeza, None en caso contrario.
     """
+ 
+    # obtiene el nombre del campo de dim_player que almacena el ID de la fuente
+    # ej: source="sofascore" → id_col="id_sofascore", source="understat" → id_col="id_understat"
     id_col = SOURCE_ID_FIELDS.get(source, {}).get("player")
-
+ 
     # 1. Búsqueda por ID de fuente
+    # Evita volver a buscar jugador si ya tiene id de la fuente asignado
     if source_id is not None and id_col:
         row = conn.execute(
             text(f"SELECT canonical_id FROM dim_player WHERE {id_col} = :sid LIMIT 1"),
@@ -196,54 +321,44 @@ def resolve_player(
         ).fetchone()
         if row:
             return row[0]
-
-    # 2. Búsqueda por nombre exacto normalizado
+ 
+    # 2. Búsqueda por nombre exacto normalizado en caché
+    # normalize() elimina tildes y entidades HTML → "André" y "Andre" quedan igual
+    # La caché también normaliza los nombres de dim_player → comparación correcta en ambos lados
     norm = normalize(player_name)
     if not norm:
         log.warning("resolve_player: nombre vacío/inválido '%s'", player_name)
         return None
-
-    row = conn.execute(
-        text("""
-            SELECT canonical_id
-            FROM dim_player
-            WHERE LOWER(canonical_name) = :n
-            LIMIT 1
-        """),
-        {"n": norm},
-    ).fetchone()
-
-    if row:
-        canonical_id = row[0]
+ 
+    cache = _get_player_cache(conn)
+ 
+    exact_match_id = None
+    for p in cache:
+        if p["norm"] == norm:
+            exact_match_id = p["id"]
+            break
+ 
+    if exact_match_id:
         # Actualizar ID externo si no estaba registrado
         if source_id is not None and id_col:
             conn.execute(
                 text(f"UPDATE dim_player SET {id_col} = :sid WHERE canonical_id = :cid AND {id_col} IS NULL"),
-                {"sid": source_id, "cid": canonical_id},
+                {"sid": source_id, "cid": exact_match_id},
             )
-        return canonical_id
-
-    # 3. Búsqueda fuzzy: comparar contra todos los jugadores de dim_player
-    #    Para escalabilidad, se hace solo si hay pocos candidatos (nombre parcial)
-    first_word = norm.split()[0] if norm.split() else norm
-    candidates = conn.execute(
-        text("""
-            SELECT canonical_id, canonical_name
-            FROM dim_player
-            WHERE LOWER(canonical_name) LIKE :pattern
-            LIMIT 20
-        """),
-        {"pattern": f"%{first_word}%"},
-    ).fetchall()
-
+        return exact_match_id
+ 
+    # 3. Búsqueda fuzzy en caché
+    # Compara el nombre normalizado contra todos los jugadores de dim_player
+    # _similarity_score usa apellidos, iniciales y SequenceMatcher para typos
     best_score = 0
     best_id    = None
-    for cand_id, cand_name in candidates:
-        score = _similarity_score(norm, normalize(cand_name) or "")
+ 
+    for p in cache:
+        score = _similarity_score(norm, p["norm"])
         if score > best_score:
             best_score = score
-            best_id    = cand_id
-
+            best_id    = p["id"]
+ 
     if best_id and best_score >= similarity_threshold:
         # Match fuzzy con suficiente confianza → actualizar ID si no estaba
         if source_id is not None and id_col:
@@ -252,19 +367,19 @@ def resolve_player(
                 {"sid": source_id, "cid": best_id},
             )
         return best_id
-
-    # 4. Sin match o baja similitud → encolar en player_review
+ 
+    # 4. Sin match o baja similitud → encolar en player_review para revisión manual
     _queue_player_review(
-        conn       = conn,
-        source_name= player_name,
-        source     = source,
-        source_id  = str(source_id) if source_id else None,
-        suggested_id = best_id,
-        score      = best_score,
+        conn        = conn,
+        source_name = player_name,
+        source      = source,
+        source_id   = str(source_id) if source_id else None,
+        suggested_id= best_id,
+        score       = best_score,
     )
     return None
-
-
+ 
+ 
 def _queue_player_review(
     conn,
     source_name: str,
@@ -274,7 +389,7 @@ def _queue_player_review(
     score: int,
 ) -> None:
     """Inserta un registro en player_review para desambiguación manual.
-
+ 
     Usa WHERE NOT EXISTS para evitar duplicados (player_review no tiene
     unique constraint, se usan los índices idx_player_review_source).
     """
@@ -304,13 +419,13 @@ def _queue_player_review(
         )
     except Exception as e:
         log.warning("Error insertando player_review para '%s': %s", source_name, e)
-
-
+ 
+ 
 # ── Helpers públicos de compatibilidad ──────────────────────────────────────
-
+ 
 def resolve(conn, entity: str, raw_name: str, source: str, source_id=None):
     """API de compatibilidad con el engine anterior.
-
+ 
     Prefer resolve_team() / resolve_player() en código nuevo.
     """
     if entity == "team":
