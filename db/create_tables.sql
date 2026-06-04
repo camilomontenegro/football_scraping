@@ -27,7 +27,6 @@ CREATE TABLE dim_team (
     country VARCHAR(80),
     id_sofascore INTEGER,
     id_understat INTEGER,
-    id_statsbomb VARCHAR(50),
     id_whoscored INTEGER,
     id_transfermarkt INTEGER,
     created_at TIMESTAMP DEFAULT NOW()
@@ -40,10 +39,6 @@ WHERE
 CREATE UNIQUE INDEX ux_team_understat ON dim_team (id_understat)
 WHERE
     id_understat IS NOT NULL;
-
-CREATE UNIQUE INDEX ux_team_statsbomb ON dim_team (id_statsbomb)
-WHERE
-    id_statsbomb IS NOT NULL;
 
 CREATE UNIQUE INDEX ux_team_whoscored ON dim_team (id_whoscored)
 WHERE
@@ -63,7 +58,6 @@ CREATE TABLE dim_player (
     id_sofascore INTEGER,
     id_understat INTEGER,
     id_transfermarkt INTEGER,
-    id_statsbomb VARCHAR(50),
     id_whoscored INTEGER,
     created_at TIMESTAMP DEFAULT NOW()
 );
@@ -75,10 +69,6 @@ WHERE
 CREATE UNIQUE INDEX ux_player_understat ON dim_player (id_understat)
 WHERE
     id_understat IS NOT NULL;
-
-CREATE UNIQUE INDEX ux_player_statsbomb ON dim_player (id_statsbomb)
-WHERE
-    id_statsbomb IS NOT NULL;
 
 CREATE UNIQUE INDEX ux_player_whoscored ON dim_player (id_whoscored)
 WHERE
@@ -127,7 +117,6 @@ CREATE TABLE dim_competition(
     id_understat VARCHAR(50),
     -- Transfermarkt usa códigos alfanuméricos como ES1, GB1, CL.
     id_transfermarkt VARCHAR(50),
-    id_statsbomb VARCHAR(50),
     id_whoscored INTEGER,
     created_at TIMESTAMP DEFAULT NOW()
 );
@@ -161,7 +150,6 @@ CREATE TABLE dim_match (
     data_source VARCHAR(50),
     id_sofascore INTEGER,
     id_understat INTEGER,
-    id_statsbomb VARCHAR(50),
     id_whoscored INTEGER,
     -- Enrichment columns (populated post-load)
     attendance INTEGER,
@@ -179,10 +167,6 @@ WHERE
 CREATE UNIQUE INDEX ux_match_understat ON dim_match (id_understat)
 WHERE
     id_understat IS NOT NULL;
-
-CREATE UNIQUE INDEX ux_match_statsbomb ON dim_match (id_statsbomb)
-WHERE
-    id_statsbomb IS NOT NULL;
 
 CREATE UNIQUE INDEX ux_match_whoscored ON dim_match (id_whoscored)
 WHERE
