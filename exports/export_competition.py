@@ -38,8 +38,9 @@ import pandas as pd
 from sqlalchemy import text
  
 from loaders.common import engine
-from scripts.competitions import COMPETITIONS, get_competition
- 
+from wizard.competitions import COMPETITIONS, get_competition, WORKING_COMPETITION_NAMES
+
+# instancia de la clase Logger 
 log = logging.getLogger(__name__)
  
 # Raíz del proyecto — sube dos niveles desde exports/export_competition.py
@@ -75,12 +76,12 @@ def _setup_logging(competition_name: str) -> None:
 def _get_export_dir(competition_name: str) -> Path:
     """
     Construye y crea la carpeta de exportación para una competición.
-    Usa el campo 'folder' de competitions.py para el nombre de la carpeta.
+    Usa la el nombre de la competición pasado como argumento al elegir una opción en el menú principal
  
     Ejemplo:
         _get_export_dir("La Liga")          → exports/la_liga/
         _get_export_dir("Bundesliga")       → exports/bundesliga/
-        _get_export_dir("Champions League") → exports/champions/
+        _get_export_dir("Champions League") → exports/champions_league/
  
     Parámetros:
         competition_name (str): nombre de la competición
@@ -88,8 +89,7 @@ def _get_export_dir(competition_name: str) -> Path:
     Devuelve:
         Path apuntando a la carpeta de exportación (ya creada)
     """
-    comp = get_competition(competition_name)
-    folder = comp["folder"]
+    folder = competition_name.lower().replace(" ", "_")
     export_dir = PROJECT_ROOT / "exports" / folder
     export_dir.mkdir(parents=True, exist_ok=True)
     return export_dir
@@ -224,6 +224,15 @@ def _export_matches(competition_id: int, export_dir: Path) -> None:
             "SELECT * FROM dim_match WHERE competition_id = :cid ORDER BY match_date",
             {"cid": competition_id},
         )
+    # Proteccion  para supuestos en los que el tipo de dato es entero 
+    # Si hay algún valor null en la columna, Pandas va a convertir el tipo de dato de toda la columna a float64 para poder representar null como NaN
+    # Cuando se guarda en csv el valor entero queda como deciaml ( 2.0 en lugar de 2)
+    # Excel y PowerBi pueden  malinterpretar  y  representar los valores erroneamente el csv
+    # Para evitar todo esto, se convierte la columna a Int64. 
+    for col in ["home_score", "away_score"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
+
     _save_csv(df, export_dir / "matches.csv", "Matches")
  
  
@@ -336,6 +345,16 @@ def _export_injuries(competition_id: int, export_dir: Path) -> None:
                 WHERE dm.competition_id = :cid
             )
         """, {"cid": competition_id})
+    # Proteccion  para supuestos en los que el tipo de dato es entero 
+    # Si hay algún valor null en la columna, Pandas va a convertir el tipo de dato de toda la columna a float64 para poder representar null como NaN
+    # Cuando se guarda en csv el valor entero queda como deciaml ( 2.0 en lugar de 2)
+    # Excel y PowerBi pueden  malinterpretar  y  representar los valores erroneamente el csv
+    # Para evitar todo esto, se convierte la columna a Int64. 
+
+    for col in ["days_absent", "matches_missed"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
+
     _save_csv(df, export_dir / "injuries.csv", "Injuries")
  
  
@@ -496,8 +515,9 @@ def _menu_principal() -> None:
     # List comprehension — obtiene solo competiciones con folder y data_sources definidos
     competition_names = [
         name for name, comp in COMPETITIONS.items()
-        if comp.get("folder") and comp.get("data_sources")
-    ]
+            if comp.get("sources", {}).get("transfermarkt", {}).get("league_code")
+            and name in WORKING_COMPETITION_NAMES
+        ]
  
     while True:
         print("\n" + "=" * 50)
