@@ -26,6 +26,7 @@ from __future__ import annotations
 from importlib.resources import files
 import logging
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 from sqlalchemy import text

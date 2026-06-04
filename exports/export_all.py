@@ -3,7 +3,10 @@ import pandas as pd
 from sqlalchemy import text
 from loaders.common import engine
 
-# Ejecución desde la raiz -> python exports/export_all.py
+"""
+ Scripts de exportacion de  las tablas  competitions, players, matches, teams, shots, evetns, injuries y player review  a CSV. 
+"""
+
 
 BASE = os.path.dirname(__file__)
 os.makedirs(BASE, exist_ok=True)
