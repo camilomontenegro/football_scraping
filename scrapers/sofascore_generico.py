@@ -338,6 +338,11 @@ def transform_matches(matches: list[dict]) -> pd.DataFrame:
     """Adapta la lista cruda de partidos a las columnas de dim_match."""
     rows = []
     for m in matches:
+        attendance = m.get("attendance")
+        if attendance is None:
+            venue = m.get("venue") or {}
+            attendance = venue.get("attendance")
+
         rows.append({
             "id_sofascore":    m.get("id"),
             "match_date":      _ss_timestamp_to_date(m.get("startTimestamp")),
@@ -349,6 +354,7 @@ def transform_matches(matches: list[dict]) -> pd.DataFrame:
             "away_team_name":  m.get("awayTeam", {}).get("name"),
             "home_score":      m.get("homeScore", {}).get("current"),
             "away_score":      m.get("awayScore", {}).get("current"),
+            "attendance":      attendance,
             "data_source":     "sofascore",
         })
     return pd.DataFrame(rows)
