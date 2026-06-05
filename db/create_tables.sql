@@ -59,6 +59,7 @@ CREATE TABLE dim_player (
     id_understat INTEGER,
     id_transfermarkt INTEGER,
     id_whoscored INTEGER,
+    photo_url TEXT,
     created_at TIMESTAMP DEFAULT NOW()
 );
 
