@@ -57,7 +57,7 @@ log = logging.getLogger(__name__)
 DELAY_MIN = 1.0
 DELAY_MAX = 3.0
 MAX_RETRIES = 3
-COMMIT_BATCH = 100
+COMMIT_BATCH = 50
 
 CACHE_NAME = "transfermarkt_transfers"
 
@@ -349,6 +349,17 @@ def get_players_from_db():
     return [dict(r) for r in rows]
 
 
+def _flush_progress(cache, stats):
+    """Guarda cache + regenera CSVs limpios desde los raw JSONs acumulados."""
+    _save_cache(CACHE_NAME, cache)
+    build_transfers_csv()
+    build_market_value_csv()
+    log.info(
+        "  >> Progreso guardado: %d transfers, %d mv scrapeados",
+        stats["transfers_scraped"], stats["mv_scraped"],
+    )
+
+
 def scrape_all(dry_run=False, limit=None, skip_transfers=False,
                skip_market_value=False, force=False):
     players = get_players_from_db()
@@ -358,77 +369,90 @@ def scrape_all(dry_run=False, limit=None, skip_transfers=False,
     cache = _load_cache(CACHE_NAME) if not force else {}
     stats = {"players": len(players), "transfers_scraped": 0, "mv_scraped": 0,
              "transfers_total": 0, "mv_total": 0, "skipped": 0, "errors": 0}
+    processed_since_flush = 0
 
     log.info("Jugadores con id_transfermarkt: %d (limit=%s)", len(players), limit)
 
-    for idx, player in enumerate(players, 1):
-        pid = str(player["id_transfermarkt"])
-        cid = player["canonical_id"]
-        name = player["canonical_name"]
+    try:
+        for idx, player in enumerate(players, 1):
+            pid = str(player["id_transfermarkt"])
+            cid = player["canonical_id"]
+            name = player["canonical_name"]
 
-        cached = cache.get(pid, {})
-        transfers_done = cached.get("transfers_scraped") and not force
-        mv_done = cached.get("mv_scraped") and not force
+            cached = cache.get(pid, {})
+            transfers_done = cached.get("transfers_scraped") and not force
+            mv_done = cached.get("mv_scraped") and not force
 
-        if (skip_transfers or transfers_done) and (skip_market_value or mv_done):
-            stats["skipped"] += 1
-            continue
+            if (skip_transfers or transfers_done) and (skip_market_value or mv_done):
+                stats["skipped"] += 1
+                continue
 
-        log.info("[%d/%d] %s (tm_id=%s, db_id=%d)", idx, len(players), name, pid, cid)
+            log.info("[%d/%d] %s (tm_id=%s, db_id=%d)", idx, len(players), name, pid, cid)
 
-        if not skip_transfers and not transfers_done:
-            if dry_run:
-                log.info("  [dry-run] transfers para %s", name)
-            else:
-                try:
-                    transfers = fetch_player_transfers(pid, pid)
-                    _save_raw(RAW_TRANSFERS_DIR, pid, {
-                        "player_id_tm": pid,
-                        "canonical_id": cid,
-                        "player_name": name,
-                        "transfers": transfers,
-                    })
-                    stats["transfers_scraped"] += 1
-                    stats["transfers_total"] += len(transfers)
-                    log.info("  %d fichajes encontrados", len(transfers))
-                except Exception as e:
-                    log.error("  Error scraping transfers: %s", e)
-                    stats["errors"] += 1
-                _delay()
+            if not skip_transfers and not transfers_done:
+                if dry_run:
+                    log.info("  [dry-run] transfers para %s", name)
+                else:
+                    try:
+                        transfers = fetch_player_transfers(pid, pid)
+                        _save_raw(RAW_TRANSFERS_DIR, pid, {
+                            "player_id_tm": pid,
+                            "canonical_id": cid,
+                            "player_name": name,
+                            "transfers": transfers,
+                        })
+                        stats["transfers_scraped"] += 1
+                        stats["transfers_total"] += len(transfers)
+                        log.info("  %d fichajes encontrados", len(transfers))
+                    except Exception as e:
+                        log.error("  Error scraping transfers: %s", e)
+                        stats["errors"] += 1
+                    _delay()
 
-        if not skip_market_value and not mv_done:
-            if dry_run:
-                log.info("  [dry-run] market value para %s", name)
-            else:
-                try:
-                    mv_history = fetch_market_value_history(pid, pid)
-                    _save_raw(RAW_MV_DIR, pid, {
-                        "player_id_tm": pid,
-                        "canonical_id": cid,
-                        "player_name": name,
-                        "market_values": mv_history,
-                    })
-                    stats["mv_scraped"] += 1
-                    stats["mv_total"] += len(mv_history)
-                    log.info("  %d puntos de valor de mercado", len(mv_history))
-                except Exception as e:
-                    log.error("  Error scraping market value: %s", e)
-                    stats["errors"] += 1
-                _delay()
+            if not skip_market_value and not mv_done:
+                if dry_run:
+                    log.info("  [dry-run] market value para %s", name)
+                else:
+                    try:
+                        mv_history = fetch_market_value_history(pid, pid)
+                        _save_raw(RAW_MV_DIR, pid, {
+                            "player_id_tm": pid,
+                            "canonical_id": cid,
+                            "player_name": name,
+                            "market_values": mv_history,
+                        })
+                        stats["mv_scraped"] += 1
+                        stats["mv_total"] += len(mv_history)
+                        log.info("  %d puntos de valor de mercado", len(mv_history))
+                    except Exception as e:
+                        log.error("  Error scraping market value: %s", e)
+                        stats["errors"] += 1
+                    _delay()
 
-        if not dry_run:
-            cache[pid] = {
-                "name": name,
-                "canonical_id": cid,
-                "transfers_scraped": not skip_transfers or transfers_done,
-                "mv_scraped": not skip_market_value or mv_done,
-                "last_scraped": datetime.now().isoformat(),
-            }
-            if idx % COMMIT_BATCH == 0:
-                _save_cache(CACHE_NAME, cache)
+            if not dry_run:
+                cache[pid] = {
+                    "name": name,
+                    "canonical_id": cid,
+                    "transfers_scraped": not skip_transfers or transfers_done,
+                    "mv_scraped": not skip_market_value or mv_done,
+                    "last_scraped": datetime.now().isoformat(),
+                }
+                processed_since_flush += 1
 
-    if not dry_run:
-        _save_cache(CACHE_NAME, cache)
+                if processed_since_flush >= COMMIT_BATCH:
+                    _flush_progress(cache, stats)
+                    processed_since_flush = 0
+
+    except KeyboardInterrupt:
+        log.warning("Interrumpido por el usuario -- guardando progreso...")
+        if not dry_run and processed_since_flush > 0:
+            _flush_progress(cache, stats)
+        raise
+
+    # Flush final
+    if not dry_run and processed_since_flush > 0:
+        _flush_progress(cache, stats)
+
     return stats
 
 
