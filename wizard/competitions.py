@@ -104,7 +104,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "La Liga",
             },
             "statsbomb": {
-                "competition_id": 11,
+                "competition_id": None,
                 "name": "La Liga",
             },
             "whoscored": {
@@ -167,7 +167,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Premier League",
             },
             "statsbomb": {
-                "competition_id": 2,
+                "competition_id": None,
                 "name": "Premier League",
             },
             "whoscored": {
@@ -230,7 +230,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Bundesliga",
             },
             "statsbomb": {
-                "competition_id": 3,
+                "competition_id": None,
                 "name": "Bundesliga",
             },
             "whoscored": {
@@ -264,7 +264,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Serie A",
             },
             "statsbomb": {
-                "competition_id": 4,
+                "competition_id": None,
                 "name": "Serie A",
             },
             "whoscored": {
@@ -298,7 +298,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Ligue 1",
             },
             "statsbomb": {
-                "competition_id": 7,
+                "competition_id": None,
                 "name": "Ligue 1",
             },
             "whoscored": {
@@ -328,7 +328,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Primeira Liga",
             },
             "understat": {
-                "league": "Primeira_Liga",
+                "league": None,
                 "name": "Primeira Liga",
             },
             "statsbomb": {
@@ -362,11 +362,11 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Eredivisie",
             },
             "understat": {
-                "league": "Eredivisie",
+                "league": None,
                 "name": "Eredivisie",
             },
             "statsbomb": {
-                "competition_id": 8,
+                "competition_id": None,
                 "name": "Eredivisie",
             },
             "whoscored": {
@@ -400,7 +400,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Champions League",
             },
             "statsbomb": {
-                "competition_id": 16,
+                "competition_id": None,
                 "name": "Champions League",
             },
             "whoscored": {
@@ -430,7 +430,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Europa League",
             },
             "statsbomb": {
-                "competition_id": 17,
+                "competition_id": None,
                 "name": "Europa League",
             },
             "whoscored": {
