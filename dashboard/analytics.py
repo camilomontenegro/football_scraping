@@ -7,8 +7,14 @@ Coordinate normalisation (all sources converted to 0-105 m × 0-68 m):
   - Understat raw (0-1):   x * 105,  y * 68   (detected when x <= 1.1)
   - Understat meters:      as-is
   - SofaScore (0-100 %):  x * 1.05, y * 0.68
+  - StatsBomb (120×80 yd): x * 0.875, y * 0.85
+  - WhoScored (0-100):     x * 1.05,  y * 0.68
 Normalisation is applied inline in SQL so it works regardless of whether
 the database was populated with raw or pre-normalised values.
+
+Data-source agnostic: queries work with shots from any scraper source,
+including continental competitions (Champions League, Europa League, etc.)
+that may only have SofaScore or StatsBomb data.
 """
 from __future__ import annotations
 
@@ -60,12 +66,16 @@ def get_heatmap_data(
                     WHEN 'understat' THEN
                         CASE WHEN fs.x <= 1.1 THEN fs.x * 105 ELSE fs.x END
                     WHEN 'sofascore' THEN (100 - fs.x) * 1.05
+                    WHEN 'statsbomb' THEN fs.x * 0.875
+                    WHEN 'whoscored' THEN fs.x * 1.05
                     ELSE fs.x
                 END AS x_m,
                 CASE fs.data_source
                     WHEN 'understat' THEN
                         CASE WHEN fs.y <= 1.1 THEN fs.y * 68 ELSE fs.y END
                     WHEN 'sofascore' THEN fs.y * 0.68
+                    WHEN 'statsbomb' THEN fs.y * 0.85
+                    WHEN 'whoscored' THEN fs.y * 0.68
                     ELSE fs.y
                 END AS y_m,
                 fs.result,
@@ -74,7 +84,6 @@ def get_heatmap_data(
             JOIN dim_match m ON fs.match_id = m.match_id
             {comp_join}
             WHERE m.season = :season
-              AND fs.data_source IN ('understat', 'sofascore')
               AND fs.x IS NOT NULL
               AND fs.y IS NOT NULL
               {comp_filter}
@@ -124,10 +133,10 @@ def get_player_finishing(
             p.canonical_name AS player,
             COUNT(*) AS shots,
             SUM(CASE WHEN fs.result = 'Goal' THEN 1 ELSE 0 END) AS goals,
-            ROUND(SUM(fs.xg)::numeric, 2) AS total_xg,
+            ROUND(COALESCE(SUM(fs.xg), 0)::numeric, 2) AS total_xg,
             ROUND(
                 SUM(CASE WHEN fs.result = 'Goal' THEN 1 ELSE 0 END)::numeric
-                - SUM(fs.xg)::numeric,
+                - COALESCE(SUM(fs.xg), 0)::numeric,
                 2
             ) AS goals_minus_xg
         FROM fact_shots fs
@@ -135,7 +144,6 @@ def get_player_finishing(
         JOIN dim_match m  ON fs.match_id  = m.match_id
         {comp_join}
         WHERE m.season = :season
-          AND fs.data_source IN ('understat', 'sofascore')
           {comp_filter}
           {team_filter}
         GROUP BY p.canonical_name
@@ -146,10 +154,20 @@ def get_player_finishing(
     return query_df(sql, params)
 
 
-def get_shot_type_breakdown(season_label: str, team_id: int | None) -> pd.DataFrame:
+def get_shot_type_breakdown(
+    season_label: str,
+    team_id: int | None,
+    competition: str | None = None,
+) -> pd.DataFrame:
     """Conversion rate and avg xG by shot_type. Minimum 10 shots per type."""
     params: dict = {"season": season_label}
-    sql = """
+    comp_join = ""
+    comp_filter = ""
+    if competition is not None:
+        comp_join = "JOIN dim_competition dc ON dc.canonical_id = m.competition_id"
+        comp_filter = "AND dc.canonical_name = :competition"
+        params["competition"] = competition
+    sql = f"""
         SELECT
             fs.shot_type,
             COUNT(*) AS shots,
@@ -162,9 +180,10 @@ def get_shot_type_breakdown(season_label: str, team_id: int | None) -> pd.DataFr
             ROUND(AVG(fs.xg)::numeric, 3) AS avg_xg
         FROM fact_shots fs
         JOIN dim_match m  ON fs.match_id = m.match_id
+        {comp_join}
         WHERE m.season = :season
-          AND fs.data_source = 'understat'
           AND fs.shot_type IS NOT NULL
+          {comp_filter}
     """
     if team_id is not None:
         sql += " AND fs.team_id = :tid"
@@ -177,10 +196,20 @@ def get_shot_type_breakdown(season_label: str, team_id: int | None) -> pd.DataFr
     return query_df(sql, params)
 
 
-def get_situation_breakdown(season_label: str, team_id: int | None) -> pd.DataFrame:
+def get_situation_breakdown(
+    season_label: str,
+    team_id: int | None,
+    competition: str | None = None,
+) -> pd.DataFrame:
     """Conversion rate and avg xG by situation. Minimum 10 shots per situation."""
     params: dict = {"season": season_label}
-    sql = """
+    comp_join = ""
+    comp_filter = ""
+    if competition is not None:
+        comp_join = "JOIN dim_competition dc ON dc.canonical_id = m.competition_id"
+        comp_filter = "AND dc.canonical_name = :competition"
+        params["competition"] = competition
+    sql = f"""
         SELECT
             fs.situation,
             COUNT(*) AS shots,
@@ -193,9 +222,10 @@ def get_situation_breakdown(season_label: str, team_id: int | None) -> pd.DataFr
             ROUND(AVG(fs.xg)::numeric, 3) AS avg_xg
         FROM fact_shots fs
         JOIN dim_match m  ON fs.match_id = m.match_id
+        {comp_join}
         WHERE m.season = :season
-          AND fs.data_source = 'understat'
           AND fs.situation IS NOT NULL
+          {comp_filter}
     """
     if team_id is not None:
         sql += " AND fs.team_id = :tid"
@@ -208,13 +238,23 @@ def get_situation_breakdown(season_label: str, team_id: int | None) -> pd.DataFr
     return query_df(sql, params)
 
 
-def get_period_breakdown(season_label: str, team_id: int | None) -> pd.DataFrame:
+def get_period_breakdown(
+    season_label: str,
+    team_id: int | None,
+    competition: str | None = None,
+) -> pd.DataFrame:
     """Avg xG and goal count by 15-minute match period.
 
     All seven standard periods are always returned; periods with no shots get zeros.
     """
     params: dict = {"season": season_label}
-    sql = """
+    comp_join = ""
+    comp_filter = ""
+    if competition is not None:
+        comp_join = "JOIN dim_competition dc ON dc.canonical_id = m.competition_id"
+        comp_filter = "AND dc.canonical_name = :competition"
+        params["competition"] = competition
+    sql = f"""
         SELECT
             CASE
                 WHEN fs.minute BETWEEN 0  AND 15 THEN '00-15'
@@ -230,9 +270,10 @@ def get_period_breakdown(season_label: str, team_id: int | None) -> pd.DataFrame
             ROUND(AVG(fs.xg)::numeric, 3) AS avg_xg
         FROM fact_shots fs
         JOIN dim_match m  ON fs.match_id = m.match_id
+        {comp_join}
         WHERE m.season = :season
-          AND fs.data_source = 'understat'
           AND fs.minute IS NOT NULL
+          {comp_filter}
     """
     if team_id is not None:
         sql += " AND fs.team_id = :tid"
@@ -265,6 +306,7 @@ def get_setpiece_goals(
     season_label: str,
     team_id: int | None,
     player_id: int | None = None,
+    competition: str | None = None,
 ) -> pd.DataFrame:
     """Set-piece goal stats for the Set-piece Specialists section.
 
@@ -272,10 +314,16 @@ def get_setpiece_goals(
                        openplay_goals, total_goals (only players with pen/fk goals).
     player_id=<id>  → bucket breakdown: situation_bucket, goals (for one player).
 
-    Data source: fact_shots filtered to data_source='understat' and result='Goal'.
+    Data source: fact_shots (all sources) filtered to result='Goal'.
     Situation normalisation via LOWER() handles mixed casing across scrapers.
     """
     params: dict = {"season": season_label}
+    comp_join = ""
+    comp_filter = ""
+    if competition is not None:
+        comp_join = "JOIN dim_competition dc ON dc.canonical_id = m.competition_id"
+        comp_filter = "AND dc.canonical_name = :competition"
+        params["competition"] = competition
 
     if player_id is None:
         team_filter = ""
@@ -301,9 +349,10 @@ def get_setpiece_goals(
             JOIN dim_player p ON fs.player_id  = p.canonical_id
             JOIN dim_team   t ON fs.team_id    = t.canonical_id
             JOIN dim_match  m ON fs.match_id   = m.match_id
+            {comp_join}
             WHERE fs.result      = 'Goal'
-              AND fs.data_source = 'understat'
               AND m.season       = :season
+              {comp_filter}
               {team_filter}
             GROUP BY p.canonical_id, p.canonical_name, t.canonical_id, t.canonical_name
             HAVING
@@ -314,7 +363,7 @@ def get_setpiece_goals(
         """
     else:
         params["pid"] = player_id
-        sql = """
+        sql = f"""
             SELECT
                 CASE
                     WHEN LOWER(fs.situation) = 'penalty'
@@ -328,10 +377,11 @@ def get_setpiece_goals(
                 COUNT(*) AS goals
             FROM fact_shots fs
             JOIN dim_match m ON fs.match_id = m.match_id
+            {comp_join}
             WHERE fs.result      = 'Goal'
-              AND fs.data_source = 'understat'
               AND m.season       = :season
               AND fs.player_id   = :pid
+              {comp_filter}
             GROUP BY situation_bucket
             ORDER BY goals DESC
         """

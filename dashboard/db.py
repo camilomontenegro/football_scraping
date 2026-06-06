@@ -22,14 +22,13 @@ _engine: Engine | None = None
 
 
 def get_engine() -> Engine:
-
     """
-    Return a SQLAlchemy engine, creating it only once
+    Return a SQLAlchemy engine, creating it only once.
+
     Resolution order:
       1. Return the cached engine if already initialised.
       2. Re-use the shared engine from loaders.common (avoids duplicate pools).
       3. Build a new engine from environment variables in the project-root .env.
-
     """
     global _engine
     if _engine is not None:
@@ -91,9 +90,7 @@ def get_db_summary() -> dict:
 
 
 def get_seasons_in_db() -> set[tuple[str, str]]:
-    """
-     Return the set of (competition, season) tuples currently stored in the database.
-    """
+    """Return the set of (competition, season) tuples currently stored in the database."""
     eng = get_engine()
     with eng.connect() as conn:
         rows = conn.execute(text(
@@ -208,11 +205,14 @@ def get_player_review_queue(limit: int = 50) -> pd.DataFrame:
         limit: Maximum number of rows to return (default 50).
 
     Returns:
-        DataFrame with columns: id, source_name, source_system,
-        suggested_player_name, similarity_score.
+        DataFrame with columns: id, source_name, source_system, competition,
+        season, source_team_name, source_team_id, suggested_player_name,
+        similarity_score.
     """
     return query_df("""
         SELECT pr.id, pr.source_name, pr.source_system,
+               pr.competition, pr.season,
+               pr.source_team_name, pr.source_team_id,
                p.canonical_name AS suggested_player_name,
                pr.similarity_score
         FROM player_review pr

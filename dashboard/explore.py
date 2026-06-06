@@ -15,6 +15,11 @@ from sqlalchemy import text
 
 from dashboard.db import get_engine, query_df
 
+try:
+    from wizard.competitions import WORKING_COMPETITION_NAMES
+except Exception:  # pragma: no cover - fallback si el modulo no esta disponible
+    WORKING_COMPETITION_NAMES = set()
+
 
 def _short_season(label: str) -> str:
     """Convert '2020/2021' → '20/21' to match fact_injuries season format."""
@@ -41,12 +46,23 @@ def _comp_clause(competition: str | None, match_alias: str = "m") -> tuple[str, 
 
 
 def get_competitions() -> list[str]:
+    """Lista las competiciones del dashboard.
+
+    Se filtra por `WORKING_COMPETITION_NAMES` (definido en
+    `wizard/competitions.py`) para que en la UI solo aparezcan las
+    ligas/torneos con los que trabajamos hoy. Si por cualquier motivo
+    el conjunto esta vacio (modulo no importable o sin entradas),
+    cae al comportamiento antiguo de mostrar todas.
+    """
     eng = get_engine()
     with eng.connect() as conn:
         rows = conn.execute(text(
             "SELECT canonical_name FROM dim_competition ORDER BY canonical_name"
         )).fetchall()
-    return [r[0] for r in rows] or ["La Liga"]
+    names = [r[0] for r in rows]
+    if WORKING_COMPETITION_NAMES:
+        names = [n for n in names if n in WORKING_COMPETITION_NAMES]
+    return names or ["La Liga"]
 
 
 def get_seasons_for_competition(competition: str) -> list[str]:
@@ -189,7 +205,10 @@ def get_results(
                ht.canonical_name AS home_team,
                at.canonical_name AS away_team,
                m.home_score, m.away_score, m.data_source,
-               m.home_team_id, m.away_team_id
+               m.home_team_id, m.away_team_id,
+               m.attendance,
+               m.temperature_c, m.humidity_pct,
+               m.precipitation_mm, m.wind_speed_kmh, m.weather_code
         FROM dim_match m
         {comp_join}
         LEFT JOIN dim_team ht ON m.home_team_id = ht.canonical_id
@@ -736,3 +755,180 @@ def get_injury_season_trend(team: str | None) -> pd.DataFrame:
         ORDER BY fi.season DESC
     """
     return query_df(sql, {})
+
+
+# ════════════════════════════════════════════════════════════════════
+# STADIUMS — dim_stadium (Transfermarkt, modelo SCD2)
+# ════════════════════════════════════════════════════════════════════
+# Granularidad: una fila por estado del estadio, con rango
+# [valid_from_season, valid_to_season]. Si la informacion no cambia
+# entre temporadas, hay una sola fila que cubre el rango entero.
+
+def _stadium_table_exists() -> bool:
+    """True si la tabla dim_stadium existe (evita crash si aun no migrada)."""
+    eng = get_engine()
+    try:
+        with eng.connect() as conn:
+            row = conn.execute(text(
+                "SELECT to_regclass('public.dim_stadium')"
+            )).fetchone()
+        return row is not None and row[0] is not None
+    except Exception:
+        return False
+
+
+def get_stadium_seasons() -> list[str]:
+    """Temporadas con datos en dim_stadium (descendente).
+
+    SCD2: cada fila cubre un RANGO [valid_from_season, valid_to_season].
+    Enumeramos todas las temporadas cubiertas por algun rango.
+    """
+    if not _stadium_table_exists():
+        return []
+    sql = """
+        WITH years AS (
+            SELECT CAST(SPLIT_PART(valid_from_season, '/', 1) AS INTEGER) AS yfrom,
+                   CAST(SPLIT_PART(valid_to_season,   '/', 1) AS INTEGER) AS yto
+            FROM dim_stadium
+            WHERE valid_from_season IS NOT NULL
+              AND valid_to_season   IS NOT NULL
+        )
+        SELECT DISTINCT (y::text || '/' || (y + 1)::text) AS season
+        FROM years, generate_series(yfrom, yto) AS y
+        ORDER BY season DESC
+    """
+    eng = get_engine()
+    with eng.connect() as conn:
+        return [r[0] for r in conn.execute(text(sql)).fetchall()]
+
+
+def get_stadium_countries() -> list[str]:
+    if not _stadium_table_exists():
+        return []
+    sql = """
+        SELECT DISTINCT country
+        FROM dim_stadium
+        WHERE country IS NOT NULL AND country <> ''
+        ORDER BY country
+    """
+    eng = get_engine()
+    with eng.connect() as conn:
+        return [r[0] for r in conn.execute(text(sql)).fetchall()]
+
+
+def get_stadiums(
+    season: str | None = None,
+    competition: str | None = None,
+    country: str | None = None,
+    search: str | None = None,
+) -> pd.DataFrame:
+    """Estadios filtrados por temporada / competicion / pais / busqueda.
+
+    Si se filtra por temporada, se aplica filtro de rango SCD2:
+    `:season BETWEEN valid_from_season AND valid_to_season`.
+    """
+    if not _stadium_table_exists():
+        return pd.DataFrame()
+
+    params: dict = {}
+    where_clauses: list[str] = []
+
+    # Si filtramos por season concreta, la mostramos en la columna 'season'.
+    # Si no, mostramos el rango "vfrom -> vto" o solo vfrom si son iguales.
+    if season:
+        season_expr = ":season AS season"
+    else:
+        season_expr = (
+            "CASE WHEN s.valid_from_season = s.valid_to_season "
+            "     THEN s.valid_from_season "
+            "     ELSE s.valid_from_season || ' -> ' || s.valid_to_season "
+            "END AS season"
+        )
+
+    base_sql = f"""
+        SELECT
+            s.stadium_id,
+            COALESCE(t.canonical_name, s.team_slug) AS team,
+            {season_expr},
+            s.stadium_name,
+            s.capacity,
+            s.built_year,
+            s.owner,
+            s.city,
+            s.country,
+            s.surface,
+            s.architect,
+            s.latitude,
+            s.longitude,
+            s.tm_url,
+            s.image_url,
+            s.wikipedia_url,
+            s.wikidata_qid
+        FROM dim_stadium s
+        LEFT JOIN dim_team t ON t.canonical_id = s.canonical_team_id
+    """
+
+    if competition:
+        base_sql += """
+            JOIN (
+                SELECT DISTINCT team_id FROM (
+                    SELECT m.home_team_id AS team_id FROM dim_match m
+                      JOIN dim_competition dc ON dc.canonical_id = m.competition_id
+                      WHERE dc.canonical_name = :competition
+                    UNION
+                    SELECT m.away_team_id AS team_id FROM dim_match m
+                      JOIN dim_competition dc ON dc.canonical_id = m.competition_id
+                      WHERE dc.canonical_name = :competition
+                ) x WHERE team_id IS NOT NULL
+            ) ct ON ct.team_id = s.canonical_team_id
+        """
+        params["competition"] = competition
+
+    if season:
+        where_clauses.append(
+            ":season BETWEEN s.valid_from_season AND s.valid_to_season"
+        )
+        params["season"] = season
+    if country:
+        where_clauses.append("s.country = :country")
+        params["country"] = country
+    if search:
+        where_clauses.append(
+            "(LOWER(s.stadium_name) LIKE :q OR LOWER(t.canonical_name) LIKE :q "
+            "OR LOWER(s.city) LIKE :q)"
+        )
+        params["q"] = f"%{search.lower()}%"
+
+    if where_clauses:
+        base_sql += " WHERE " + " AND ".join(where_clauses)
+
+    base_sql += " ORDER BY s.capacity DESC NULLS LAST, team ASC"
+    return query_df(base_sql, params)
+
+
+def get_stadium_summary(
+    season: str | None = None,
+    competition: str | None = None,
+    country: str | None = None,
+) -> dict:
+    """Tarjetas resumen: n estadios, aforo total, media, equipo+aforo top."""
+    df = get_stadiums(season=season, competition=competition, country=country)
+    if df.empty:
+        return {
+            "n_stadiums": 0, "total_capacity": 0, "avg_capacity": 0,
+            "max_stadium": "-", "max_capacity": 0,
+        }
+    caps = pd.to_numeric(df["capacity"], errors="coerce").dropna()
+    if caps.empty:
+        return {
+            "n_stadiums": len(df), "total_capacity": 0, "avg_capacity": 0,
+            "max_stadium": "-", "max_capacity": 0,
+        }
+    idx_max = caps.idxmax()
+    return {
+        "n_stadiums":     len(df),
+        "total_capacity": int(caps.sum()),
+        "avg_capacity":   int(caps.mean()),
+        "max_stadium":    str(df.loc[idx_max, "stadium_name"] or "-"),
+        "max_capacity":   int(caps.max()),
+    }
