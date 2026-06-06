@@ -45,9 +45,9 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
-from webdriver_manager.chrome import ChromeDriverManager
+
+from utils.chrome_driver import create_chrome_driver
 
 
 # ── Importar competitions.py (fuente única de verdad para IDs) ────────────────
@@ -124,10 +124,7 @@ def create_driver(headless: bool = True) -> webdriver.Chrome:
     
     options.page_load_strategy = "eager"
 
-    driver = webdriver.Chrome(
-        service=Service(ChromeDriverManager().install()),
-        options=options,
-    )
+    driver = create_chrome_driver(options)
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     return driver
 

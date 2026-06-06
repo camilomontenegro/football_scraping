@@ -1,78 +1,32 @@
-﻿import json
-import pandas as pd
-from pathlib import Path
-import logging
+﻿"""
+scrapers/repair_tm.py
+======================
+DEPRECATED — utilidad legacy de reconstrucción de CSVs de Transfermarkt cuando
+los CSVs se perdían pero quedaban los JSON crudos.
 
-logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s - %(message)s")
-log = logging.getLogger(__name__)
+Con el nuevo layout canónico (`data/raw/<comp>/<season>/transfermarkt/players/`
+y `…/injuries/`), la regeneración correcta es ejecutar el scraper normal:
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RAW_TM = PROJECT_ROOT / "data" / "raw" / "transfermarkt"
+    python -m scrapers.transfermarkt_scraper --competition "La Liga" --seasons 2024
 
-def repair_consolidated():
-    log.info("[START] Iniciando reparacion de archivos consolidados de Transfermarkt...")
-    
-    player_files = list(RAW_TM.glob("**/players.json"))
-    injury_files = list(RAW_TM.glob("**/injuries.json"))
-    
-    log.info(f"Encontrados {len(player_files)} archivos de jugadores y {len(injury_files)} de lesiones.")
-    
-    all_players = []
-    for f in player_files:
-        try:
-            with open(f, "r", encoding="utf-8") as file:
-                data = json.load(file)
-                if isinstance(data, list):
-                    # Inyectar temporada desde la ruta si no existe
-                    # Ruta ejemplo: .../season=2020/...
-                    season_part = [p for p in f.parts if "season=" in p]
-                    season = int(season_part[0].split("=")[1]) if season_part else None
-                    for item in data:
-                        if season and "season" not in item:
-                            item["season"] = season
-                    all_players.extend(data)
-        except Exception as e:
-            log.error(f"Error procesando {f}: {e}")
+Si necesitas el comportamiento antiguo (consolidar JSON viejos en CSV), recupera
+este archivo desde el historial de git.
+"""
 
-    all_injuries = []
-    for f in injury_files:
-        try:
-            with open(f, "r", encoding="utf-8") as file:
-                data = json.load(file)
-                if isinstance(data, list):
-                    all_injuries.extend(data)
-        except Exception as e:
-            log.error(f"Error procesando {f}: {e}")
+from __future__ import annotations
 
-    if not all_players:
-        log.warning("No se encontraron datos de jugadores para unificar.")
-        return
+import sys
 
-    # Definir directorio oficial
-    # En el scraper usamos season=2020-2024 (o similar)
-    # Busquemos si ya existe una carpeta season=XXXX-XXXX
-    existing_dirs = [d for d in RAW_TM.iterdir() if d.is_dir() and "season=" in d.name and "-" in d.name]
-    if existing_dirs:
-        target_dir = existing_dirs[0]
-    else:
-        target_dir = RAW_TM / "season=repaired"
-    
-    target_dir.mkdir(parents=True, exist_ok=True)
-    
-    players_path = target_dir / "players_clean.csv"
-    injuries_path = target_dir / "injuries_clean.csv"
 
-    # Convertir a DataFrame para transformaciones finales (si fueran necesarias)
-    df_p = pd.DataFrame(all_players)
-    df_i = pd.DataFrame(all_injuries)
+def main() -> None:
+    print(
+        "[repair_tm] DEPRECATED. Usa `python -m scrapers.transfermarkt_scraper "
+        "--competition <Comp> --seasons <YYYY>` para regenerar players.csv y "
+        "injuries.csv en el layout canónico.",
+        file=sys.stderr,
+    )
+    sys.exit(2)
 
-    # Guardar en CSV
-    df_p.to_csv(players_path,   index=False, encoding="utf-8-sig")
-    df_i.to_csv(injuries_path, index=False, encoding="utf-8-sig")
-
-    log.info(f"[OK] ReparaciÃ³n completada.")
-    log.info(f"  - {players_path} ({len(df_p)} registros)")
-    log.info(f"  - {injuries_path} ({len(df_i)} registros)")
 
 if __name__ == "__main__":
-    repair_consolidated()
+    main()

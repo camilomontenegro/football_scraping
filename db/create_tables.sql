@@ -2,6 +2,19 @@
 -- SCHEMA football_db
 -- ══════════════════════════════════════════════════════════
 
+-- ── Limpieza previa (idempotente) ─────────────────────────
+-- DROP en orden inverso de dependencias por las FKs.
+-- CASCADE elimina índices y constraints asociados.
+DROP TABLE IF EXISTS fact_injuries   CASCADE;
+DROP TABLE IF EXISTS fact_events     CASCADE;
+DROP TABLE IF EXISTS fact_shots      CASCADE;
+DROP TABLE IF EXISTS dim_match       CASCADE;
+DROP TABLE IF EXISTS dim_competition CASCADE;
+DROP TABLE IF EXISTS player_review   CASCADE;
+DROP TABLE IF EXISTS dim_player      CASCADE;
+DROP TABLE IF EXISTS dim_stadium     CASCADE;
+DROP TABLE IF EXISTS dim_team        CASCADE;
+
 -- ══════════════════════════════════════════════════════════
 -- DIMENSIONES
 -- ══════════════════════════════════════════════════════════
@@ -14,7 +27,6 @@ CREATE TABLE dim_team (
     country VARCHAR(80),
     id_sofascore INTEGER,
     id_understat INTEGER,
-    id_statsbomb VARCHAR(50),
     id_whoscored INTEGER,
     id_transfermarkt INTEGER,
     created_at TIMESTAMP DEFAULT NOW()
@@ -27,10 +39,6 @@ WHERE
 CREATE UNIQUE INDEX ux_team_understat ON dim_team (id_understat)
 WHERE
     id_understat IS NOT NULL;
-
-CREATE UNIQUE INDEX ux_team_statsbomb ON dim_team (id_statsbomb)
-WHERE
-    id_statsbomb IS NOT NULL;
 
 CREATE UNIQUE INDEX ux_team_whoscored ON dim_team (id_whoscored)
 WHERE
@@ -50,7 +58,6 @@ CREATE TABLE dim_player (
     id_sofascore INTEGER,
     id_understat INTEGER,
     id_transfermarkt INTEGER,
-    id_statsbomb VARCHAR(50),
     id_whoscored INTEGER,
     created_at TIMESTAMP DEFAULT NOW()
 );
@@ -62,10 +69,6 @@ WHERE
 CREATE UNIQUE INDEX ux_player_understat ON dim_player (id_understat)
 WHERE
     id_understat IS NOT NULL;
-
-CREATE UNIQUE INDEX ux_player_statsbomb ON dim_player (id_statsbomb)
-WHERE
-    id_statsbomb IS NOT NULL;
 
 CREATE UNIQUE INDEX ux_player_whoscored ON dim_player (id_whoscored)
 WHERE
@@ -86,7 +89,11 @@ CREATE TABLE player_review (
     resolved BOOLEAN DEFAULT FALSE,
     canonical_id_assigned INTEGER REFERENCES dim_player (canonical_id),
     created_at TIMESTAMP DEFAULT NOW(),
-    reviewed_at TIMESTAMP
+    reviewed_at TIMESTAMP,
+    source_team_id VARCHAR(50),
+    source_team_name VARCHAR(150),
+    competition VARCHAR(100),
+    season VARCHAR(20)
 );
 
 CREATE INDEX IF NOT EXISTS idx_player_review_source ON player_review (source_system, source_id);
@@ -104,16 +111,17 @@ WHERE
 CREATE TABLE dim_competition(
     canonical_id SERIAL PRIMARY KEY,
     canonical_name VARCHAR(150) NOT NULL,
+    country VARCHAR(80),
+    country_code VARCHAR(10),
     id_sofascore INTEGER,
     id_understat VARCHAR(50),
-    # problema TF usa  string como codigo para las competiciones 
-    id_transfermarkt INTEGER,
-    id_statsbomb VARCHAR(50),
+    -- Transfermarkt usa códigos alfanuméricos como ES1, GB1, CL.
+    id_transfermarkt VARCHAR(50),
     id_whoscored INTEGER,
-    created_at TIMESTAMP DEFAULT NOW(),
-)
+    created_at TIMESTAMP DEFAULT NOW()
+);
 -- garantiza que no haya dos competiciones con el mismo nombre
-CREATE UNIQUE INDEX idx_dim_competition_name_unique 
+CREATE UNIQUE INDEX idx_dim_competition_name_unique
 ON dim_competition(canonical_name);
 
 
@@ -136,14 +144,20 @@ CREATE TABLE dim_match (
     season VARCHAR(20),
     home_team_id INTEGER REFERENCES dim_team (canonical_id),
     away_team_id INTEGER REFERENCES dim_team (canonical_id),
-    competition_id INTEGER REFERENDES dim_competition (canonical_id),
+    competition_id INTEGER REFERENCES dim_competition (canonical_id),
     home_score SMALLINT,
     away_score SMALLINT,
     data_source VARCHAR(50),
     id_sofascore INTEGER,
     id_understat INTEGER,
-    id_statsbomb VARCHAR(50),
-    id_whoscored INTEGER
+    id_whoscored INTEGER,
+    -- Enrichment columns (populated post-load)
+    attendance INTEGER,
+    temperature_c DECIMAL(4,1),
+    humidity_pct SMALLINT,
+    precipitation_mm DECIMAL(5,1),
+    wind_speed_kmh DECIMAL(5,1),
+    weather_code SMALLINT
 );
 
 CREATE UNIQUE INDEX ux_match_sofascore ON dim_match (id_sofascore)
@@ -153,10 +167,6 @@ WHERE
 CREATE UNIQUE INDEX ux_match_understat ON dim_match (id_understat)
 WHERE
     id_understat IS NOT NULL;
-
-CREATE UNIQUE INDEX ux_match_statsbomb ON dim_match (id_statsbomb)
-WHERE
-    id_statsbomb IS NOT NULL;
 
 CREATE UNIQUE INDEX ux_match_whoscored ON dim_match (id_whoscored)
 WHERE
@@ -250,7 +260,11 @@ CREATE TABLE fact_injuries (
     date_from DATE,
     date_until DATE,
     days_absent INTEGER,
-    matches_missed SMALLINT
+    matches_missed SMALLINT,
+    -- Club donde estaba el jugador durante la lesión (Transfermarkt)
+    club_name VARCHAR(200),
+    club_id_tm INTEGER,
+    club_slug VARCHAR(150)
 );
 
 CREATE UNIQUE INDEX ux_injuries_unique ON fact_injuries (
@@ -261,3 +275,83 @@ CREATE UNIQUE INDEX ux_injuries_unique ON fact_injuries (
 );
 
 CREATE INDEX idx_injuries_player ON fact_injuries (player_id);
+
+
+-- ══════════════════════════════════════════════════════════
+-- DIMENSIÓN: ESTADIOS
+-- ══════════════════════════════════════════════════════════
+-- Estadios de cada equipo por temporada (Transfermarkt como fuente).
+-- Granularidad: (team, season). Un equipo puede cambiar de estadio
+-- entre temporadas (obras, mudanza, etc.).
+
+-- SCD2: una fila por ESTADO del estadio, no por temporada. Si la
+-- información no cambia entre 2020 y 2025, hay UNA sola fila con
+-- valid_from_season='2020/2021' y valid_to_season='2024/2025'. Cuando
+-- algún campo cambia (capacity, nombre, reforma…) se cierra la fila
+-- antigua y se abre una nueva.
+CREATE TABLE dim_stadium (
+    stadium_id            SERIAL PRIMARY KEY,
+    canonical_team_id     INTEGER REFERENCES dim_team (canonical_id) ON DELETE CASCADE,
+    id_transfermarkt_team INTEGER NOT NULL,
+    team_slug             VARCHAR(150),
+
+    -- Rango de temporadas en las que este estado es válido
+    valid_from_season     VARCHAR(20) NOT NULL,
+    valid_to_season       VARCHAR(20) NOT NULL,
+
+    -- Datos del estadio (Transfermarkt + Wikidata enrichment)
+    stadium_name          VARCHAR(200),
+    capacity              INTEGER,
+    capacity_intl         INTEGER,
+    seats_total           INTEGER,
+    seats_covered         INTEGER,
+    seats_vip             INTEGER,
+    vip_boxes             SMALLINT,
+    seats_standing        INTEGER,
+    inaugurated_year      SMALLINT,
+    built_year            SMALLINT,
+    refurbished_year      SMALLINT,
+    construction_cost     VARCHAR(120),
+    owner                 VARCHAR(200),
+    operator              VARCHAR(200),
+    address               VARCHAR(300),
+    city                  VARCHAR(120),
+    country               VARCHAR(80),
+    surface               VARCHAR(80),
+    architect             VARCHAR(200),
+    naming_rights         VARCHAR(200),
+    previous_names_raw    TEXT,
+    pitch_length_m        SMALLINT,
+    pitch_width_m         SMALLINT,
+    has_pitch_heating     BOOLEAN,
+    tm_url                VARCHAR(400),
+
+    -- Wikidata enrichment
+    wikidata_qid          VARCHAR(20),
+    latitude              DECIMAL(9,6),
+    longitude             DECIMAL(9,6),
+    altitude_m            INTEGER,
+    timezone              VARCHAR(64),
+    roof_type             VARCHAR(20),
+    wikipedia_url         VARCHAR(500),
+    image_url             TEXT,
+    is_current            BOOLEAN DEFAULT TRUE,
+
+    -- SHA1 hex de los campos comparables, para detectar cambios rápido
+    data_hash             CHAR(40),
+
+    data_source           VARCHAR(50) DEFAULT 'transfermarkt',
+    created_at            TIMESTAMP DEFAULT NOW(),
+    updated_at            TIMESTAMP DEFAULT NOW(),
+
+    CHECK (valid_from_season <= valid_to_season)
+);
+
+-- Un equipo no puede tener dos rangos que empiecen en la misma temporada.
+CREATE UNIQUE INDEX ux_stadium_team_validfrom
+    ON dim_stadium (id_transfermarkt_team, valid_from_season);
+
+CREATE INDEX idx_stadium_team      ON dim_stadium (canonical_team_id);
+CREATE INDEX idx_stadium_team_tm   ON dim_stadium (id_transfermarkt_team);
+CREATE INDEX idx_stadium_data_hash ON dim_stadium (id_transfermarkt_team, data_hash);
+CREATE INDEX idx_stadium_name_lower ON dim_stadium (LOWER(stadium_name));

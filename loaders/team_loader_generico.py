@@ -26,6 +26,7 @@ from __future__ import annotations
 from importlib.resources import files
 import logging
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 from sqlalchemy import text
@@ -149,13 +150,13 @@ def _load_from_sofascore(conn, ss_path: Path) -> int:
 
 
 def _load_from_transfermarkt(conn,tm_path: Path) -> int:
-    """Lee players_clean.csv de TM → añade country e id_transfermarkt a dim_team."""
-    
-    files = list(tm_path.glob("**/teams_clean.csv"))
-    
+    """Lee teams.csv de TM → añade country e id_transfermarkt a dim_team."""
+
+    files = list(tm_path.glob("**/teams.csv"))
+
 
     if not files:
-        log.info("team_loader: no hay teams_clean.csv de TM en %s", tm_path)
+        log.info("team_loader: no hay teams.csv de TM en %s", tm_path)
         return 0
 
     # Construir tabla única de equipos TM (team_slug, team_country)
@@ -220,7 +221,15 @@ def _load_from_understat(conn, us_path: Path) -> int:
 
     count = 0
     for _, row in df.iterrows():
-        us_id   = row.get("understat_team_id")
+        # Acepta tanto el formato canónico del repo:
+        #   understat_team_id,team_name
+        # como el formato externo:
+        #   team_id,team_name
+        us_id = (
+            row.get("understat_team_id")
+            if row.get("understat_team_id") is not None
+            else row.get("team_id")
+        )
         us_name = row.get("team_name")
 
          # proteccion por si del scrapper no vienen las entitidades html convertidas a sus caracteres reales 

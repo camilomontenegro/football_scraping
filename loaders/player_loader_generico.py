@@ -188,7 +188,8 @@ def _load_phase2_sofascore(conn, ss_path: Path) -> tuple[int, int]:
 
     for f in lineup_files:
         try:
-            data = json.load(open(f, encoding="utf-8"))
+            with open(f, encoding="utf-8") as fh:
+                data = json.load(fh)
             for side in ("home", "away"):
                 for p in data.get(side, {}).get("players", []):
                     player = p.get("player", {})
