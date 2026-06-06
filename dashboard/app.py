@@ -397,7 +397,7 @@ with tab_player_detail:
     st.header("Player Detail")
 
     try:
-        from mplsoccer import VerticalPitch as _VPitch
+        from mplsoccer import Pitch as _PlayerPitch
     except ImportError:
         st.error("Install mplsoccer: pip install mplsoccer")
         st.stop()
@@ -461,18 +461,52 @@ with tab_player_detail:
         st.subheader("Shot Map")
         _sm_seasons = ["All"] + player_detail.get_player_shot_seasons(_pd_cid)
         _sm_sources = ["All"] + player_detail.get_player_shot_sources(_pd_cid)
-        _smc1, _smc2 = st.columns(2)
+        _smc1, _smc2, _smc3 = st.columns(3)
         with _smc1:
             _sm_season = st.selectbox("Season", _sm_seasons, key="pd_sm_season")
         with _smc2:
             _sm_source = st.selectbox("Source", _sm_sources, key="pd_sm_source")
+        _sm_matches_df = player_detail.get_player_shot_matches(_pd_cid, _sm_season, _sm_source)
+        _sm_match_options = {"All": None}
+        for _match in _sm_matches_df.itertuples(index=False):
+            _date = (
+                _match.match_date.strftime("%Y-%m-%d")
+                if pd.notna(_match.match_date) else "Unknown date"
+            )
+            _home = _match.home_team or "Home"
+            _away = _match.away_team or "Away"
+            _score = (
+                f" {_match.home_score}-{_match.away_score}"
+                if pd.notna(_match.home_score) and pd.notna(_match.away_score) else ""
+            )
+            _comp = f" | {_match.competition}" if _match.competition else ""
+            _shots = f" | {_match.shots} shots"
+            _label = f"{_date} | {_home}{_score} {_away}{_comp}{_shots}"
+            _sm_match_options[_label] = int(_match.match_id)
+        with _smc3:
+            _sm_match_label = st.selectbox(
+                "Match",
+                list(_sm_match_options.keys()),
+                key="pd_sm_match",
+                disabled=_sm_matches_df.empty,
+            )
+        _sm_match_id = _sm_match_options.get(_sm_match_label)
 
-        _shots_df = player_detail.get_player_shots(_pd_cid, _sm_season, _sm_source)
+        _shots_df = player_detail.get_player_shots(
+            _pd_cid, _sm_season, _sm_source, _sm_match_id
+        )
         if _shots_df.empty:
             st.info("No shot data found for this selection.")
         else:
-            _pitch = _VPitch(pitch_type="statsbomb", pitch_color="#1a472a", line_color="white", line_zorder=2)
-            _fig_sm, _ax_sm = _pitch.draw(figsize=(6, 8))
+            _pitch = _PlayerPitch(
+                pitch_type="custom",
+                pitch_length=105,
+                pitch_width=68,
+                pitch_color="#1a472a",
+                line_color="white",
+                line_zorder=2,
+            )
+            _fig_sm, _ax_sm = _pitch.draw(figsize=(7, 4.5))
             _fig_sm.patch.set_facecolor("#1a472a")
             _x      = _shots_df["x"].to_numpy(dtype=float, na_value=np.nan)
             _y      = _shots_df["y"].to_numpy(dtype=float, na_value=np.nan)
