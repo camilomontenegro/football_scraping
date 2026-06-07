@@ -223,6 +223,8 @@ def extract_match_enrichment(data: dict, match_id: str) -> dict:
     ref = data.get("referee", {})
     return {
         "whoscored_match_id": match_id,
+        "home_team_ws_id": home.get("teamId"),
+        "away_team_ws_id": away.get("teamId"),
         "venue_name": data.get("venueName"),
         "manager_home": home.get("managerName"),
         "manager_away": away.get("managerName"),
