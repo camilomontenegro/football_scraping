@@ -17,6 +17,8 @@ Lógica:
 Uso:
     python -m scripts.fix_stadium_names --dry-run
     python -m scripts.fix_stadium_names
+    python -m scripts.fix_stadium_names --rescrape --seasons 2020 2021 2022
+    python -m scripts.fix_stadium_names --reload-db
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import subprocess
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -31,10 +34,110 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import text
+
 from loaders.common import engine
-from utils.data_paths import RAW_ROOT
+from loaders.stadium_loader import load_stadiums
+from scripts.competitions import COMPETITIONS, get_competition
+from utils.data_paths import CLEAN_ROOT, RAW_ROOT, slugify_competition
 
 log = logging.getLogger(__name__)
+
+_SKIP_CLEAN_DIRS = frozenset({"attendance", "market_value", "transfers", "archive"})
+
+
+def _slug_to_canonical_map() -> dict[str, str]:
+    """Mapea slug de carpeta (la_liga) → nombre canónico (La Liga)."""
+    mapping: dict[str, str] = {}
+    for name in COMPETITIONS:
+        mapping[slugify_competition(name)] = name
+
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text(
+                "SELECT canonical_name FROM dim_competition WHERE canonical_name IS NOT NULL"
+            )).fetchall()
+        for (canonical_name,) in rows:
+            mapping[slugify_competition(canonical_name)] = canonical_name
+    except Exception as e:
+        log.warning("No se pudo leer dim_competition para mapeo de slugs: %s", e)
+
+    return mapping
+
+
+def resolve_competition_name(identifier: str) -> str | None:
+    """Resuelve slug o alias al nombre canónico que espera el scraper TM."""
+    if not identifier:
+        return None
+    if get_competition(identifier):
+        return identifier
+
+    slug = slugify_competition(identifier.replace("-", " "))
+    resolved = _slug_to_canonical_map().get(slug)
+    if resolved and get_competition(resolved):
+        return resolved
+    return None
+
+
+def _discover_competition_slugs() -> list[str]:
+    """Slugs en data/clean/ que parecen competiciones."""
+    if not CLEAN_ROOT.exists():
+        return []
+    return sorted(
+        d.name for d in CLEAN_ROOT.iterdir()
+        if d.is_dir() and d.name not in _SKIP_CLEAN_DIRS
+    )
+
+
+def rescrape_stadiums(
+    seasons: list[int],
+    competitions: list[str] | None = None,
+    full_refresh: bool = False,
+) -> int:
+    """Re-scrapea stadiums.csv en Transfermarkt usando nombres canónicos."""
+    slugs = competitions or _discover_competition_slugs()
+    if not slugs:
+        print("  No hay competiciones para re-scrapear.")
+        return 1
+
+    failed = 0
+    for slug in slugs:
+        canonical = resolve_competition_name(slug)
+        if not canonical:
+            print(f"Error: slug '{slug}' no mapea a ninguna competición conocida.")
+            failed += 1
+            continue
+
+        if canonical != slug:
+            print(f"\n  [{slug}] → \"{canonical}\"")
+
+        cmd = [
+            sys.executable, "-m", "scrapers.transfermarkt_stadiums_scraper",
+            "--competition", canonical,
+            "--seasons", *[str(y) for y in seasons],
+        ]
+        if full_refresh:
+            cmd.append("--full-refresh")
+
+        print(f"\n  $ {' '.join(cmd)}")
+        result = subprocess.run(cmd, check=False)
+        if result.returncode != 0:
+            failed += 1
+
+    print("\n  Re-scrape completado.", end="")
+    if failed:
+        print(f" {failed} competición(es) con error.")
+    else:
+        print(" Sin errores.")
+    print("  Ejecuta --reload-db para actualizar dim_stadium.")
+    return failed
+
+
+def reload_db():
+    """Recarga dim_stadium desde los CSV en data/clean/."""
+    print("\n  Recargando dim_stadium desde CSV...")
+    with engine.begin() as conn:
+        n = load_stadiums(conn)
+    print(f"  [OK] stadium_loader completado — {n} filas afectadas")
 
 
 def _extract_venues_from_match_centres() -> dict[int, dict[str, str]]:
@@ -179,8 +282,33 @@ def main():
         description="Corrige dim_stadium.stadium_name usando venueName de WhoScored")
     parser.add_argument("--dry-run", action="store_true",
                         help="Solo muestra qué se corregiría, sin aplicar cambios.")
+    parser.add_argument("--rescrape", action="store_true",
+                        help="Re-scrapea stadiums.csv en Transfermarkt (nombres canónicos).")
+    parser.add_argument("--reload-db", action="store_true",
+                        help="Recarga dim_stadium desde data/clean/*/transfermarkt/stadiums.csv.")
+    parser.add_argument("--seasons", nargs="+", type=int, default=[2020, 2021, 2022],
+                        help="Temporadas para --rescrape (año inicio, ej: 2020 2021 2022).")
+    parser.add_argument("--competition", action="append", dest="competitions",
+                        metavar="SLUG",
+                        help="Limita --rescrape a slug(s) concretos (ej: la_liga). Repetible.")
+    parser.add_argument("--full-refresh", action="store_true",
+                        help="Ignora caché TM de 30 días en --rescrape.")
     args = parser.parse_args()
-    fix_names(dry_run=args.dry_run)
+
+    if args.rescrape:
+        code = rescrape_stadiums(
+            seasons=args.seasons,
+            competitions=args.competitions,
+            full_refresh=args.full_refresh,
+        )
+        if code and not args.reload_db:
+            sys.exit(1)
+
+    if args.reload_db:
+        reload_db()
+
+    if not args.rescrape and not args.reload_db:
+        fix_names(dry_run=args.dry_run)
 
 
 if __name__ == "__main__":
