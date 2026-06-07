@@ -130,6 +130,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "download_full_season":  {"es": "Descargar temporada completa",       "en": "Download full season"},
     "update_new_games":      {"es": "Actualizar datos con juegos nuevos", "en": "Update with new games"},
     "download_stadiums":     {"es": "Descargar estadios por temporada",   "en": "Download stadiums by season"},
+    "load_to_db":            {"es": "Cargar datos en la base de datos",   "en": "Load data into database"},
     "data_sources":          {"es": "Fuente(s) de datos",    "en": "Data source(s)"},
     "match_filter":          {"es": "¿Cómo filtrar los partidos descargados?",
                               "en": "How to filter downloaded matches?"},

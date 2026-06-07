@@ -411,7 +411,26 @@ def _load_from_whoscored(conn, ws_path: Path, competition_id: int) -> int:
         except Exception as e:
             log.warning("Error leyendo %s: %s", f, e)
 
-    # Derivar equipos desde events.csv
+    # Derivar equipos: preferir match_enrichment.csv (tiene home/away reales)
+    # luego events.csv como fallback (orden arbitrario)
+    enrich_team_files = list(ws_path.glob("**/match_enrichment.csv"))
+    for f in enrich_team_files:
+        try:
+            df_e = pd.read_csv(f)
+            for _, row in df_e.iterrows():
+                mid_str = str(row.get("whoscored_match_id", "")).strip()
+                if not mid_str:
+                    continue
+                h_ws = _safe_int(row.get("home_team_ws_id"))
+                a_ws = _safe_int(row.get("away_team_ws_id"))
+                if h_ws and a_ws:
+                    entry = ws_matches.setdefault(mid_str, {})
+                    entry["home_team_ws_id"] = h_ws
+                    entry["away_team_ws_id"] = a_ws
+                    entry["_has_home_away"] = True
+        except Exception:
+            pass
+
     if event_files:
         try:
             dfs = [pd.read_csv(f) for f in event_files]
@@ -423,66 +442,102 @@ def _load_from_whoscored(conn, ws_path: Path, competition_id: int) -> int:
         if not df_events.empty:
             for mid, group in df_events.groupby("whoscored_match_id"):
                 mid_str = str(mid)
+                entry = ws_matches.setdefault(mid_str, {})
+                # Solo si no tenemos ya home/away de match_enrichment
+                if entry.get("_has_home_away"):
+                    continue
                 starts = group[group["event_type"] == "Start"]
                 unique_teams = starts["whoscored_team_id"].unique().tolist()
                 if len(unique_teams) < 2:
                     unique_teams = group["whoscored_team_id"].dropna().unique().tolist()
                 if len(unique_teams) >= 2:
-                    entry = ws_matches.setdefault(mid_str, {})
-                    entry["team_a_ws_id"] = int(unique_teams[0])
-                    entry["team_b_ws_id"] = int(unique_teams[1])
+                    entry["home_team_ws_id"] = int(unique_teams[0])
+                    entry["away_team_ws_id"] = int(unique_teams[1])
+                    # _has_home_away queda False → usará OR como fallback
                     if "season" not in entry or not entry.get("season"):
                         entry["season"] = normalize_season(str(group["season"].iloc[0]))
 
     linked = 0
     for ws_mid, info in ws_matches.items():
-        team_a_ws = info.get("team_a_ws_id")
-        team_b_ws = info.get("team_b_ws_id")
-        if not team_a_ws or not team_b_ws:
+        h_ws = info.get("home_team_ws_id")
+        a_ws = info.get("away_team_ws_id")
+        if not h_ws or not a_ws:
             continue
 
-        a_row = conn.execute(text("SELECT canonical_id FROM dim_team WHERE id_whoscored = :sid"), {"sid": team_a_ws}).fetchone()
-        b_row = conn.execute(text("SELECT canonical_id FROM dim_team WHERE id_whoscored = :sid"), {"sid": team_b_ws}).fetchone()
-        if not a_row or not b_row:
+        h_row = conn.execute(text("SELECT canonical_id FROM dim_team WHERE id_whoscored = :sid"), {"sid": h_ws}).fetchone()
+        a_row = conn.execute(text("SELECT canonical_id FROM dim_team WHERE id_whoscored = :sid"), {"sid": a_ws}).fetchone()
+        if not h_row or not a_row:
             continue
 
-        # Intentar enlazar por fecha + equipos (más preciso)
+        has_strict = info.get("_has_home_away", False)
+
+        # Intentar enlazar por fecha + equipos
         match_date = info.get("match_date")
         existing = None
         if match_date:
-            existing = conn.execute(text("""
-                SELECT match_id FROM dim_match
-                WHERE match_date = :date
-                  AND competition_id = :comp_id
-                  AND id_whoscored IS NULL
-                  AND (
-                      (home_team_id = :hid AND away_team_id = :aid)
-                      OR
-                      (home_team_id = :aid AND away_team_id = :hid)
-                  )
-                LIMIT 1
-            """), {
-                "date": match_date, "hid": a_row[0], "aid": b_row[0],
-                "comp_id": competition_id,
-            }).fetchone()
+            if has_strict:
+                # Matching estricto: home/away del partido deben coincidir exacto
+                existing = conn.execute(text("""
+                    SELECT match_id FROM dim_match
+                    WHERE match_date = :date
+                      AND competition_id = :comp_id
+                      AND id_whoscored IS NULL
+                      AND home_team_id = :hid
+                      AND away_team_id = :aid
+                    LIMIT 1
+                """), {
+                    "date": match_date, "hid": h_row[0], "aid": a_row[0],
+                    "comp_id": competition_id,
+                }).fetchone()
+            else:
+                # OR bidireccional (events.csv no sabe home/away)
+                existing = conn.execute(text("""
+                    SELECT match_id FROM dim_match
+                    WHERE match_date = :date
+                      AND competition_id = :comp_id
+                      AND id_whoscored IS NULL
+                      AND (
+                          (home_team_id = :hid AND away_team_id = :aid)
+                          OR
+                          (home_team_id = :aid AND away_team_id = :hid)
+                      )
+                    LIMIT 1
+                """), {
+                    "date": match_date, "hid": h_row[0], "aid": a_row[0],
+                    "comp_id": competition_id,
+                }).fetchone()
 
         # Fallback: season + equipos
         if not existing and info.get("season"):
-            existing = conn.execute(text("""
-                SELECT match_id FROM dim_match
-                WHERE season = :season
-                  AND competition_id = :comp_id
-                  AND id_whoscored IS NULL
-                  AND (
-                      (home_team_id = :hid AND away_team_id = :aid)
-                      OR
-                      (home_team_id = :aid AND away_team_id = :hid)
-                  )
-                LIMIT 1
-            """), {
-                "season": info["season"], "hid": a_row[0], "aid": b_row[0],
-                "comp_id": competition_id,
-            }).fetchone()
+            if has_strict:
+                existing = conn.execute(text("""
+                    SELECT match_id FROM dim_match
+                    WHERE season = :season
+                      AND competition_id = :comp_id
+                      AND id_whoscored IS NULL
+                      AND home_team_id = :hid
+                      AND away_team_id = :aid
+                    LIMIT 1
+                """), {
+                    "season": info["season"], "hid": h_row[0], "aid": a_row[0],
+                    "comp_id": competition_id,
+                }).fetchone()
+            else:
+                existing = conn.execute(text("""
+                    SELECT match_id FROM dim_match
+                    WHERE season = :season
+                      AND competition_id = :comp_id
+                      AND id_whoscored IS NULL
+                      AND (
+                          (home_team_id = :hid AND away_team_id = :aid)
+                          OR
+                          (home_team_id = :aid AND away_team_id = :hid)
+                      )
+                    LIMIT 1
+                """), {
+                    "season": info["season"], "hid": h_row[0], "aid": a_row[0],
+                    "comp_id": competition_id,
+                }).fetchone()
 
         if existing:
             # Enlazar id_whoscored + attendance en un solo UPDATE

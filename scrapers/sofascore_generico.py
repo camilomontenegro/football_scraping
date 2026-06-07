@@ -224,6 +224,12 @@ def get_match_lineups(driver: webdriver.Chrome, match_id: int) -> dict:
     return get_json(driver, f"https://api.sofascore.com/api/v1/event/{match_id}/lineups")
 
 
+def get_match_detail(driver: webdriver.Chrome, match_id: int) -> dict:
+    """Devuelve el JSON del detalle de un partido (incluye attendance, venue, referee)."""
+    data = get_json(driver, f"https://api.sofascore.com/api/v1/event/{match_id}")
+    return data.get("event", data)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 4. ORCHESTRATOR
 # ══════════════════════════════════════════════════════════════════════════════
@@ -288,6 +294,17 @@ def scrape_sofascore(
 
             match_dir = base_path / f"match_{match_id}" / f"batch_id={batch_id}"
             match_dir.mkdir(parents=True, exist_ok=True)
+
+            # Detalle del partido (attendance, venue, referee)
+            try:
+                detail = get_match_detail(driver, match_id)
+                _save_json(detail, match_dir / "detail.json")
+                # Enriquecer el match con datos del detalle
+                for key in ("attendance", "venue", "referee"):
+                    if detail.get(key) is not None:
+                        m[key] = detail[key]
+            except Exception as e:
+                log.warning("Detail failed match %d: %s", match_id, e)
 
             # Tiros
             try:
