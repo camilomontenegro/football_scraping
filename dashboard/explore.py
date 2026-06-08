@@ -743,6 +743,276 @@ def get_players_for_season(
     return [(r[0], r[1]) for r in rows]
 
 
+def get_weather_by_match(
+    season_label: str,
+    team: str | None,
+    competition: str | None = None,
+) -> pd.DataFrame:
+    """Return match-level weather data for matches that have temperature info."""
+    eng = get_engine()
+    with eng.connect() as conn:
+        tid = _team_id(conn, team)
+    comp_join, comp_filter = _comp_clause(competition)
+    params: dict = {"season": season_label}
+    if competition:
+        params["competition"] = competition
+    sql = f"""
+        SELECT m.match_date,
+               ht.canonical_name AS home_team,
+               at.canonical_name AS away_team,
+               m.home_score, m.away_score,
+               m.temperature_c, m.humidity_pct,
+               m.precipitation_mm, m.wind_speed_kmh,
+               m.weather_code,
+               m.venue_name
+        FROM dim_match m
+        {comp_join}
+        LEFT JOIN dim_team ht ON m.home_team_id = ht.canonical_id
+        LEFT JOIN dim_team at ON m.away_team_id = at.canonical_id
+        WHERE m.season = :season {comp_filter}
+          AND m.temperature_c IS NOT NULL
+          AND m.temperature_c BETWEEN -60 AND 60
+    """
+    if tid is not None:
+        sql += " AND (m.home_team_id = :tid OR m.away_team_id = :tid)"
+        params["tid"] = tid
+    sql += " ORDER BY m.match_date"
+    return query_df(sql, params)
+
+
+def get_weather_summary(
+    season_label: str,
+    team: str | None,
+    competition: str | None = None,
+) -> dict:
+    """Aggregate weather metrics: avg temp, matches with rain, avg humidity."""
+    eng = get_engine()
+    with eng.connect() as conn:
+        tid = _team_id(conn, team)
+    comp_join, comp_filter = _comp_clause(competition)
+    params: dict = {"season": season_label}
+    if competition:
+        params["competition"] = competition
+    team_filter = ""
+    if tid is not None:
+        team_filter = "AND (m.home_team_id = :tid OR m.away_team_id = :tid)"
+        params["tid"] = tid
+    sql = f"""
+        SELECT
+            COUNT(*) AS matches_with_weather,
+            ROUND(AVG(m.temperature_c)::numeric, 1) AS avg_temp,
+            ROUND(MIN(m.temperature_c)::numeric, 1) AS min_temp,
+            ROUND(MAX(m.temperature_c)::numeric, 1) AS max_temp,
+            ROUND(AVG(m.humidity_pct)::numeric, 0) AS avg_humidity,
+            ROUND(AVG(m.wind_speed_kmh)::numeric, 1) AS avg_wind,
+            SUM(CASE WHEN m.precipitation_mm > 0 THEN 1 ELSE 0 END) AS rainy_matches
+        FROM dim_match m
+        {comp_join}
+        WHERE m.season = :season {comp_filter}
+          AND m.temperature_c IS NOT NULL
+          AND m.temperature_c BETWEEN -60 AND 60
+          {team_filter}
+    """
+    row = query_df(sql, params)
+    if row.empty:
+        return {"matches_with_weather": 0, "avg_temp": 0, "min_temp": 0,
+                "max_temp": 0, "avg_humidity": 0, "avg_wind": 0, "rainy_matches": 0}
+    r = row.iloc[0]
+    return {k: (float(r[k]) if r[k] is not None else 0) for k in r.index}
+
+
+def get_attendance_by_match(
+    season_label: str,
+    team: str | None,
+    competition: str | None = None,
+) -> pd.DataFrame:
+    """Return match-level attendance data."""
+    eng = get_engine()
+    with eng.connect() as conn:
+        tid = _team_id(conn, team)
+    comp_join, comp_filter = _comp_clause(competition)
+    params: dict = {"season": season_label}
+    if competition:
+        params["competition"] = competition
+    sql = f"""
+        SELECT m.match_date,
+               ht.canonical_name AS home_team,
+               at.canonical_name AS away_team,
+               m.home_score, m.away_score,
+               m.attendance,
+               m.venue_name
+        FROM dim_match m
+        {comp_join}
+        LEFT JOIN dim_team ht ON m.home_team_id = ht.canonical_id
+        LEFT JOIN dim_team at ON m.away_team_id = at.canonical_id
+        WHERE m.season = :season {comp_filter}
+          AND m.attendance IS NOT NULL AND m.attendance > 0
+    """
+    if tid is not None:
+        sql += " AND (m.home_team_id = :tid OR m.away_team_id = :tid)"
+        params["tid"] = tid
+    sql += " ORDER BY m.attendance DESC"
+    return query_df(sql, params)
+
+
+def get_attendance_by_team(
+    season_label: str,
+    competition: str | None = None,
+) -> pd.DataFrame:
+    """Average home attendance per team."""
+    comp_join, comp_filter = _comp_clause(competition)
+    params: dict = {"season": season_label}
+    if competition:
+        params["competition"] = competition
+    sql = f"""
+        SELECT ht.canonical_name AS team,
+               COUNT(*) AS home_matches,
+               ROUND(AVG(m.attendance)) AS avg_attendance,
+               MAX(m.attendance) AS max_attendance,
+               MIN(m.attendance) AS min_attendance,
+               SUM(m.attendance) AS total_attendance
+        FROM dim_match m
+        {comp_join}
+        LEFT JOIN dim_team ht ON m.home_team_id = ht.canonical_id
+        WHERE m.season = :season {comp_filter}
+          AND m.attendance IS NOT NULL AND m.attendance > 0
+        GROUP BY ht.canonical_name
+        ORDER BY avg_attendance DESC
+    """
+    return query_df(sql, params)
+
+
+def get_referee_stats(
+    season_label: str | None,
+    competition: str | None = None,
+) -> pd.DataFrame:
+    """Referee match counts, goals, and card/discipline stats for a season."""
+    comp_join, comp_filter = _comp_clause(competition)
+    params: dict = {}
+    season_filter = ""
+    if season_label is not None:
+        season_filter = "AND m.season = :season"
+        params["season"] = season_label
+    if competition:
+        params["competition"] = competition
+
+    sql = f"""
+        WITH ref_matches AS (
+            SELECT r.canonical_name AS referee,
+                   m.match_id,
+                   m.home_score,
+                   m.away_score
+            FROM dim_match m
+            JOIN dim_referee r ON r.referee_id = m.referee_id
+            {comp_join}
+            WHERE m.referee_id IS NOT NULL
+              {season_filter} {comp_filter}
+        ),
+        ref_cards AS (
+            SELECT rm.referee,
+                   SUM(CASE WHEN
+                       (fe.event_type ILIKE '%yellow%' AND fe.event_type NOT ILIKE '%red%')
+                       OR (LOWER(fe.event_type) = 'card' AND LOWER(fe.outcome) = 'yellow')
+                       THEN 1 ELSE 0 END) AS yellow_cards,
+                   SUM(CASE WHEN
+                       (fe.event_type ILIKE '%red%')
+                       OR (LOWER(fe.event_type) = 'card' AND LOWER(fe.outcome) IN ('red', 'yellowred'))
+                       THEN 1 ELSE 0 END) AS red_cards
+            FROM ref_matches rm
+            JOIN fact_events fe ON fe.match_id = rm.match_id
+            WHERE fe.event_type IS NOT NULL
+            GROUP BY rm.referee
+        )
+        SELECT rm.referee,
+               COUNT(DISTINCT rm.match_id) AS matches_officiated,
+               ROUND(AVG(rm.home_score + rm.away_score)::numeric, 2) AS avg_goals,
+               ROUND(AVG(rm.home_score)::numeric, 2) AS avg_home_goals,
+               ROUND(AVG(rm.away_score)::numeric, 2) AS avg_away_goals,
+               COALESCE(rc.yellow_cards, 0) AS yellow_cards,
+               COALESCE(rc.red_cards, 0) AS red_cards,
+               COALESCE(rc.yellow_cards, 0) + COALESCE(rc.red_cards, 0) AS total_cards,
+               ROUND(
+                   (COALESCE(rc.yellow_cards, 0) + COALESCE(rc.red_cards, 0))::numeric
+                   / NULLIF(COUNT(DISTINCT rm.match_id), 0),
+                   2
+               ) AS cards_per_match
+        FROM ref_matches rm
+        LEFT JOIN ref_cards rc ON rc.referee = rm.referee
+        GROUP BY rm.referee, rc.yellow_cards, rc.red_cards
+        ORDER BY matches_officiated DESC
+    """
+    try:
+        return query_df(sql, params)
+    except Exception:
+        return pd.DataFrame()
+
+
+def get_manager_stats(
+    season_label: str | None,
+    competition: str | None = None,
+) -> pd.DataFrame:
+    """Manager win/draw/loss record from dim_match text columns."""
+    comp_join, comp_filter = _comp_clause(competition)
+    params: dict = {}
+    season_filter = ""
+    if season_label is not None:
+        season_filter = "AND m.season = :season"
+        params["season"] = season_label
+    if competition:
+        params["competition"] = competition
+
+    sql = f"""
+        WITH manager_matches AS (
+            SELECT m.manager_home AS manager,
+                   ht.canonical_name AS team,
+                   m.home_score AS scored,
+                   m.away_score AS conceded,
+                   m.match_id
+            FROM dim_match m
+            {comp_join}
+            LEFT JOIN dim_team ht ON m.home_team_id = ht.canonical_id
+            WHERE m.manager_home IS NOT NULL
+              AND m.home_score IS NOT NULL
+              {season_filter} {comp_filter}
+
+            UNION ALL
+
+            SELECT m.manager_away AS manager,
+                   at.canonical_name AS team,
+                   m.away_score AS scored,
+                   m.home_score AS conceded,
+                   m.match_id
+            FROM dim_match m
+            {comp_join}
+            LEFT JOIN dim_team at ON m.away_team_id = at.canonical_id
+            WHERE m.manager_away IS NOT NULL
+              AND m.away_score IS NOT NULL
+              {season_filter} {comp_filter}
+        )
+        SELECT manager,
+               MAX(team) AS team,
+               COUNT(*) AS matches,
+               SUM(CASE WHEN scored > conceded THEN 1 ELSE 0 END) AS wins,
+               SUM(CASE WHEN scored = conceded THEN 1 ELSE 0 END) AS draws,
+               SUM(CASE WHEN scored < conceded THEN 1 ELSE 0 END) AS losses,
+               SUM(scored) AS goals_for,
+               SUM(conceded) AS goals_against,
+               ROUND(SUM(scored)::numeric / NULLIF(COUNT(*), 0), 2) AS avg_gf,
+               ROUND(
+                   (SUM(CASE WHEN scored > conceded THEN 3
+                             WHEN scored = conceded THEN 1
+                             ELSE 0 END)::numeric
+                    / NULLIF(COUNT(*) * 3, 0)) * 100,
+                   1
+               ) AS points_pct
+        FROM manager_matches
+        GROUP BY manager
+        HAVING COUNT(*) >= 3
+        ORDER BY points_pct DESC, matches DESC
+    """
+    return query_df(sql, params)
+
+
 def get_injury_season_trend(team: str | None) -> pd.DataFrame:
     sql = """
         SELECT fi.season,
