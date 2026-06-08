@@ -925,9 +925,6 @@ def get_referee_stats(
         )
         SELECT rm.referee,
                COUNT(DISTINCT rm.match_id) AS matches_officiated,
-               ROUND(AVG(rm.home_score + rm.away_score)::numeric, 2) AS avg_goals,
-               ROUND(AVG(rm.home_score)::numeric, 2) AS avg_home_goals,
-               ROUND(AVG(rm.away_score)::numeric, 2) AS avg_away_goals,
                COALESCE(rc.yellow_cards, 0) AS yellow_cards,
                COALESCE(rc.red_cards, 0) AS red_cards,
                COALESCE(rc.yellow_cards, 0) + COALESCE(rc.red_cards, 0) AS total_cards,

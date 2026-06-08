@@ -193,3 +193,198 @@ def get_player_shot_sources(canonical_id: int) -> list[str]:
             ORDER BY data_source
         """), {"cid": canonical_id}).fetchall()
     return [r[0] for r in rows]
+
+
+# ════════════════════════════════════════════════════════════════════
+# SUMMARY STATS  (for the LaLiga-style stats grid)
+# ════════════════════════════════════════════════════════════════════
+
+def get_player_summary_stats(
+    canonical_id: int, season: str | None = None,
+) -> dict:
+    """Aggregate stats for one player: goals, shots, xG, cards, matches, penalties."""
+    params: dict = {"cid": canonical_id}
+    season_filter_shots = ""
+    season_filter_events = ""
+    if season and season != "All":
+        season_filter_shots = "AND m.season = :season"
+        season_filter_events = "AND m.season = :season"
+        params["season"] = season
+
+    # ── Shots / goals / xG / penalties ──────────────────────────
+    shots_df = query_df(f"""
+        SELECT
+            COUNT(*)                                              AS shots,
+            SUM(CASE WHEN fs.result = 'Goal' THEN 1 ELSE 0 END)  AS goals,
+            ROUND(COALESCE(SUM(fs.xg), 0)::numeric, 2)           AS xg,
+            COUNT(DISTINCT fs.match_id)                           AS matches,
+            SUM(CASE WHEN LOWER(fs.situation) = 'penalty' THEN 1 ELSE 0 END) AS penalties,
+            SUM(CASE WHEN LOWER(fs.situation) = 'penalty'
+                      AND fs.result = 'Goal' THEN 1 ELSE 0 END)  AS penalty_goals
+        FROM fact_shots fs
+        JOIN dim_match m ON m.match_id = fs.match_id
+        WHERE fs.player_id = :cid {season_filter_shots}
+    """, params)
+
+    # ── Cards from events ───────────────────────────────────────
+    cards_df = query_df(f"""
+        SELECT
+            SUM(CASE WHEN LOWER(fe.event_type) LIKE '%%yellow%%' THEN 1 ELSE 0 END) AS yellows,
+            SUM(CASE WHEN LOWER(fe.event_type) LIKE '%%red%%'
+                       OR LOWER(fe.event_type) LIKE '%%dismissal%%' THEN 1 ELSE 0 END) AS reds
+        FROM fact_events fe
+        JOIN dim_match m ON m.match_id = fe.match_id
+        WHERE fe.player_id = :cid {season_filter_events}
+    """, params)
+
+    # ── Team (most frequent) ───────────────────────────────────
+    team_df = query_df(f"""
+        SELECT dt.canonical_name AS team
+        FROM fact_shots fs
+        JOIN dim_team dt ON dt.canonical_id = fs.team_id
+        JOIN dim_match m ON m.match_id = fs.match_id
+        WHERE fs.player_id = :cid {season_filter_shots}
+        GROUP BY dt.canonical_name
+        ORDER BY COUNT(*) DESC
+        LIMIT 1
+    """, params)
+
+    s = shots_df.iloc[0] if not shots_df.empty else {}
+    c = cards_df.iloc[0] if not cards_df.empty else {}
+    return {
+        "goals":         int(s.get("goals", 0) or 0),
+        "shots":         int(s.get("shots", 0) or 0),
+        "xg":            float(s.get("xg", 0) or 0),
+        "matches":       int(s.get("matches", 0) or 0),
+        "penalties":     int(s.get("penalties", 0) or 0),
+        "penalty_goals": int(s.get("penalty_goals", 0) or 0),
+        "yellows":       int(c.get("yellows", 0) or 0),
+        "reds":          int(c.get("reds", 0) or 0),
+        "team":          team_df.iloc[0]["team"] if not team_df.empty else None,
+    }
+
+
+# ════════════════════════════════════════════════════════════════════
+# RADAR DATA  (player per-match metrics + league avg + head-to-head)
+# ════════════════════════════════════════════════════════════════════
+
+_RADAR_METRICS = ["Goals/match", "Shots/match", "xG/match",
+                  "Conversion %", "Penalties/match"]
+
+
+def _player_radar_row(
+    canonical_id: int,
+    season: str | None = None,
+    competition_id: int | None = None,
+) -> list[float] | None:
+    """Per-match radar values for one player. Returns list of 5 floats or None."""
+    params: dict = {"cid": canonical_id}
+    filters = ""
+    if season and season != "All":
+        filters += " AND m.season = :season"
+        params["season"] = season
+    if competition_id is not None:
+        filters += " AND m.competition_id = :compid"
+        params["compid"] = competition_id
+
+    df = query_df(f"""
+        SELECT
+            COUNT(DISTINCT fs.match_id)                            AS matches,
+            COUNT(*)::float / NULLIF(COUNT(DISTINCT fs.match_id), 0) AS shots_pm,
+            SUM(CASE WHEN fs.result='Goal' THEN 1 ELSE 0 END)::float
+                / NULLIF(COUNT(DISTINCT fs.match_id), 0)           AS goals_pm,
+            COALESCE(SUM(fs.xg), 0)::float
+                / NULLIF(COUNT(DISTINCT fs.match_id), 0)           AS xg_pm,
+            CASE WHEN COUNT(*) > 0
+                THEN SUM(CASE WHEN fs.result='Goal' THEN 1 ELSE 0 END)::float / COUNT(*)
+                ELSE 0 END                                         AS conversion,
+            SUM(CASE WHEN LOWER(fs.situation)='penalty' THEN 1 ELSE 0 END)::float
+                / NULLIF(COUNT(DISTINCT fs.match_id), 0)           AS penalties_pm
+        FROM fact_shots fs
+        JOIN dim_match m ON m.match_id = fs.match_id
+        WHERE fs.player_id = :cid {filters}
+    """, params)
+    if df.empty or int(df.iloc[0]["matches"] or 0) == 0:
+        return None
+    r = df.iloc[0]
+    return [
+        float(r["goals_pm"] or 0),
+        float(r["shots_pm"] or 0),
+        float(r["xg_pm"] or 0),
+        float(r["conversion"] or 0) * 100,
+        float(r["penalties_pm"] or 0),
+    ]
+
+
+def get_player_primary_competition(
+    canonical_id: int, season: str | None = None,
+) -> tuple[int, str] | None:
+    """Return (competition_id, competition_name) where the player has most shots."""
+    params: dict = {"cid": canonical_id}
+    season_filter = ""
+    if season and season != "All":
+        season_filter = "AND m.season = :season"
+        params["season"] = season
+    df = query_df(f"""
+        SELECT m.competition_id,
+               COALESCE(dc.canonical_name, m.competition) AS comp_name
+        FROM fact_shots fs
+        JOIN dim_match m ON m.match_id = fs.match_id
+        LEFT JOIN dim_competition dc ON dc.canonical_id = m.competition_id
+        WHERE fs.player_id = :cid {season_filter}
+          AND m.competition_id IS NOT NULL
+        GROUP BY m.competition_id, dc.canonical_name, m.competition
+        ORDER BY COUNT(*) DESC
+        LIMIT 1
+    """, params)
+    if df.empty:
+        return None
+    return int(df.iloc[0]["competition_id"]), str(df.iloc[0]["comp_name"] or "League")
+
+
+def get_league_avg_radar(
+    competition_id: int,
+    season: str | None = None,
+    exclude_player: int | None = None,
+) -> list[float] | None:
+    """Per-player per-match averages across the whole competition."""
+    params: dict = {"compid": competition_id}
+    filters = ""
+    if season and season != "All":
+        filters += " AND m.season = :season"
+        params["season"] = season
+    exclude = ""
+    if exclude_player is not None:
+        exclude = " AND fs.player_id != :excl"
+        params["excl"] = exclude_player
+
+    df = query_df(f"""
+        SELECT
+            COUNT(*)::float / NULLIF(COUNT(DISTINCT fs.player_id), 0)
+                / NULLIF(COUNT(DISTINCT fs.match_id), 0)          AS shots_pm,
+            SUM(CASE WHEN fs.result='Goal' THEN 1 ELSE 0 END)::float
+                / NULLIF(COUNT(DISTINCT fs.player_id), 0)
+                / NULLIF(COUNT(DISTINCT fs.match_id), 0)          AS goals_pm,
+            COALESCE(SUM(fs.xg), 0)::float
+                / NULLIF(COUNT(DISTINCT fs.player_id), 0)
+                / NULLIF(COUNT(DISTINCT fs.match_id), 0)          AS xg_pm,
+            CASE WHEN COUNT(*) > 0
+                THEN SUM(CASE WHEN fs.result='Goal' THEN 1 ELSE 0 END)::float / COUNT(*)
+                ELSE 0 END                                         AS conversion,
+            SUM(CASE WHEN LOWER(fs.situation)='penalty' THEN 1 ELSE 0 END)::float
+                / NULLIF(COUNT(DISTINCT fs.player_id), 0)
+                / NULLIF(COUNT(DISTINCT fs.match_id), 0)          AS penalties_pm
+        FROM fact_shots fs
+        JOIN dim_match m ON m.match_id = fs.match_id
+        WHERE m.competition_id = :compid {filters} {exclude}
+    """, params)
+    if df.empty:
+        return None
+    r = df.iloc[0]
+    return [
+        float(r["goals_pm"] or 0),
+        float(r["shots_pm"] or 0),
+        float(r["xg_pm"] or 0),
+        float(r["conversion"] or 0) * 100,
+        float(r["penalties_pm"] or 0),
+    ]

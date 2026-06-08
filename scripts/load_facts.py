@@ -12,11 +12,13 @@ Uso:
     python -m scripts.load_facts --all
     python -m scripts.load_facts                     # = --all
     python -m scripts.load_facts --competition "La Liga" --shots
+    python -m scripts.load_facts --events --all-seasons
 """
 
 import argparse
 import logging
 import sys
+from pathlib import Path
 
 from sqlalchemy import text
 
@@ -28,11 +30,31 @@ log = logging.getLogger(__name__)
 
 from loaders.common import engine
 from loaders.fact_loader_generico import load_shots, load_events, load_injuries
-from utils.data_paths import clean_dir, normalize_season
+from utils.data_paths import CLEAN_ROOT, clean_dir, normalize_season, slugify_competition
 from wizard.competitions import (
     WORKING_COMPETITION_NAMES,
     get_competition,
 )
+
+
+def _discover_comp_seasons(comp_names: list[str]) -> list[tuple[str, str]]:
+    """Pares (competición, temporada) con al menos un events.csv en clean/."""
+    pairs: list[tuple[str, str]] = []
+    for comp_name in comp_names:
+        slug = slugify_competition(comp_name)
+        base = CLEAN_ROOT / slug
+        if not base.is_dir():
+            continue
+        for season_dir in sorted(base.iterdir()):
+            if not season_dir.is_dir():
+                continue
+            has_events = any(
+                (season_dir / src / "events.csv").exists()
+                for src in ("whoscored", "sofascore", "statsbomb")
+            )
+            if has_events:
+                pairs.append((comp_name, season_dir.name))
+    return pairs
 
 
 def _competition_id(conn, comp_name: str):
@@ -68,6 +90,8 @@ def main():
     parser.add_argument("--injuries", action="store_true")
     parser.add_argument("--all", action="store_true")
     parser.add_argument("--season", default="2025_2026")
+    parser.add_argument("--all-seasons", action="store_true",
+                        help="Iterar todas las temporadas con events.csv en data/clean/")
     parser.add_argument("--competition", action="append")
 
     args = parser.parse_args()
@@ -78,12 +102,17 @@ def main():
     season = normalize_season(args.season) or args.season
     comps = args.competition or sorted(WORKING_COMPETITION_NAMES)
 
+    if args.all_seasons:
+        comp_seasons = _discover_comp_seasons(comps)
+    else:
+        comp_seasons = [(c, season) for c in comps]
+
     any_failure = False
 
-    for comp_name in comps:
-        paths = _paths(comp_name, season)
+    for comp_name, season_label in comp_seasons:
+        paths = _paths(comp_name, season_label)
         print("\n" + "=" * 60)
-        print(f"[>] {comp_name} ({season})")
+        print(f"[>] {comp_name} ({season_label})")
         print("=" * 60)
 
         with engine.begin() as conn:
@@ -100,7 +129,7 @@ def main():
                     load_shots(conn, ss_path=paths["ss"], competition_id=comp_id, us_path=paths["us"])
             except Exception as e:
                 any_failure = True
-                log.error("[ERROR] shots de %s: %s", comp_name, e, exc_info=True)
+                log.error("[ERROR] shots de %s %s: %s", comp_name, season_label, e, exc_info=True)
 
         if args.all or args.events:
             try:
@@ -108,7 +137,7 @@ def main():
                     load_events(conn, ss_path=paths["ss"], sb_path=paths["sb"], ws_path=paths["ws"])
             except Exception as e:
                 any_failure = True
-                log.error("[ERROR] events de %s: %s", comp_name, e, exc_info=True)
+                log.error("[ERROR] events de %s %s: %s", comp_name, season_label, e, exc_info=True)
 
         if args.all or args.injuries:
             try:
@@ -116,7 +145,7 @@ def main():
                     load_injuries(conn, tm_path=paths["tm"])
             except Exception as e:
                 any_failure = True
-                log.error("[ERROR] injuries de %s: %s", comp_name, e, exc_info=True)
+                log.error("[ERROR] injuries de %s %s: %s", comp_name, season_label, e, exc_info=True)
 
     print("\n" + "=" * 60)
     if any_failure:
