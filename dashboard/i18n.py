@@ -22,6 +22,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "tab_player_detail":     {"es": "Ficha del jugador",     "en": "Player Detail"},
     "tab_injuries":          {"es": "Lesiones",              "en": "Injuries"},
     "tab_shot_intelligence": {"es": "Inteligencia de tiro",  "en": "Shot Intelligence"},
+    "tab_pass_network":      {"es": "Red de pases",          "en": "Pass Network"},
     "tab_stadiums":          {"es": "Estadios",              "en": "Stadiums"},
     "tab_pipeline":          {"es": "Monitorización",        "en": "Pipeline monitoring"},
     "tab_wizard":            {"es": "Wizard",                "en": "Wizard"},
@@ -133,6 +134,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "player_drilldown":      {"es": "Detalle por jugador",   "en": "Player drill-down"},
     "all_players":           {"es": "Todos los jugadores",   "en": "All players"},
     "zone_data_table":       {"es": "Tabla de datos por zona", "en": "Zone data table"},
+
+    # ── Pass Network tab ────────────────────────────────────
+    "pass_network":          {"es": "Red de pases",          "en": "Pass Network"},
+    "match":                 {"es": "Partido",               "en": "Match"},
+    "min_passes":            {"es": "Mínimo de pases entre jugadores", "en": "Min passes between players"},
+    "no_pass_matches":       {"es": "No hay partidos con datos de pases (WhoScored) para esta selección.",
+                              "en": "No matches with pass data (WhoScored) for this selection."},
+    "no_pass_data":          {"es": "No hay datos de pases para este equipo en este partido.",
+                              "en": "No pass data for this team in this match."},
+    "total_passes":          {"es": "Pases completados",     "en": "Completed passes"},
+    "pass_pairs":            {"es": "Conexiones",            "en": "Connections"},
+    "top_connection":        {"es": "Mejor conexión",        "en": "Top connection"},
 
     # ── Stadiums tab ────────────────────────────────────────
     "stadiums":              {"es": "Estadios",              "en": "Stadiums"},
