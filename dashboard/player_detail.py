@@ -44,67 +44,6 @@ def get_player_shots(
     canonical_id: int,
     season: str | None = None,
     source: str | None = None,
-    match_id: int | None = None,
-) -> pd.DataFrame:
-    params: dict = {"cid": canonical_id}
-    season_filter = ""
-    if season and season != "All":
-        season_filter = "AND m.season = :season"
-        params["season"] = season
-    source_filter = ""
-    if source and source != "All":
-        source_filter = "AND fs.data_source = :source"
-        params["source"] = source
-    match_filter = ""
-    if match_id is not None:
-        match_filter = "AND fs.match_id = :match_id"
-        params["match_id"] = match_id
-    return query_df(f"""
-        WITH _plot_shots AS (
-            SELECT
-                CASE
-                    WHEN fs.x IS NULL THEN NULL
-                    WHEN fs.data_source = 'sofascore' AND fs.x <= 1.1 THEN (1 - LEAST(GREATEST(fs.x, 0), 1)) * 105
-                    WHEN fs.data_source = 'sofascore' AND fs.x <= 100 THEN (100 - fs.x) * 1.05
-                    WHEN fs.x <= 1.1 THEN LEAST(GREATEST(fs.x, 0), 1) * 105
-                    WHEN fs.data_source = 'statsbomb' THEN fs.x * 0.875
-                    WHEN fs.x <= 100 THEN fs.x * 1.05
-                    ELSE fs.x
-                END AS x,
-                CASE
-                    WHEN fs.y IS NULL THEN NULL
-                    WHEN fs.y <= 1.1 THEN LEAST(GREATEST(fs.y, 0), 1) * 68
-                    WHEN fs.data_source = 'statsbomb' THEN fs.y * 0.85
-                    WHEN fs.y <= 100 THEN fs.y * 0.68
-                    ELSE fs.y
-                END AS y,
-                fs.result, fs.xg,
-                fs.minute, m.season,
-                dc.canonical_name AS competition,
-                fs.data_source
-            FROM fact_shots fs
-            JOIN dim_match m ON m.match_id = fs.match_id
-            LEFT JOIN dim_competition dc ON dc.canonical_id = m.competition_id
-            WHERE fs.player_id = :cid
-              {season_filter}
-              {source_filter}
-              {match_filter}
-        )
-        SELECT
-            CASE WHEN x IS NULL THEN NULL ELSE LEAST(GREATEST(x, 0), 105) END AS x,
-            CASE WHEN y IS NULL THEN NULL ELSE LEAST(GREATEST(y, 0), 68) END AS y,
-            result, xg,
-            minute, season,
-            competition,
-            data_source
-        FROM _plot_shots
-    """, params)
-
-
-def get_player_shot_matches(
-    canonical_id: int,
-    season: str | None = None,
-    source: str | None = None,
 ) -> pd.DataFrame:
     params: dict = {"cid": canonical_id}
     season_filter = ""
@@ -117,27 +56,16 @@ def get_player_shot_matches(
         params["source"] = source
     return query_df(f"""
         SELECT
-            m.match_id,
-            m.match_date,
-            m.season,
-            COALESCE(dc.canonical_name, m.competition) AS competition,
-            ht.canonical_name AS home_team,
-            at.canonical_name AS away_team,
-            m.home_score,
-            m.away_score,
-            COUNT(*) AS shots
+            fs.x, fs.y, fs.result, fs.xg,
+            fs.minute, m.season,
+            dc.canonical_name AS competition,
+            fs.data_source
         FROM fact_shots fs
         JOIN dim_match m ON m.match_id = fs.match_id
         LEFT JOIN dim_competition dc ON dc.canonical_id = m.competition_id
-        LEFT JOIN dim_team ht ON ht.canonical_id = m.home_team_id
-        LEFT JOIN dim_team at ON at.canonical_id = m.away_team_id
         WHERE fs.player_id = :cid
           {season_filter}
           {source_filter}
-        GROUP BY
-            m.match_id, m.match_date, m.season, dc.canonical_name, m.competition,
-            ht.canonical_name, at.canonical_name, m.home_score, m.away_score
-        ORDER BY m.match_date DESC NULLS LAST, m.match_id DESC
     """, params)
 
 
