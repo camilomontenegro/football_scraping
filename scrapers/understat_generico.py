@@ -144,7 +144,9 @@ async def get_matches_via_html(
         match = re.search(pattern, raw, re.DOTALL)
         if not match:
             print(f"  [!] No se encontró 'datesData' en el HTML de {league}/{season}.")
-            print(f"      Variables JS disponibles: {re.findall(r'var\\s+(\\w+)\\s*=\\s*JSON\\.parse', raw)}")
+            _js_vars_pat = r'var\s+(\w+)\s*=\s*JSON\.parse'
+            _js_vars_pat = r'var\s+(\w+)\s*=\s*JSON\.parse'
+            print(f"      Variables JS disponibles: {re.findall(_js_vars_pat, raw)}")
             return []
  
         # Understat escapa las comillas simples como \'

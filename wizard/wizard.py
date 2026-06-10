@@ -6,24 +6,28 @@ wizard.py
 =========
 Asistente interactivo del pipeline de scraping de fútbol.
 
-Características:
+Mejoras de UX (versión unificada):
   • Pulsando "0" en cualquier menú vuelves al paso anterior.
   • Pulsando "Q" sales del wizard limpiamente.
   • Las fuentes de datos se filtran automáticamente según la competición.
-  • Understat queda excluido para competiciones internacionales.
+  • Understat queda excluido para competiciones internacionales (Champions,
+    Europa, Conference) ya que sólo cubre ligas domésticas.
   • Resumen + confirmación antes de lanzar el pipeline.
-  • Las competiciones se agrupan por categoría.
+  • Las competiciones se agrupan por categoría (Nacionales / Continentales).
 
 Uso:
     Interactivo:
-        $ python -m wizard.wizard
+        $ python -m scripts.wizard
 
     CLI (no se hacen preguntas):
-        $ python -m wizard.wizard --competition "La Liga" --season 2024/2025 --scrape
-        $ python -m wizard.wizard --competition "Champions League" --update
-        $ python -m wizard.wizard --competition "La Liga" --season 2024/2025 --scrape --team "real-madrid"
+        $ python -m scripts.wizard --competition "La Liga" --season 2024/2025 --scrape
+        $ python -m scripts.wizard --competition "Champions League" --update
+        $ python -m scripts.wizard --competition "La Liga" --season 2024/2025 --scrape --team "real-madrid"
 """
 
+# --------------------------------------------------------------------------- #
+# Imports
+# --------------------------------------------------------------------------- #
 import argparse
 import csv
 import datetime
@@ -38,36 +42,18 @@ from wizard.pipeline_runner import (
     get_available_seasons,
     get_last_match_date,
     get_current_season,
-    available_sources_for_competition,
+    db_competition_names,
+    grouped_db_competitions,
 )
 from wizard.competitions import (
     COMPETITIONS,
-    WORKING_COMPETITIONS,
-    WORKING_COMPETITION_NAMES,
     get_competition,
     get_season_start_year,
 )
+from scrapers.transfermarkt_scraper import get_league_teams
+from loaders.common import engine
+from sqlalchemy import text
 
-__all__ = [
-    "BACK",
-    "QUIT",
-    "WizardQuit",
-    "LOG_PATH",
-    "run_with_log_capture",
-    "prompt_choice",
-    "prompt_date",
-    "prompt_yes_no",
-    "choose_operation",
-    "choose_competition",
-    "choose_season",
-    "choose_source",
-    "choose_match_filter",
-    "confirm_summary",
-    "export_matches_for_team",
-    "interactive_flow",
-    "main",
-    "is_international_competition",
-]
 
 # --------------------------------------------------------------------------- #
 # Sentinels para navegación entre pasos
@@ -207,6 +193,7 @@ _INTERNATIONAL_COUNTRIES = {"International", "Internacional", "World", "WW"}
 
 
 def _category(comp_conf: Dict[str, Any]) -> str:
+    """Devuelve 'nacional', 'continental' o 'internacional'."""
     country = (comp_conf.get("country") or "").strip()
     code = (comp_conf.get("country_code") or "").strip().upper()
     if country in _INTERNATIONAL_COUNTRIES or code == "WW":
@@ -216,24 +203,57 @@ def _category(comp_conf: Dict[str, Any]) -> str:
     return "nacional"
 
 
-def is_international_competition(comp_conf: Dict[str, Any]) -> bool:
-    """True si la competición NO es de una liga doméstica de un país."""
+def _is_international(comp_conf: Dict[str, Any]) -> bool:
+    """True si la competición NO es de una liga doméstica de un país.
+
+    Devuelve True tanto para continentales (Champions, Europa) como para
+    selecciones / internacionales (Mundial, Copa America, EURO, …).
+    Las fuentes que sólo cubren ligas (Understat) la usan como filtro.
+    """
     return _category(comp_conf) != "nacional"
 
 
-# Back-compat private alias for callers still using the private name.
-_is_international = is_international_competition
+def is_international_competition(comp_conf: Dict[str, Any]) -> bool:
+    """Public wrapper used by the Streamlit dashboard."""
+    return _is_international(comp_conf)
 
 
 def _grouped_competitions() -> List[tuple]:
-    return [
-        (label, [name for name in names if name in COMPETITIONS])
-        for label, names in WORKING_COMPETITIONS.items()
-        if any(name in COMPETITIONS for name in names)
-    ]
+    """Sólo competiciones que estén registradas en `dim_competition`.
+
+    La fuente de verdad es la tabla `dim_competition` de la base de datos —
+    si una competición no aparece allí, queda oculta del wizard hasta que
+    se inserte. Esto hace que el menú sea dinámico sin tocar código.
+    """
+    return grouped_db_competitions()
+
+
+def _grouped_competitions_old() -> List[tuple]:
+    """Agrupa las claves de COMPETITIONS por categoría."""
+    nacionales: List[str] = []
+    continentales: List[str] = []
+    internacionales: List[str] = []
+    for name, conf in COMPETITIONS.items():
+        cat = _category(conf)
+        if cat == "nacional":
+            nacionales.append(name)
+        elif cat == "continental":
+            continentales.append(name)
+        else:
+            internacionales.append(name)
+
+    groups: List[tuple] = []
+    if nacionales:
+        groups.append(("Ligas nacionales", nacionales))
+    if continentales:
+        groups.append(("Competiciones continentales", continentales))
+    if internacionales:
+        groups.append(("Selecciones / Internacional", internacionales))
+    return groups
 
 
 def _flatten_grouped(groups: List[tuple]) -> List[str]:
+    """Devuelve la lista plana respetando el orden de los grupos."""
     flat: List[str] = []
     for _, items in groups:
         flat.extend(items)
@@ -246,7 +266,11 @@ def _flatten_grouped(groups: List[tuple]) -> List[str]:
 def choose_operation() -> str:
     return prompt_choice(
         "¿Qué quieres hacer?",
-        ["Descargar temporada completa", "Actualizar datos con juegos nuevos"],
+        [
+            "Descargar temporada completa",
+            "Actualizar desde última fecha en BD",
+            "Descargar estadios por temporada",
+        ],
         default="Descargar temporada completa",
         allow_back=True,
         back_label="cancelar y salir",
@@ -254,9 +278,22 @@ def choose_operation() -> str:
 
 
 def choose_competition() -> str:
-    """Selecciona competición agrupada por categoría."""
+    """Selecciona competición agrupada por categoría.
+
+    Sólo aparecen las competiciones registradas en `dim_competition`. Si la
+    tabla está vacía (o la conexión a la BD falla) se aborta el wizard con
+    un mensaje explícito.
+    """
     groups = _grouped_competitions()
     flat = _flatten_grouped(groups)
+
+    if not flat:
+        print(
+            "\n  [!] No hay competiciones registradas en `dim_competition`. "
+            "Inserta las que quieras scrapear en esa tabla y vuelve a "
+            "lanzar el wizard."
+        )
+        raise WizardQuit()
 
     while True:
         print()
@@ -293,16 +330,69 @@ def choose_season() -> str:
     )
 
 
-def _available_sources_for(
-    comp_conf: Dict[str, Any], competition: str, season: str
-) -> List[str]:
-    """Private back-compat wrapper around the public helper."""
-    return available_sources_for_competition(comp_conf, competition, season)
+def _reference_has_source(competition: str, season: str, source: str) -> bool:
+    ref_path = Path(__file__).resolve().parent.parent / "data" / "reference" / "source_reference_ids.csv"
+    if not ref_path.exists():
+        return True
+    with ref_path.open("r", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            if (
+                row.get("competition") == competition
+                and row.get("season") == season
+                and row.get("source") == source
+            ):
+                if source in {"sofascore", "statsbomb", "whoscored"}:
+                    return bool(row.get("season_id"))
+                return True
+    return False
+
+
+def _sofascore_season_available(competition: str, season: str) -> bool:
+    from scrapers.sofascore_seasons import sofascore_season_available
+    return sofascore_season_available(competition, season)
+
+
+def _available_sources_for(comp_conf: Dict[str, Any], competition: str, season: str) -> List[str]:
+    """Devuelve la lista de fuentes con datos para esta competición."""
+    sources_map = comp_conf.get("sources", {})
+    available: List[str] = []
+
+    tm = sources_map.get("transfermarkt", {})
+    if tm.get("league_code") and _reference_has_source(competition, season, "transfermarkt"):
+        available.append("transfermarkt")
+
+    sf = sources_map.get("sofascore", {})
+    if sf.get("tournament_id") is not None and (
+        _reference_has_source(competition, season, "sofascore")
+        or _sofascore_season_available(competition, season)
+    ):
+        available.append("sofascore")
+
+    # Understat — sólo para ligas nacionales.  No tiene datos fiables
+    # para Champions / Europa / Conference aunque el dict tenga 'league'.
+    us = sources_map.get("understat", {})
+    if us.get("league") and not _is_international(comp_conf) and _reference_has_source(competition, season, "understat"):
+        available.append("understat")
+
+    sb = sources_map.get("statsbomb", {})
+    if sb.get("competition_id") is not None and _reference_has_source(competition, season, "statsbomb"):
+        available.append("statsbomb")
+
+    ws = sources_map.get("whoscored", {})
+    if (
+        ws.get("tournament_id") is not None
+        and _reference_has_source(competition, season, "whoscored")
+    ):
+        from scrapers.whoscored_scraper import whoscored_season_available
+        if whoscored_season_available(competition, season):
+            available.append("whoscored")
+
+    return available
 
 
 def choose_source(comp_conf: Dict[str, Any], competition: str, season: str) -> str:
     """Sólo muestra fuentes con datos reales para la competición elegida."""
-    available = available_sources_for_competition(comp_conf, competition, season)
+    available = _available_sources_for(comp_conf, competition, season)
     if not available:
         print("\n[!] La competición seleccionada no tiene fuentes válidas en "
               "competitions.py. Revisa la configuración.")
@@ -311,7 +401,7 @@ def choose_source(comp_conf: Dict[str, Any], competition: str, season: str) -> s
     options = ["all"] + available
 
     if "understat" not in available:
-        if is_international_competition(comp_conf):
+        if _is_international(comp_conf):
             print("\n[i] Understat sólo cubre ligas domésticas — "
                   "se ha eliminado de la lista de fuentes para esta competición.")
         else:
@@ -356,8 +446,7 @@ def choose_match_filter(comp_conf: Dict[str, Any], season_start: int) -> Dict[st
             result["match_type"] = "all"
             return result
         try:
-            from scrapers.transfermarkt_scraper import get_league_teams
-            from wizard.competitions import get_competition_slug_transfermarkt
+            from scripts.competitions import get_competition_slug_transfermarkt
             tm_slug = get_competition_slug_transfermarkt(
                 next((name for name, conf in COMPETITIONS.items() if conf is comp_conf), "")
             ) or "laliga"
@@ -390,20 +479,35 @@ def choose_match_filter(comp_conf: Dict[str, Any], season_start: int) -> Dict[st
 # Resumen + confirmación final
 # --------------------------------------------------------------------------- #
 def _print_summary(state: Dict[str, Any]) -> None:
-    op = "Descarga completa" if state["full_scrape"] else "Actualización incremental"
-    print("\n" + "=" * 60)
-    print("  RESUMEN DE LA OPERACIÓN")
-    print("=" * 60)
-    print(f"  Acción      : {op}")
-    print(f"  Competición : {state['competition']}")
-    print(f"  Temporada   : {state['season']}")
-    print(f"  Fuente(s)   : {state['source']}")
-    if state.get("match_filter", {}).get("match_type") == "team":
-        print(f"  Filtro      : sólo equipo '{state['match_filter']['team_slug']}'")
-    elif state.get("match_filter", {}).get("from_date"):
-        print(f"  Filtro      : partidos desde {state['match_filter']['from_date']}")
+    if state.get("stadiums_only"):
+        op = "Descarga de estadios (Transfermarkt → dim_stadium)"
+    elif state["full_scrape"]:
+        op = "Descarga completa"
     else:
-        print( "  Filtro      : todos los partidos")
+        op = "Mantenimiento (desde última fecha en BD)"
+
+    print("\n" + "=" * 60)
+    print("  RESUMEN DE LA OPERACION")
+    print("=" * 60)
+    print(f"  Accion      : {op}")
+    if state.get("stadiums_only"):
+        print(f"  Competicion : Todas las ligas del wizard (WORKING_COMPETITIONS)")
+    else:
+        print(f"  Competicion : {state['competition']}")
+    print(f"  Temporada   : {state['season']}")
+
+    # En el sub-flujo de estadios no aplican fuente ni filtro de partidos
+    if not state.get("stadiums_only"):
+        print(f"  Fuente(s)   : {state['source']}")
+        if state.get("match_filter", {}).get("match_type") == "team":
+            print(f"  Filtro      : sólo equipo '{state['match_filter']['team_slug']}'")
+        elif state.get("match_filter", {}).get("from_date"):
+            print(f"  Filtro      : partidos desde {state['match_filter']['from_date']}")
+        else:
+            print( "  Filtro      : todos los partidos")
+    else:
+        print(f"  Fuente      : Transfermarkt (única para estadios)")
+        print(f"  Destino     : dim_stadium")
     print("=" * 60)
 
 
@@ -429,10 +533,7 @@ def confirm_summary(state: Dict[str, Any]) -> str:
 # Export helper (team-specific)
 # --------------------------------------------------------------------------- #
 def export_matches_for_team(team_slug: str, competition: str, season: str) -> Optional[Path]:
-    """Genera CSV con los partidos del equipo para la temporada. Devuelve el path o None."""
-    from loaders.common import engine
-    from sqlalchemy import text
-
+    """Genera CSV con los partidos del equipo seleccionado para la temporada."""
     print(f"\n[EXPORT] Generando CSV con los partidos de {team_slug}...")
 
     with engine.connect() as conn:
@@ -498,6 +599,169 @@ def export_matches_for_team(team_slug: str, competition: str, season: str) -> Op
 
 
 # --------------------------------------------------------------------------- #
+# Sub-flujo: descarga de estadios (Transfermarkt)
+# --------------------------------------------------------------------------- #
+def run_stadiums_flow(competition: str, season: str, full_refresh: bool = False) -> None:
+    """
+    Descarga estadios desde Transfermarkt y los carga en `dim_stadium`.
+
+    Args:
+        competition: nombre canónico (ej. "La Liga") tal como está en
+                     `dim_competition`.
+        season:      etiqueta tipo "2024/2025".
+        full_refresh: ignora la caché de 30 días del scraper.
+    """
+    from scrapers.transfermarkt_stadiums_scraper import (
+        scrape_transfermarkt_stadiums,
+        resolve_competition_from_db,
+    )
+    from loaders.stadium_loader import load_stadiums
+
+    print("\n=== DESCARGA DE ESTADIOS (Transfermarkt) ===")
+    print(f"  Competición: {competition}")
+    print(f"  Temporada  : {season}")
+
+    # 1) Resolver league_code: primero contra dim_competition (verdad),
+    #    fallback al dict COMPETITIONS para no bloquear si falta la fila.
+    comp_db = resolve_competition_from_db(competition)
+    if comp_db:
+        league_code = comp_db["id_transfermarkt"]
+    else:
+        comp_conf = get_competition(competition)
+        league_code = (
+            (comp_conf or {}).get("sources", {})
+                              .get("transfermarkt", {})
+                              .get("league_code")
+        )
+    if not league_code:
+        print(f"  [ERROR] No hay league_code de Transfermarkt para '{competition}'.")
+        return
+
+    season_start  = get_season_start_year(season)
+    season_label  = season.replace("/", "_")
+
+    # 2) Scrape
+    print("\n[1/2] Scrapeando estadios desde Transfermarkt...")
+    try:
+        scrape_transfermarkt_stadiums(
+            competition_name=competition,
+            league_code=league_code,
+            season=season_start,
+            season_label=season_label,
+            full_refresh=full_refresh,
+        )
+    except Exception as e:
+        print(f"  [ERROR] Falló el scraper de estadios: {e}")
+        return
+
+    # 3) Load → dim_stadium
+    print("\n[2/2] Cargando dim_stadium...")
+    try:
+        with engine.begin() as conn:
+            # El loader normaliza competition (acepta nombre humano o slug)
+            # y season (acepta '2024/2025' o '2024_2025').
+            n = load_stadiums(
+                conn,
+                competition=competition,
+                season=season_label,
+            )
+        print(f"\n  [OK] {n} estadio(s) upserteados en dim_stadium.")
+    except Exception as e:
+        print(f"  [ERROR] Falló el loader: {e}")
+
+
+def run_all_stadiums_flow(season: str, full_refresh: bool = False) -> None:
+    """
+    Itera las competiciones de clubes del wizard (WORKING_COMPETITIONS) y
+    ejecuta run_stadiums_flow para cada una. Las selecciones nacionales se
+    omiten automaticamente porque /stadion/verein/<team_id> no aplica a
+    federaciones.
+
+    Equivale al modo --all-db del scraper CLI, pero invocable desde el
+    wizard interactivo (CLI o Streamlit). En esta version el usuario NO
+    elige liga: se itera la lista canonica del wizard.
+    """
+    from wizard.competitions import WORKING_COMPETITIONS
+    from scripts.competitions import (
+        COMPETITIONS,
+        get_competition_slug_transfermarkt,
+    )
+
+    # Misma lista negra que el scraper --all-db: selecciones nacionales sin
+    # estadio de club no tienen sentido aqui.
+    NATIONAL_TEAM_COMPS = {
+        "FIFA World Cup",
+        "European Championship",
+        "Copa America",
+        "UEFA Women's EURO",
+        "FIFA Women's World Cup",
+        "UEFA Nations League A",
+        "UEFA Nations League B",
+        "UEFA Nations League C",
+        "UEFA Nations League D",
+        "World Cup Qualification UEFA",
+        "World Cup Qualification CONMEBOL",
+        "Int. Friendly",
+        "Africa Cup of Nations",
+        "Asian Cup",
+    }
+
+    # Mantener el orden del wizard (Ligas nacionales → continentales → ...)
+    seen, ordered = set(), []
+    for _bucket, names in WORKING_COMPETITIONS.items():
+        for n in names:
+            if n in seen:
+                continue
+            seen.add(n)
+            ordered.append(n)
+
+    to_process, skipped = [], []
+    for name in ordered:
+        cfg = COMPETITIONS.get(name, {})
+        league_code = (cfg.get("sources", {})
+                          .get("transfermarkt", {})
+                          .get("league_code"))
+        reasons = []
+        if not league_code:
+            reasons.append("sin league_code TM")
+        if not get_competition_slug_transfermarkt(name):
+            reasons.append("sin slug TM")
+        if name in NATIONAL_TEAM_COMPS:
+            reasons.append("seleccion nacional")
+        if reasons:
+            skipped.append((name, "; ".join(reasons)))
+        else:
+            to_process.append(name)
+
+    print("\n=== DESCARGA MASIVA DE ESTADIOS (Transfermarkt) ===")
+    print(f"  Temporada     : {season}")
+    print(f"  Procesando    : {len(to_process)} competiciones")
+    print(f"  Omitidas      : {len(skipped)}")
+    if skipped:
+        print("  Detalle omitidas:")
+        for name, why in skipped:
+            print(f"    - {name}: {why}")
+
+    ok: list[str] = []
+    failed: list[tuple[str, str]] = []
+    for i, name in enumerate(to_process, start=1):
+        print(f"\n----- [{i}/{len(to_process)}] {name} -----")
+        try:
+            run_stadiums_flow(name, season, full_refresh=full_refresh)
+            ok.append(name)
+        except Exception as e:  # noqa: BLE001
+            print(f"  [ERROR] Fallo en '{name}': {e}")
+            failed.append((name, str(e)))
+
+    print("\n=== RESUMEN DESCARGA MASIVA DE ESTADIOS ===")
+    print(f"  OK    : {len(ok)}/{len(to_process)}")
+    if failed:
+        print(f"  Fallos: {len(failed)}")
+        for name, err in failed:
+            print(f"    - {name}: {err}")
+
+
+# --------------------------------------------------------------------------- #
 # Flujo interactivo con navegación entre pasos
 # --------------------------------------------------------------------------- #
 PHASES = ["operation", "competition", "season", "source", "filter", "confirm"]
@@ -519,10 +783,19 @@ def interactive_flow() -> None:
                     print("\n  Saliendo del wizard. Hasta luego!")
                     return
                 state["operation"] = op
-                state["full_scrape"] = op.lower().startswith("descargar")
+                state["full_scrape"] = op.lower().startswith("descargar temporada")
+                state["stadiums_only"] = "estadios" in op.lower()
+                # En el flujo de estadios el usuario NO elige liga: se
+                # iteran todas las ligas de WORKING_COMPETITIONS.
+                if state["stadiums_only"]:
+                    state["competition"] = "ALL"
                 idx += 1
 
             elif phase == "competition":
+                # En modo estadios saltamos la eleccion de liga.
+                if state.get("stadiums_only"):
+                    idx += 1
+                    continue
                 comp = choose_competition()
                 if comp == BACK:
                     idx -= 1
@@ -530,7 +803,7 @@ def interactive_flow() -> None:
                 state["competition"] = comp
                 state["comp_conf"] = get_competition(comp)
                 if not state["comp_conf"]:
-                    print(f"  [ERROR] Competición '{comp}' no encontrada.")
+                    print(f"  [ERROR] Competicion '{comp}' no encontrada.")
                     continue
                 idx += 1
 
@@ -541,7 +814,13 @@ def interactive_flow() -> None:
                     continue
                 state["season"] = season
                 state["season_start"] = get_season_start_year(season)
-                idx += 1
+                # Si el usuario eligió "Descargar estadios", saltamos
+                # source/filter y vamos directos a confirmar.
+                if state.get("stadiums_only"):
+                    idx = PHASES.index("confirm")
+                else:
+                    idx += 1
+                continue
 
             elif phase == "source":
                 src = choose_source(state["comp_conf"], state["competition"], state["season"])
@@ -573,9 +852,18 @@ def interactive_flow() -> None:
         print("\n  Saliendo del wizard. Hasta luego!")
         return
 
+    # -- Ejecucion ------------------------------------------------
+    # Caso especial: solo estadios -> iteramos TODAS las ligas del wizard.
+    if state.get("stadiums_only"):
+        print("\n=== INICIANDO DESCARGA MASIVA DE ESTADIOS ===")
+        run_all_stadiums_flow(state["season"])
+        print("\n=== PROCESO FINALIZADO EXITOSAMENTE ===")
+        return
+
     match_filter = state.get("match_filter", {})
     kwargs = {
         "scrape": state["full_scrape"],
+        "load": False,
         "competition": state["competition"],
         "source": state["source"],
         "season": state["season"],
@@ -606,12 +894,10 @@ def parse_cli_args() -> argparse.Namespace:
     )
     parser.add_argument("--competition", help="Nombre de la competición (ej. 'La Liga')")
     parser.add_argument("--season", help="Temporada (ej. 2024/2025)")
-    parser.add_argument(
-        "--source",
-        choices=["all", "understat", "sofascore", "transfermarkt", "statsbomb", "whoscored"],
-        default="all",
-        help="Fuente(s) de datos (default: all)",
-    )
+    parser.add_argument("--source",
+                        choices=["all", "understat", "sofascore", "transfermarkt", "statsbomb", "whoscored"],
+                        default="all",
+                        help="Fuente(s) de datos (default: all)")
     parser.add_argument("--scrape", action="store_true", help="Forzar scrape completo")
     parser.add_argument("--update", action="store_true", help="Update incremental")
     parser.add_argument("--from-date", help="Fecha mínima YYYY-MM-DD")
@@ -632,14 +918,22 @@ def main() -> None:
         print("ERROR: debes especificar --competition")
         sys.exit(1)
     comp_conf = get_competition(competition)
-    if not comp_conf or competition not in WORKING_COMPETITION_NAMES:
-        print(f"ERROR: la competición '{competition}' no existe.")
+    if not comp_conf:
+        print(f"ERROR: la competición '{competition}' no existe en competitions.py.")
+        sys.exit(1)
+    if competition not in db_competition_names():
+        print(
+            f"ERROR: la competición '{competition}' no está registrada en "
+            f"`dim_competition`. Inserta una fila para esa competición antes "
+            f"de lanzar el pipeline."
+        )
         sys.exit(1)
 
     season = args.season or get_current_season()
 
     kwargs = {
         "scrape": args.scrape or not args.update,
+        "load": False,
         "competition": competition,
         "source": args.source,
         "season": season,

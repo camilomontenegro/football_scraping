@@ -34,7 +34,7 @@ import argparse
 
 # importa del archivo del diccionacio COMPETITIONS get_competition para obtener el diccionario de la competicion 
 # y  get_competition_slug_tranfermarkt para obtener el slug de la competicion y poder construir la URL
-from scripts.competitions import get_competition, get_competition_slug_tranfermarkt
+from scripts.competitions import get_competition, get_competition_slug_transfermarkt
 
 
 DELAY_MIN   = 2.0    # pausa mínima entre peticiones (segundos)

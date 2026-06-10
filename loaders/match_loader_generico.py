@@ -42,10 +42,24 @@ def _ensure_date(val) -> Optional[str]:
 
 
 def _safe_int(val) -> Optional[int]:
-    """Convierte un valor a entero de forma segura, devuelve None si falla."""
+    """Convierte un valor a entero de forma segura, devuelve None si falla.
+
+    Acepta floats serializados como string ("2.0") porque pandas suele
+    escribir asi los enteros opcionales en CSV.
+    """
+    if val is None:
+        return None
     try:
-        return int(val) if val is not None and str(val).strip() not in ("", "nan") else None
-    except (ValueError, TypeError):
+        if pd.isna(val):
+            return None
+    except (TypeError, ValueError):
+        pass
+    text_val = str(val).strip()
+    if text_val.lower() in ("", "nan", "none"):
+        return None
+    try:
+        return int(float(text_val))
+    except (TypeError, ValueError):
         return None
 
 
@@ -88,16 +102,16 @@ def _resolve_team_by_sb_id(conn, sb_id: str) -> Optional[int]:
 
 def _load_from_sofascore(conn, ss_path: Path, competition_id: int) -> int:
     """
-    Lee matches_clean.csv de SofaScore → upsert en dim_match.
+    Lee matches.csv de SofaScore → upsert en dim_match.
 
     Parámetros:
         conn:           conexión a la base de datos
         ss_path:        ruta a la carpeta de SofaScore de la competición
         competition_id: canonical_id de dim_competition para enlazar el partido
     """
-    files = list(ss_path.glob("**/matches_clean.csv"))
+    files = list(ss_path.glob("**/matches.csv"))
     if not files:
-        log.warning("match_loader: no se encontraron matches_clean.csv en %s", ss_path)
+        log.warning("match_loader: no se encontraron matches.csv en %s", ss_path)
         return 0
 
     all_rows: list[dict] = []
@@ -240,10 +254,18 @@ def _load_from_understat(conn, us_path: Path, competition_id: int) -> int:
         """), {"date": match_date, "hid": h_canonical, "aid": a_canonical, "comp_id": competition_id}).fetchone()
 
         if existing:
+            # Guard: si :uid ya existe en otra fila distinta, no asignar
+            # (violaria la UNIQUE en id_understat).
             conn.execute(text("""
                 UPDATE dim_match
                 SET id_understat = :uid
-                WHERE match_id = :mid AND id_understat IS NULL
+                WHERE match_id = :mid
+                  AND id_understat IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM dim_match m2
+                      WHERE m2.id_understat = :uid
+                        AND m2.match_id <> :mid
+                  )
             """), {"uid": int(us_mid), "mid": existing[0]})
             linked += 1
         else:
@@ -279,14 +301,14 @@ def _load_from_understat(conn, us_path: Path, competition_id: int) -> int:
 
 def _load_from_statsbomb(conn, sb_path: Path, competition_id: int) -> int:
     """
-    Lee matches_clean.csv de StatsBomb → añade id_statsbomb a partidos existentes.
+    Lee matches.csv de StatsBomb → añade id_statsbomb a partidos existentes.
 
     Parámetros:
         conn:           conexión a la base de datos
         sb_path:        ruta a la carpeta de StatsBomb de la competición
         competition_id: canonical_id de dim_competition para filtrar la búsqueda
     """
-    files = list(sb_path.glob("**/matches_clean.csv"))
+    files = list(sb_path.glob("**/matches.csv"))
     if not files:
         return 0
 
@@ -335,7 +357,13 @@ def _load_from_statsbomb(conn, sb_path: Path, competition_id: int) -> int:
                 conn.execute(text("""
                     UPDATE dim_match
                     SET id_statsbomb = :sid
-                    WHERE match_id = :mid AND id_statsbomb IS NULL
+                    WHERE match_id = :mid
+                      AND id_statsbomb IS NULL
+                      AND NOT EXISTS (
+                          SELECT 1 FROM dim_match m2
+                          WHERE m2.id_statsbomb = :sid
+                            AND m2.match_id <> :mid
+                      )
                 """), {"sid": str(sb_mid), "mid": existing[0]})
                 linked += 1
 
@@ -347,85 +375,181 @@ def _load_from_statsbomb(conn, sb_path: Path, competition_id: int) -> int:
 
 def _load_from_whoscored(conn, ws_path: Path, competition_id: int) -> int:
     """
-    Lee el CSV de eventos de WhoScored → añade id_whoscored a partidos existentes.
-    Deriva los equipos de cada partido a partir de los eventos.
-    Busca en events porque el CSV de matches de whoscored solo tiene el match_id y season. No aparecen los equipos  que jugaron cada partido. 
+    Lee matches.csv y match_enrichment.csv de WhoScored → enlaza id_whoscored
+    a partidos existentes y carga attendance, venue, managers, referee.
+
+    Estrategia de enlace (por orden de precisión):
+      1. match_date + equipos (via events.csv para derivar team IDs)
+      2. Fallback: season + equipos (sin fecha)
 
     Parámetros:
         conn:           conexión a la base de datos
         ws_path:        ruta a la carpeta de WhoScored de la competición
         competition_id: canonical_id de dim_competition para filtrar la búsqueda
     """
-
+    # ── Fase 1: enlazar id_whoscored usando matches.csv + events.csv ──
+    match_files = list(ws_path.glob("**/matches.csv"))
     event_files = list(ws_path.glob("**/*events*.csv"))
 
-    if not event_files:
-        log.info("match_loader: no hay CSV de eventos de WhoScored en %s", ws_path)
+    if not match_files and not event_files:
+        log.info("match_loader: no hay CSV de WhoScored en %s", ws_path)
         return 0
 
-    log.info("Analizando %d archivos de eventos de WhoScored...", len(event_files))
+    # Leer matches.csv para obtener match_date y attendance
+    ws_matches: dict[str, dict] = {}
+    for f in match_files:
+        try:
+            df = pd.read_csv(f)
+            for _, row in df.iterrows():
+                mid = str(row.get("whoscored_match_id", "")).strip()
+                if mid:
+                    ws_matches[mid] = {
+                        "match_date": _ensure_date(row.get("match_date")),
+                        "attendance": _safe_int(row.get("attendance")),
+                        "season": normalize_season(str(row.get("season", ""))),
+                    }
+        except Exception as e:
+            log.warning("Error leyendo %s: %s", f, e)
 
-    try:
-        dfs = [pd.read_csv(f) for f in event_files]
-        df = pd.concat(dfs, ignore_index=True)
-    except Exception as e:
-        log.error("Error leyendo eventos de WhoScored: %s", e)
-        return 0
+    # Derivar equipos desde events.csv
+    if event_files:
+        try:
+            dfs = [pd.read_csv(f) for f in event_files]
+            df_events = pd.concat(dfs, ignore_index=True)
+        except Exception as e:
+            log.error("Error leyendo eventos de WhoScored: %s", e)
+            df_events = pd.DataFrame()
 
-    # mapear match_id → (home_ws_id, away_ws_id, season)
-    match_map: dict[str, dict] = {}
-    for mid, group in df.groupby("whoscored_match_id"):
-        starts       = group[group["event_type"] == "Start"]
-        unique_teams = starts["whoscored_team_id"].unique().tolist()
-        if len(unique_teams) < 2:
-            unique_teams = group["whoscored_team_id"].dropna().unique().tolist()
-        if len(unique_teams) >= 2:
-            ws_season = normalize_season(str(group["season"].iloc[0]))
-            match_map[str(mid)] = {
-                "home_ws_id": int(unique_teams[0]),
-                "away_ws_id": int(unique_teams[1]),
-                "season":     ws_season,
-            }
+        if not df_events.empty:
+            for mid, group in df_events.groupby("whoscored_match_id"):
+                mid_str = str(mid)
+                starts = group[group["event_type"] == "Start"]
+                unique_teams = starts["whoscored_team_id"].unique().tolist()
+                if len(unique_teams) < 2:
+                    unique_teams = group["whoscored_team_id"].dropna().unique().tolist()
+                if len(unique_teams) >= 2:
+                    entry = ws_matches.setdefault(mid_str, {})
+                    entry["team_a_ws_id"] = int(unique_teams[0])
+                    entry["team_b_ws_id"] = int(unique_teams[1])
+                    if "season" not in entry or not entry.get("season"):
+                        entry["season"] = normalize_season(str(group["season"].iloc[0]))
 
     linked = 0
-    for ws_mid, info in match_map.items():
-        h_row = conn.execute(text("SELECT canonical_id FROM dim_team WHERE id_whoscored = :sid"), {"sid": info["home_ws_id"]}).fetchone()
-        a_row = conn.execute(text("SELECT canonical_id FROM dim_team WHERE id_whoscored = :sid"), {"sid": info["away_ws_id"]}).fetchone()
-
-        if not h_row or not a_row:
+    for ws_mid, info in ws_matches.items():
+        team_a_ws = info.get("team_a_ws_id")
+        team_b_ws = info.get("team_b_ws_id")
+        if not team_a_ws or not team_b_ws:
             continue
 
-        existing = conn.execute(text("""
-            SELECT match_id FROM dim_match
-            WHERE season         = :season
-            AND competition_id = :comp_id
-            AND id_whoscored IS NULL
-            AND (
-                (home_team_id = :hid AND away_team_id = :aid)
-                OR
-                (home_team_id = :aid AND away_team_id = :hid)
-            )
-            LIMIT 1
-        """), {
-            "hid":     h_row[0],
-            "aid":     a_row[0],
-            "season":  info["season"],
-            "comp_id": competition_id,
-        }).fetchone()
-        
+        a_row = conn.execute(text("SELECT canonical_id FROM dim_team WHERE id_whoscored = :sid"), {"sid": team_a_ws}).fetchone()
+        b_row = conn.execute(text("SELECT canonical_id FROM dim_team WHERE id_whoscored = :sid"), {"sid": team_b_ws}).fetchone()
+        if not a_row or not b_row:
+            continue
+
+        # Intentar enlazar por fecha + equipos (más preciso)
+        match_date = info.get("match_date")
+        existing = None
+        if match_date:
+            existing = conn.execute(text("""
+                SELECT match_id FROM dim_match
+                WHERE match_date = :date
+                  AND competition_id = :comp_id
+                  AND id_whoscored IS NULL
+                  AND (
+                      (home_team_id = :hid AND away_team_id = :aid)
+                      OR
+                      (home_team_id = :aid AND away_team_id = :hid)
+                  )
+                LIMIT 1
+            """), {
+                "date": match_date, "hid": a_row[0], "aid": b_row[0],
+                "comp_id": competition_id,
+            }).fetchone()
+
+        # Fallback: season + equipos
+        if not existing and info.get("season"):
+            existing = conn.execute(text("""
+                SELECT match_id FROM dim_match
+                WHERE season = :season
+                  AND competition_id = :comp_id
+                  AND id_whoscored IS NULL
+                  AND (
+                      (home_team_id = :hid AND away_team_id = :aid)
+                      OR
+                      (home_team_id = :aid AND away_team_id = :hid)
+                  )
+                LIMIT 1
+            """), {
+                "season": info["season"], "hid": a_row[0], "aid": b_row[0],
+                "comp_id": competition_id,
+            }).fetchone()
+
         if existing:
+            # Enlazar id_whoscored + attendance en un solo UPDATE
+            att = info.get("attendance")
             conn.execute(text("""
                 UPDATE dim_match
-                SET id_whoscored = :sid
-                WHERE match_id = :mid 
-                AND id_whoscored IS NULL
-                AND NOT EXISTS (
-                    SELECT 1 FROM dim_match WHERE id_whoscored = :sid
-                )
-            """), {"sid": int(ws_mid), "mid": existing[0]})
+                SET id_whoscored = :sid,
+                    attendance = COALESCE(attendance, :att)
+                WHERE match_id = :mid
+                  AND id_whoscored IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM dim_match WHERE id_whoscored = :sid
+                  )
+            """), {"sid": int(ws_mid), "mid": existing[0], "att": att})
             linked += 1
 
-    log.info("dim_match ← WhoScored: %d partidos enlazados", linked)
+    # ── Fase 2: enriquecer con match_enrichment.csv (venue, managers, scores) ──
+    enrich_files = list(ws_path.glob("**/match_enrichment.csv"))
+    enriched = 0
+    for f in enrich_files:
+        try:
+            df_e = pd.read_csv(f)
+        except Exception:
+            continue
+        for _, row in df_e.iterrows():
+            ws_mid = _safe_int(row.get("whoscored_match_id"))
+            if not ws_mid:
+                continue
+            # Buscar el match_id por id_whoscored
+            m = conn.execute(text(
+                "SELECT match_id FROM dim_match WHERE id_whoscored = :ws"
+            ), {"ws": ws_mid}).fetchone()
+            if not m:
+                continue
+
+            updates = {}
+            venue = row.get("venue_name")
+            if pd.notna(venue) and venue:
+                updates["venue_name"] = str(venue)
+            mgr_h = row.get("manager_home")
+            if pd.notna(mgr_h) and mgr_h:
+                updates["manager_home"] = str(mgr_h)
+            mgr_a = row.get("manager_away")
+            if pd.notna(mgr_a) and mgr_a:
+                updates["manager_away"] = str(mgr_a)
+            ht = row.get("ht_score")
+            if pd.notna(ht) and ht:
+                updates["ht_score"] = str(ht).strip()
+            ft = row.get("ft_score")
+            if pd.notna(ft) and ft:
+                updates["ft_score"] = str(ft).strip()
+            att = row.get("attendance")
+            if pd.notna(att):
+                try:
+                    updates["attendance"] = int(float(att))
+                except (ValueError, TypeError):
+                    pass
+
+            if updates:
+                set_parts = ", ".join(f"{k} = :{k}" for k in updates)
+                updates["mid"] = m[0]
+                conn.execute(text(
+                    f"UPDATE dim_match SET {set_parts} WHERE match_id = :mid"
+                ), updates)
+                enriched += 1
+
+    log.info("dim_match ← WhoScored: %d enlazados, %d enriquecidos (venue/managers/att)", linked, enriched)
     return linked
 
 

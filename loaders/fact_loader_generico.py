@@ -132,10 +132,10 @@ def _team_id_by_source(conn, source: str, ext_id) -> Optional[int]:
     eid = _safe_str(ext_id) if source == "statsbomb" else ext_id
     if eid is None:
         return None
-    
+
     row = conn.execute(
         text(f"SELECT canonical_id FROM dim_team WHERE {col} = :eid LIMIT 1"),
-        {"eid": ext_id},
+        {"eid": eid},
     ).fetchone()
     return row[0] if row else None
 
@@ -184,6 +184,34 @@ def _safe_float(val) -> Optional[float]:
     except (ValueError, TypeError):
         return None
 
+def _to_bool(val) -> Optional[bool]:
+    """Parsea un valor a bool con tolerancia a strings y NaN.
+
+    bool("False") en Python es True (cualquier string no vacio es truthy),
+    asi que NO se puede usar bool() sobre lo que pandas devuelve. Aqui
+    parseamos explicitamente las representaciones habituales.
+
+    Devuelve None si el valor no es interpretable.
+    """
+    if val is None:
+        return None
+    if isinstance(val, bool):
+        return val
+    try:
+        if pd.isna(val):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(val, (int, float)):
+        return bool(int(val))
+    s = str(val).strip().lower()
+    if s in ("true", "t", "1", "yes", "y", "home"):
+        return True
+    if s in ("false", "f", "0", "no", "n", "away"):
+        return False
+    return None
+
+
 def _safe_str(val) -> Optional[str]:
     """
     Convierte un valor a string de forma segura.
@@ -209,10 +237,10 @@ def _safe_str(val) -> Optional[str]:
 
 
 def _load_shots_sofascore(conn, ss_path: Path, competition_id:int ) -> int:
-    """Carga tiros de SofaScore desde shots_clean.csv."""
-    files = list(ss_path.glob("**/shots_clean.csv"))
+    """Carga tiros de SofaScore desde shots.csv."""
+    files = list(ss_path.glob("**/shots.csv"))
     if not files:
-        log.info("fact_shots: no hay shots_clean.csv de SofaScore")
+        log.info("fact_shots: no hay shots.csv de SofaScore")
         return 0
 
     all_rows: list[dict] = []
@@ -251,15 +279,17 @@ def _load_shots_sofascore(conn, ss_path: Path, competition_id:int ) -> int:
             tid = _team_id_by_source(conn, "sofascore",   _safe_int(row.get("team_id_ss")))
 
             
-            if not tid: 
-                #boolean indica si el partido se jugo en casa o fuera. 
-                #Se usa para extraer el id del equipo del jugador que realizó el tiro
-                is_home = row.get("is_home")
-                
-                if is_home  is not None  and mid:
-                    match_teams= matches_cache.get(mid)
-                    if(match_teams):
-                        tid= match_teams[0] if is_home else match_teams[1]
+            if not tid:
+                # boolean indica si el jugador es del equipo local; se usa
+                # para sacar el team_id del partido (home o away).
+                # Pandas puede leer la columna como string "True"/"False":
+                # _to_bool() lo normaliza correctamente (bool("False") seria True).
+                is_home = _to_bool(row.get("is_home"))
+
+                if is_home is not None and mid:
+                    match_teams = matches_cache.get(mid)
+                    if match_teams:
+                        tid = match_teams[0] if is_home else match_teams[1]
 
             if not mid or not pid or not tid:
                 skipped += 1
@@ -463,19 +493,11 @@ def _load_events_source(conn, source: str, file_pattern: str, files_dir: Path) -
         pid = _player_id_by_source(conn, source, _safe_int(row.get(pid_col)))
         tid = _team_id_by_source(conn, source, _safe_int(row.get(tid_col))) if tid_col else None
 
-        if not mid or not pid:
-            skipped += 1
-            continue
-
-        # Si no hay team_id, intentar derivarlo del partido (home o away)
-        if not tid:
-            m_row = conn.execute(
-                text("SELECT home_team_id FROM dim_match WHERE match_id = :mid LIMIT 1"),
-                {"mid": mid},
-            ).fetchone()
-            tid = m_row[0] if m_row else None
-
-        if not tid:
+        if not mid or not pid or not tid:
+            # Descartamos el evento si falta cualquier FK.
+            # NUNCA inventar el team_id asumiendo home/away: corromperia los
+            # eventos del visitante. Mejor reportar como skipped y resolverlo
+            # aguas arriba (cargar el equipo en dim_team).
             skipped += 1
             continue
 
@@ -544,9 +566,9 @@ def load_events(
 
     # **/events_clean*.csv busca  cualquier archivo qeu contenga events_clean en el nombre
     if ss_path:
-        total += _load_events_source(conn, "sofascore", "**/events_clean.csv", ss_path)
+        total += _load_events_source(conn, "sofascore", "**/events.csv", ss_path)
     if sb_path:
-        total += _load_events_source(conn, "statsbomb", "**/events_clean.csv", sb_path)
+        total += _load_events_source(conn, "statsbomb", "**/events.csv", sb_path)
     if ws_path:
         total += _load_events_source(conn, "whoscored", "**/*events*.csv", ws_path)
     log.info("[OK] fact_events completado — %d eventos insertados", total)
@@ -562,10 +584,10 @@ def load_injuries(conn,  tm_path: Path) -> int:
 
     log.info("[START] Cargando fact_injuries...")
     #
-    files = list(tm_path.glob("**/injuries_clean.csv"))
-    
+    files = list(tm_path.glob("**/injuries.csv"))
+
     if not files:
-        log.warning("fact_injuries: no hay injuries_clean.csv en %s", tm_path)
+        log.warning("fact_injuries: no hay injuries.csv en %s", tm_path)
         return 0
 
     all_rows: list[dict] = []
@@ -578,14 +600,18 @@ def load_injuries(conn,  tm_path: Path) -> int:
 
     count = skipped = 0
     for row in all_rows:
-        # cambio player_id_tm por player_id
-        # Usar player_id_tm como parte del nombre del savepoint para depuración
-        sp_name = f"injury_{_safe_int(row.get('player_id'))}_{count}"
+        # El CSV del scraper TM produce `player_id_tm`. Mantenemos fallbacks
+        # a `id_transfermarkt`/`player_id` por si en el futuro se renombra.
+        tm_pid = (
+            _safe_int(row.get("player_id_tm"))
+            or _safe_int(row.get("id_transfermarkt"))
+            or _safe_int(row.get("player_id"))
+        )
+        sp_name = f"injury_{tm_pid}_{count}"
         conn.execute(text(f"SAVEPOINT {sp_name}"))
-        
+
         try:
-            # cambio player_id_tm por player_id
-            pid = _player_id_by_source(conn, "transfermarkt", _safe_int(row.get("player_id")))
+            pid = _player_id_by_source(conn, "transfermarkt", tm_pid)
 
             if not pid:
                 conn.execute(text(f"RELEASE SAVEPOINT {sp_name}"))

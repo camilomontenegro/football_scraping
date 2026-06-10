@@ -15,8 +15,13 @@ from pathlib import Path
 from sqlalchemy import text
 
 # Importar loaders
-from loaders.team_loader import _upsert_team, _load_from_sofascore
+from loaders.team_loader_generico import _upsert_team, _load_from_sofascore
+from loaders.match_loader_generico import _safe_int
 from loaders.common import engine
+from scrapers.transfermarkt_stadiums_scraper import (
+    _parse_pitch_dimensions,
+    parse_previous_names,
+)
 from utils.mdm_engine import resolve_team, resolve_player, normalize
 
 
@@ -76,6 +81,51 @@ class TestDataValidation:
         for date_str in invalid_dates:
             # Deberían fallar o retornar None
             assert date_str not in ["2020-01-01"]
+
+    def test_safe_int_handles_nan_scores(self):
+        """Los marcadores NaN de fixtures no jugados se guardan como NULL."""
+        assert _safe_int(pd.NA) is None
+        assert _safe_int(float("nan")) is None
+        assert _safe_int("") is None
+        assert _safe_int("2.0") == 2
+        assert _safe_int(3) == 3
+
+
+@pytest.mark.unit
+class TestStadiumV3Helpers:
+    def test_parse_previous_names_with_dates(self):
+        raw = (
+            "Nuevo Mirandilla (25/06/2021 - 03/03/2026)\n"
+            "Ramon de Carranza (03/09/1955 - 24/06/2021)"
+        )
+        rows = parse_previous_names(raw)
+        assert rows[0]["name"] == "Nuevo Mirandilla"
+        assert rows[0]["date_from"] == "25/06/2021"
+        assert rows[1]["date_to"] == "24/06/2021"
+
+    def test_parse_previous_names_without_dates(self):
+        assert parse_previous_names("Old Stadium") == [
+            {"name": "Old Stadium", "date_from": None, "date_to": None}
+        ]
+
+    def test_parse_pitch_dimensions(self):
+        assert _parse_pitch_dimensions("104m x 68m") == (104, 68)
+        assert _parse_pitch_dimensions("105 x 70") == (105, 70)
+        assert _parse_pitch_dimensions("unknown") == (None, None)
+
+    @pytest.mark.skip(
+        reason="_previous_season/_next_season/_date_to_season ya no existen en "
+               "stadium_loader (refactor SCD2). Reescribir o eliminar este test."
+    )
+    def test_season_helpers(self):
+        pass
+
+    @pytest.mark.skip(
+        reason="_derive_city_country ya no existe en stadium_loader. "
+               "Reescribir o eliminar este test."
+    )
+    def test_derive_city_country(self):
+        pass
 
 
 # ═════════════════════════════════════════════════════════════════
