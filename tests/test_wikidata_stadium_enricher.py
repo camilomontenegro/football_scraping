@@ -154,3 +154,21 @@ def test_enrich_all_selects_rows_missing_only_image(monkeypatch):
     enricher.enrich_all_stadiums(FakeConn(), dry_run=True)
 
     assert "s.image_url IS NULL" in captured["sql"]
+
+
+@pytest.mark.unit
+def test_checkpoint_saves_cache_every_five(monkeypatch, tmp_path):
+    saves: list[int] = []
+    cache = {"k": "v"}
+
+    monkeypatch.setattr(enricher, "CHECKPOINT_EVERY", 5)
+    monkeypatch.setattr(
+        enricher,
+        "_save_cache",
+        lambda c: saves.append(len(c)),
+    )
+
+    for i in range(1, 12):
+        enricher._checkpoint(cache, i, dry_run=True)
+
+    assert len(saves) == 2

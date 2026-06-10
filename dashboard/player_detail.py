@@ -304,15 +304,19 @@ def _player_radar_row(
         JOIN dim_match m ON m.match_id = fs.match_id
         WHERE fs.player_id = :cid {filters}
     """, params)
-    if df.empty or int(df.iloc[0]["matches"] or 0) == 0:
+    if df.empty or pd.isna(df.iloc[0]["matches"]) or int(df.iloc[0]["matches"]) == 0:
         return None
     r = df.iloc[0]
+
+    def _safe(v):
+        return 0.0 if pd.isna(v) else float(v)
+
     return [
-        float(r["goals_pm"] or 0),
-        float(r["shots_pm"] or 0),
-        float(r["xg_pm"] or 0),
-        float(r["conversion"] or 0) * 100,
-        float(r["penalties_pm"] or 0),
+        _safe(r["goals_pm"]),
+        _safe(r["shots_pm"]),
+        _safe(r["xg_pm"]),
+        _safe(r["conversion"]) * 100,
+        _safe(r["penalties_pm"]),
     ]
 
 
@@ -347,7 +351,12 @@ def get_league_avg_radar(
     season: str | None = None,
     exclude_player: int | None = None,
 ) -> list[float] | None:
-    """Per-player per-match averages across the whole competition."""
+    """Per-player per-match averages across the whole competition.
+
+    Computes per-match stats for each player individually, then averages
+    across players.  The old formula (total / players / matches) assumed
+    every player appeared in every match, giving numbers ~10× too low.
+    """
     params: dict = {"compid": competition_id}
     filters = ""
     if season and season != "All":
@@ -359,32 +368,46 @@ def get_league_avg_radar(
         params["excl"] = exclude_player
 
     df = query_df(f"""
+        WITH player_stats AS (
+            SELECT
+                fs.player_id,
+                COUNT(DISTINCT fs.match_id)                            AS matches,
+                COUNT(*)::float
+                    / NULLIF(COUNT(DISTINCT fs.match_id), 0)           AS shots_pm,
+                SUM(CASE WHEN fs.result='Goal' THEN 1 ELSE 0 END)::float
+                    / NULLIF(COUNT(DISTINCT fs.match_id), 0)           AS goals_pm,
+                COALESCE(SUM(fs.xg), 0)::float
+                    / NULLIF(COUNT(DISTINCT fs.match_id), 0)           AS xg_pm,
+                CASE WHEN COUNT(*) > 0
+                    THEN SUM(CASE WHEN fs.result='Goal' THEN 1 ELSE 0 END)::float / COUNT(*)
+                    ELSE 0 END                                         AS conversion,
+                SUM(CASE WHEN LOWER(fs.situation)='penalty' THEN 1 ELSE 0 END)::float
+                    / NULLIF(COUNT(DISTINCT fs.match_id), 0)           AS penalties_pm
+            FROM fact_shots fs
+            JOIN dim_match m ON m.match_id = fs.match_id
+            WHERE m.competition_id = :compid {filters} {exclude}
+            GROUP BY fs.player_id
+            HAVING COUNT(DISTINCT fs.match_id) >= 1
+        )
         SELECT
-            COUNT(*)::float / NULLIF(COUNT(DISTINCT fs.player_id), 0)
-                / NULLIF(COUNT(DISTINCT fs.match_id), 0)          AS shots_pm,
-            SUM(CASE WHEN fs.result='Goal' THEN 1 ELSE 0 END)::float
-                / NULLIF(COUNT(DISTINCT fs.player_id), 0)
-                / NULLIF(COUNT(DISTINCT fs.match_id), 0)          AS goals_pm,
-            COALESCE(SUM(fs.xg), 0)::float
-                / NULLIF(COUNT(DISTINCT fs.player_id), 0)
-                / NULLIF(COUNT(DISTINCT fs.match_id), 0)          AS xg_pm,
-            CASE WHEN COUNT(*) > 0
-                THEN SUM(CASE WHEN fs.result='Goal' THEN 1 ELSE 0 END)::float / COUNT(*)
-                ELSE 0 END                                         AS conversion,
-            SUM(CASE WHEN LOWER(fs.situation)='penalty' THEN 1 ELSE 0 END)::float
-                / NULLIF(COUNT(DISTINCT fs.player_id), 0)
-                / NULLIF(COUNT(DISTINCT fs.match_id), 0)          AS penalties_pm
-        FROM fact_shots fs
-        JOIN dim_match m ON m.match_id = fs.match_id
-        WHERE m.competition_id = :compid {filters} {exclude}
+            AVG(shots_pm)      AS shots_pm,
+            AVG(goals_pm)      AS goals_pm,
+            AVG(xg_pm)         AS xg_pm,
+            AVG(conversion)    AS conversion,
+            AVG(penalties_pm)  AS penalties_pm
+        FROM player_stats
     """, params)
-    if df.empty:
+    if df.empty or pd.isna(df.iloc[0]["shots_pm"]):
         return None
     r = df.iloc[0]
+
+    def _safe(v):
+        return 0.0 if pd.isna(v) else float(v)
+
     return [
-        float(r["goals_pm"] or 0),
-        float(r["shots_pm"] or 0),
-        float(r["xg_pm"] or 0),
-        float(r["conversion"] or 0) * 100,
-        float(r["penalties_pm"] or 0),
+        _safe(r["goals_pm"]),
+        _safe(r["shots_pm"]),
+        _safe(r["xg_pm"]),
+        _safe(r["conversion"]) * 100,
+        _safe(r["penalties_pm"]),
     ]

@@ -2,7 +2,7 @@
 loaders/transfers_loader.py
 ============================
 Carga fact_transfers y fact_market_value desde los CSV limpios producidos
-por scrapers/transfermarkt_transfers_scraper.py.
+por scrapers/transfer_value_scraper.py o scrapers/transfermarkt_transfers_scraper.py.
 
 Resolución de FKs:
     - player_id:   dim_player.id_transfermarkt
@@ -156,8 +156,8 @@ def load_transfers(dry_run: bool = False) -> int:
     with engine.begin() as conn:
         for _, row in df.iterrows():
             # Resolve player FK
-            pid_tm = _safe_int(row.get("player_id_tm"))
-            player_id = _safe_int(row.get("player_id"))
+            pid_tm = _safe_int(row.get("player_id_tm")) or _safe_int(row.get("id_transfermarkt"))
+            player_id = _safe_int(row.get("player_id")) or _safe_int(row.get("canonical_id"))
             if not player_id and pid_tm:
                 player_id = player_map.get(pid_tm)
             if not player_id:
@@ -165,8 +165,8 @@ def load_transfers(dry_run: bool = False) -> int:
                 continue
 
             # Resolve team FKs
-            from_tm = _safe_int(row.get("id_tm_from_team"))
-            to_tm = _safe_int(row.get("id_tm_to_team"))
+            from_tm = _safe_int(row.get("id_tm_from_team")) or _safe_int(row.get("from_team_id_tm"))
+            to_tm = _safe_int(row.get("id_tm_to_team")) or _safe_int(row.get("to_team_id_tm"))
             from_team_id = team_map.get(from_tm) if from_tm else None
             to_team_id = team_map.get(to_tm) if to_tm else None
 
@@ -230,8 +230,8 @@ def load_market_value(dry_run: bool = False) -> int:
 
     with engine.begin() as conn:
         for _, row in df.iterrows():
-            pid_tm = _safe_int(row.get("player_id_tm"))
-            player_id = _safe_int(row.get("player_id"))
+            pid_tm = _safe_int(row.get("player_id_tm")) or _safe_int(row.get("id_transfermarkt"))
+            player_id = _safe_int(row.get("player_id")) or _safe_int(row.get("canonical_id"))
             if not player_id and pid_tm:
                 player_id = player_map.get(pid_tm)
             if not player_id:

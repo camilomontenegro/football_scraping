@@ -585,6 +585,7 @@ with tab_players:
                             _cmp_cid = int(_cmp_row.iloc[0]["canonical_id"])
                             _cmp_vals = player_detail._player_radar_row(
                                 _cmp_cid, _pd_season_sel,
+                                competition_id=_comp_id_radar,
                             )
                             _cmp_label = _cmp_selected
                 else:
@@ -596,51 +597,115 @@ with tab_players:
                     st.subheader(f"{_pd['canonical_name']} vs {_cmp_label}")
                     _n = len(_labels)
 
-                    # Normalise to 0-100 scale for visual balance
-                    _max_vals = [max(abs(_p_vals[i]), abs(_cmp_vals[i]), 0.001) for i in range(_n)]
-                    _p_norm = [(_p_vals[i] / _max_vals[i]) * 100 for i in range(_n)]
-                    _t_norm = [(_cmp_vals[i] / _max_vals[i]) * 100 for i in range(_n)]
+                    # ── Normalise each axis independently (0-100) ──
+                    # Use max of both + 20% headroom so neither touches the edge
+                    _axis_max = [
+                        max(abs(_p_vals[i]), abs(_cmp_vals[i]), 1e-9) * 1.2
+                        for i in range(_n)
+                    ]
+                    _p_norm = [(_p_vals[i] / _axis_max[i]) * 100 for i in range(_n)]
+                    _c_norm = [(_cmp_vals[i] / _axis_max[i]) * 100 for i in range(_n)]
 
                     _angles = np.linspace(0, 2 * np.pi, _n, endpoint=False).tolist()
                     _p_norm += [_p_norm[0]]
-                    _t_norm += [_t_norm[0]]
-                    _angles += [_angles[0]]
+                    _c_norm += [_c_norm[0]]
+                    _angles_closed = _angles + [_angles[0]]
 
-                    _fig_r, _ax_r = plt.subplots(figsize=(5, 5), subplot_kw=dict(polar=True))
+                    _fig_r, _ax_r = plt.subplots(
+                        figsize=(5, 5), subplot_kw=dict(polar=True),
+                    )
                     _fig_r.patch.set_facecolor("#0e1117")
                     _ax_r.set_facecolor("#0e1117")
 
-                    _ax_r.plot(_angles, _p_norm, "o-", linewidth=2, color="#e74c3c",
-                               label=_pd["canonical_name"])
-                    _ax_r.fill(_angles, _p_norm, alpha=0.15, color="#e74c3c")
-                    _ax_r.plot(_angles, _t_norm, "o-", linewidth=2, color="#3498db",
-                               label=_cmp_label)
-                    _ax_r.fill(_angles, _t_norm, alpha=0.15, color="#3498db")
+                    # Concentric reference rings
+                    _ring_vals = [25, 50, 75, 100]
+                    for _rv in _ring_vals:
+                        _ax_r.plot(
+                            _angles_closed,
+                            [_rv] * (_n + 1),
+                            color="#333", linewidth=0.4, linestyle="-", zorder=0,
+                        )
 
-                    _ax_r.set_xticks(_angles[:-1])
-                    _ax_r.set_xticklabels(_labels, color="white", fontsize=9)
-                    _ax_r.set_yticklabels([])
+                    # Player 1 (red)
+                    _ax_r.plot(
+                        _angles_closed, _p_norm, "o-",
+                        linewidth=2.2, color="#e74c3c", markersize=6,
+                        label=_pd["canonical_name"], zorder=3,
+                    )
+                    _ax_r.fill(_angles_closed, _p_norm, alpha=0.20, color="#e74c3c")
+
+                    # Player 2 / League avg (blue)
+                    _ax_r.plot(
+                        _angles_closed, _c_norm, "o-",
+                        linewidth=2.2, color="#3498db", markersize=6,
+                        label=_cmp_label, zorder=3,
+                    )
+                    _ax_r.fill(_angles_closed, _c_norm, alpha=0.20, color="#3498db")
+
+                    # Value annotations next to each vertex
+                    _fmt_val = lambda v, i: (
+                        f"{v:.1f}%" if _labels[i] == "Conversion %" else f"{v:.2f}"
+                    )
+                    for i in range(_n):
+                        _offset_r = max(_p_norm[i], _c_norm[i]) + 12
+                        _ax_r.text(
+                            _angles[i], _offset_r,
+                            f"{_fmt_val(_p_vals[i], i)}",
+                            ha="center", va="center",
+                            fontsize=7.5, fontweight="bold", color="#e74c3c",
+                        )
+                        _ax_r.text(
+                            _angles[i], _offset_r + 9,
+                            f"{_fmt_val(_cmp_vals[i], i)}",
+                            ha="center", va="center",
+                            fontsize=7.5, fontweight="bold", color="#3498db",
+                        )
+
+                    # Axis labels
+                    _ax_r.set_xticks(_angles)
+                    _ax_r.set_xticklabels(
+                        _labels, color="white", fontsize=10, fontweight="600",
+                    )
+                    _ax_r.set_yticklabels([])  # hide radial ticks
+                    _ax_r.set_ylim(0, 130)     # room for annotations
                     _ax_r.spines["polar"].set_color("#444")
-                    _ax_r.grid(color="#444", linewidth=0.5)
-                    _ax_r.legend(loc="upper right", bbox_to_anchor=(1.3, 1.1),
-                                 facecolor="#0e1117", labelcolor="white", fontsize=8)
-                    plt.tight_layout()
+                    _ax_r.grid(color="#444", linewidth=0.3)
 
-                    _rc1, _rc2 = st.columns([2, 3])
+                    _ax_r.legend(
+                        loc="upper center", bbox_to_anchor=(0.5, -0.06),
+                        ncol=2, frameon=True,
+                        facecolor="#1a1a2e", edgecolor="#444",
+                        labelcolor="white", fontsize=10,
+                    )
+                    _fig_r.tight_layout()
+
+                    _rc1, _rc2 = st.columns([3, 2])
                     with _rc1:
                         st.pyplot(_fig_r)
                         plt.close(_fig_r)
                     with _rc2:
                         _rv_df = pd.DataFrame({
                             "Metric": _labels,
-                            _pd["canonical_name"]: [f"{v:.3f}" for v in _p_vals],
-                            _cmp_label: [f"{v:.3f}" for v in _cmp_vals],
+                            _pd["canonical_name"]: [
+                                _fmt_val(_p_vals[i], i) for i in range(_n)
+                            ],
+                            _cmp_label: [
+                                _fmt_val(_cmp_vals[i], i) for i in range(_n)
+                            ],
                         })
                         st.dataframe(_rv_df, width="stretch", hide_index=True)
-                        _caption = ("Per-match averages. Conversion % is per-shot."
-                                    if _cmp_mode == "Another player"
-                                    else "Per-match averages vs league (excluding this player). Conversion % is per-shot.")
+                        _caption = (
+                            "Per-match averages. Conversion % is per-shot."
+                            if _cmp_mode == "Another player"
+                            else "Per-match averages vs league (excluding this player). "
+                                 "Conversion % is per-shot."
+                        )
                         st.caption(_caption)
+                else:
+                    if _cmp_mode == "Another player":
+                        st.info("No shot data for this player in the same competition/season.")
+                    else:
+                        st.info("Not enough league data to compute average.")
 
                 st.divider()
 

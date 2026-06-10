@@ -75,6 +75,7 @@ log = logging.getLogger(__name__)
 # ── CONSTANTS ────────────────────────────────────────────────────────────────
 
 CACHE_NAME = "transfermarkt_stadiums"
+CHECKPOINT_EVERY = 5
 
 # Formato esperado de cada clave de caché: "<comp_slug>|<team_id>|<season>".
 # Versiones antiguas del scraper escribían sólo "<team_id>|<season>", lo que
@@ -122,6 +123,29 @@ def load_cache() -> dict:
 
 def save_cache(cache: dict) -> None:
     _save_cache_file(CACHE_NAME, cache)
+
+
+def _checkpoint_stadiums(
+    cache: dict,
+    all_stadia: list[dict],
+    processed: int,
+    competition_name: str,
+    season_label: str,
+    *,
+    force: bool = False,
+) -> None:
+    """Persist cache and clean CSV every CHECKPOINT_EVERY teams."""
+    if not force and processed % CHECKPOINT_EVERY != 0:
+        return
+    save_cache(cache)
+    if all_stadia:
+        df = transform_stadiums(all_stadia)
+        save_clean_csv(
+            competition_name, season_label, "transfermarkt",
+            "stadiums", df,
+        )
+    log.info("Checkpoint: %d equipos procesados — cache y CSV guardados", processed)
+    print(f"  [CHECKPOINT] {processed} equipos — datos guardados")
 
 
 # ── HELPERS ──────────────────────────────────────────────────────────────────
@@ -624,78 +648,109 @@ def scrape_transfermarkt_stadiums(
             team_slug, record, subdir="stadiums",
         )
 
-    for team_slug, team_id in teams.items():
-        # Clave de caché POR COMPETICIÓN para que el mismo equipo (p.ej. Real
-        # Madrid) no sea omitido en La Liga porque ya se scrapeó en UCL.
-        cache_key = f"{comp_slug}|{team_id}|{season}"
-        last      = cache.get(cache_key)
-        json_path = raw_dir(competition_name, season_label, "transfermarkt",
-                            "stadiums") / f"{team_slug}.json"
+    processed = 0
+    try:
+        for team_slug, team_id in teams.items():
+            processed += 1
+            # Clave de caché POR COMPETICIÓN para que el mismo equipo (p.ej. Real
+            # Madrid) no sea omitido en La Liga porque ya se scrapeó en UCL.
+            cache_key = f"{comp_slug}|{team_id}|{season}"
+            last      = cache.get(cache_key)
+            json_path = raw_dir(competition_name, season_label, "transfermarkt",
+                                "stadiums") / f"{team_slug}.json"
 
-        # Estadios cambian poco: caché 30 días, pero sólo vale si el JSON
-        # físicamente existe en esta liga (si lo borraron, regeneramos).
-        if not full_refresh and last:
-            try:
-                from datetime import datetime as _dt
-                days = (date.today() - _dt.strptime(last, "%Y-%m-%d").date()).days
-                if days < 30 and json_path.exists():
-                    try:
-                        with open(json_path, "r", encoding="utf-8") as f:
-                            all_stadia.append(json.load(f))
-                        skipped_teams += 1
-                        continue
-                    except Exception as e:
-                        log.warning("No se pudo leer JSON cacheado %s: %s", json_path, e)
-            except Exception:
-                pass
+            # Estadios cambian poco: caché 30 días, pero sólo vale si el JSON
+            # físicamente existe en esta liga (si lo borraron, regeneramos).
+            if not full_refresh and last:
+                try:
+                    from datetime import datetime as _dt
+                    days = (date.today() - _dt.strptime(last, "%Y-%m-%d").date()).days
+                    if days < 30 and json_path.exists():
+                        try:
+                            with open(json_path, "r", encoding="utf-8") as f:
+                                all_stadia.append(json.load(f))
+                            skipped_teams += 1
+                            _checkpoint_stadiums(
+                                cache, all_stadia, processed,
+                                competition_name, season_label,
+                            )
+                            continue
+                        except Exception as e:
+                            log.warning("No se pudo leer JSON cacheado %s: %s", json_path, e)
+                except Exception:
+                    pass
 
-        # Reuso cross-competición: si UCL/UEL ya scrapeó este equipo
-        # recientemente, copiamos el JSON sin pegarle otra vez a TM.
-        if not full_refresh:
-            reused = find_recent_raw_json(
-                season_label, "transfermarkt", team_slug, subdir="stadiums",
-            )
-            if reused and reused.get("stadium_name"):
-                _persist(reused)
-                all_stadia.append(reused)
-                cache[cache_key] = today_str
-                reused_from_other_comp += 1
-                cap = reused.get("capacity")
-                print(f"\n[INFO] Estadio: {team_slug} (id={team_id}) "
-                      f"— reutilizado de otra competición")
-                print(f"  [OK] {reused.get('stadium_name')} — aforo {cap}")
+            # Reuso cross-competición: si UCL/UEL ya scrapeó este equipo
+            # recientemente, copiamos el JSON sin pegarle otra vez a TM.
+            if not full_refresh:
+                reused = find_recent_raw_json(
+                    season_label, "transfermarkt", team_slug, subdir="stadiums",
+                )
+                if reused and reused.get("stadium_name"):
+                    _persist(reused)
+                    all_stadia.append(reused)
+                    cache[cache_key] = today_str
+                    reused_from_other_comp += 1
+                    cap = reused.get("capacity")
+                    print(f"\n[INFO] Estadio: {team_slug} (id={team_id}) "
+                          f"— reutilizado de otra competición")
+                    print(f"  [OK] {reused.get('stadium_name')} — aforo {cap}")
+                    _checkpoint_stadiums(
+                        cache, all_stadia, processed,
+                        competition_name, season_label,
+                    )
+                    continue
+
+            print(f"\n[INFO] Estadio: {team_slug} (id={team_id})")
+
+            record = None
+            for attempt in range(MAX_RETRIES):
+                try:
+                    record = get_team_stadium(team_slug, team_id, season)
+                    if record and record.get("stadium_name"):
+                        break
+                except Exception as e:
+                    log.warning("%s estadio intento %d: %s", team_slug, attempt + 1, e)
+                time.sleep(2 * (attempt + 1))
+
+            if not record or not record.get("stadium_name"):
+                log.error("%s sin estadio extraído", team_slug)
+                failed.append(team_slug)
+                if record:
+                    _persist(record)
+                    all_stadia.append(record)
+                time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
+                _checkpoint_stadiums(
+                    cache, all_stadia, processed,
+                    competition_name, season_label,
+                )
                 continue
 
-        print(f"\n[INFO] Estadio: {team_slug} (id={team_id})")
+            _persist(record)
+            all_stadia.append(record)
+            cache[cache_key] = today_str
 
-        record = None
-        for attempt in range(MAX_RETRIES):
-            try:
-                record = get_team_stadium(team_slug, team_id, season)
-                if record and record.get("stadium_name"):
-                    break
-            except Exception as e:
-                log.warning("%s estadio intento %d: %s", team_slug, attempt + 1, e)
-            time.sleep(2 * (attempt + 1))
+            cap = record.get("capacity")
+            print(f"  [OK] {record.get('stadium_name')} — aforo {cap}")
 
-        if not record or not record.get("stadium_name"):
-            log.error("%s sin estadio extraído", team_slug)
-            failed.append(team_slug)
-            if record:
-                _persist(record)
-                all_stadia.append(record)
             time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
-            continue
-
-        _persist(record)
-        all_stadia.append(record)
-        cache[cache_key] = today_str
-
-        cap = record.get("capacity")
-        print(f"  [OK] {record.get('stadium_name')} — aforo {cap}")
-
-        time.sleep(random.uniform(DELAY_MIN, DELAY_MAX))
-        save_cache(cache)
+            _checkpoint_stadiums(
+                cache, all_stadia, processed,
+                competition_name, season_label,
+            )
+    except KeyboardInterrupt:
+        log.warning("Interrupted — saving progress (%d equipos)", len(all_stadia))
+        _checkpoint_stadiums(
+            cache, all_stadia, processed,
+            competition_name, season_label, force=True,
+        )
+        raise
+    finally:
+        if processed and processed % CHECKPOINT_EVERY != 0:
+            _checkpoint_stadiums(
+                cache, all_stadia, processed,
+                competition_name, season_label, force=True,
+            )
 
     print(f"\n  Equipos procesados: {len(teams) - len(failed)}/{len(teams)}")
     if not full_refresh:
@@ -705,15 +760,9 @@ def scrape_transfermarkt_stadiums(
     if failed:
         print(f"  [WARNING] Fallidos: {failed}")
 
-    save_cache(cache)
-
     if all_stadia:
-        df = transform_stadiums(all_stadia)
-        out_csv = save_clean_csv(
-            competition_name, season_label, "transfermarkt",
-            "stadiums", df,
-        )
-        print(f"\n  CSV listo: {out_csv}")
+        from utils.data_paths import clean_csv_path
+        print(f"\n  CSV listo: {clean_csv_path(competition_name, season_label, 'transfermarkt', 'stadiums')}")
 
     return all_stadia
 
