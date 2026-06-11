@@ -755,24 +755,24 @@ with tab_players:
                     pitch_type="custom",
                     pitch_length=105,
                     pitch_width=68,
-                    pitch_color="#1a472a",
+                    pitch_color="grass",
+                    stripe=True,
                     line_color="white",
                     line_zorder=2,
                 )
                 _fig_sm, _ax_sm = _pitch.draw(figsize=(7, 4.5))
-                _fig_sm.patch.set_facecolor("#1a472a")
                 _x      = _shots_df["x"].to_numpy(dtype=float, na_value=np.nan)
                 _y      = _shots_df["y"].to_numpy(dtype=float, na_value=np.nan)
                 _xg_arr = _shots_df["xg"].fillna(0.05).to_numpy(dtype=float)
                 _sizes  = np.clip(_xg_arr * 300, 20, 200)
                 _is_goal = (_shots_df["result"] == "Goal").to_numpy()
                 _pitch.scatter(_x[~_is_goal], _y[~_is_goal], s=_sizes[~_is_goal],
-                    color="white", edgecolors="#cccccc", linewidths=0.4, alpha=0.6,
+                    color="white", edgecolors="#666666", linewidths=0.4, alpha=0.75,
                     ax=_ax_sm, zorder=3, label="No goal")
                 _pitch.scatter(_x[_is_goal], _y[_is_goal], s=_sizes[_is_goal],
-                    color="red", edgecolors="white", linewidths=0.5, alpha=0.9,
+                    color="red", edgecolors="white", linewidths=0.5, alpha=0.95,
                     ax=_ax_sm, zorder=4, label="Goal")
-                _ax_sm.legend(facecolor="#1a472a", labelcolor="white", loc="upper right", fontsize=8)
+                _ax_sm.legend(loc="upper right", fontsize=8, framealpha=0.85)
                 st.pyplot(_fig_sm)
                 plt.close(_fig_sm)
                 _st1, _st2, _st3, _st4 = st.columns(4)
@@ -931,52 +931,238 @@ with tab_shot:
     if not _si_seasons:
         st.info("No seasons in the database yet.")
     else:
-        # ── Section 1 — Pitch Danger Heatmap ─────────────────────
-        st.subheader(t("pitch_danger_heatmap"))
+        # ── Section 1 — Pitch view: Heatmap / Shot Map / Goal Mouth ──
+        si_view = st.selectbox(
+            t("pitch_view"),
+            [t("pitch_danger_heatmap"), t("shot_map"), t("goal_mouth")],
+            key="si_view",
+        )
 
-        hm_df = analytics.get_heatmap_data(si_season, _si_team_id, _si_competition_val)
+        if si_view in (t("shot_map"), t("goal_mouth")):
+            # ── Per-match views (WhoScored events) ───────────────
+            st.subheader(si_view)
 
-        if hm_df.empty:
-            st.info("No shot data with coordinates for this selection.")
-        else:
-            scope = si_team_choice
-            hm_title = f"{metric_label} by zone — {si_season} · {scope}"
+            from mplsoccer import VerticalPitch as _SmPitch
 
-            X_BANDS = list(range(0, 101, 10))
-            Y_BANDS = list(range(0, 61, 10))
-            grid = np.full((len(Y_BANDS), len(X_BANDS)), np.nan)
-            for _, r in hm_df.iterrows():
-                xb, yb = int(r["x_band"]), int(r["y_band"])
-                if xb in X_BANDS and yb in Y_BANDS:
-                    grid[Y_BANDS.index(yb), X_BANDS.index(xb)] = float(r[metric_col] or 0)
-
-            x_edges = np.array(X_BANDS + [105], dtype=float)
-            y_edges = np.array(Y_BANDS + [68],  dtype=float)
-
-            pitch = _Pitch(
-                pitch_type="custom", pitch_length=105, pitch_width=68,
-                pitch_color="#1a472a", line_color="white", line_zorder=2,
-            )
-            fig, ax = pitch.draw(figsize=(12, 7))
-            fig.patch.set_facecolor("#1a472a")
-
-            hm_mesh = ax.pcolormesh(
-                x_edges, y_edges, grid,
-                cmap="Reds", alpha=0.75, zorder=1, vmin=0,
-            )
-            plt.colorbar(hm_mesh, ax=ax, shrink=0.6, label=metric_label)
-            ax.set_title(hm_title, color="white", fontsize=13, pad=12)
-
-            st.pyplot(fig)
-            plt.close(fig)
-
-            with st.expander("Zone data table"):
-                st.dataframe(
-                    hm_df[["x_band", "y_band", "shots", "goals", "avg_xg", "conversion_rate"]],
-                    width='stretch',
+            _sm_matches = pass_network.get_matches_with_passes(si_competition, si_season)
+            if _sm_matches.empty:
+                st.info(t("no_pass_matches"))
+            else:
+                sm_match_label = st.selectbox(
+                    t("match"), _sm_matches["label"].tolist(), key="si_sm_match"
                 )
+                _sm_row = _sm_matches[_sm_matches["label"] == sm_match_label].iloc[0]
+                _sm_mid = int(_sm_row["match_id"])
 
-        st.divider()
+                _SM_COLORS = {
+                    "Goal":        "#2ecc71",
+                    "MissedShots": "#e74c3c",
+                    "SavedShot":   "#3498db",
+                    "ShotOnPost":  "#f39c12",
+                }
+
+                def _draw_shot_map(team_name: str, team_id: int) -> None:
+                    shots = analytics.get_match_shots(_sm_mid, team_id)
+                    if shots.empty:
+                        st.info(t("no_shot_data"))
+                        return
+
+                    pitch = _SmPitch(
+                        pitch_type="custom", pitch_length=105, pitch_width=68,
+                        half=True, pitch_color="grass", stripe=True,
+                        line_color="white", line_zorder=2,
+                    )
+                    fig, ax = pitch.draw(figsize=(6, 5))
+
+                    for etype, color in _SM_COLORS.items():
+                        sub = shots[shots["event_type"] == etype]
+                        if sub.empty:
+                            continue
+                        is_goal = etype == "Goal"
+                        # Trajectory to the goal-line crossing point — only
+                        # for shots whose end coords have been populated.
+                        traj = sub.dropna(subset=["end_x", "end_y"])
+                        if not traj.empty:
+                            pitch.arrows(
+                                traj["x"] * 105, traj["y"] * 68,
+                                traj["end_x"] * 105, traj["end_y"] * 68,
+                                width=1.5, headwidth=6, headlength=5,
+                                headaxislength=4.5,
+                                color=color, alpha=0.85, zorder=3, ax=ax,
+                            )
+                        pitch.scatter(
+                            sub["x"] * 105, sub["y"] * 68,
+                            s=160 if is_goal else 90,
+                            color=color, edgecolors="white",
+                            linewidths=1.0 if is_goal else 0.6,
+                            alpha=0.95, zorder=5 if is_goal else 4,
+                            label=etype, ax=ax,
+                        )
+                    ax.legend(loc="lower left", fontsize=8, framealpha=0.85)
+                    ax.set_title(team_name, fontsize=12, pad=10)
+                    st.pyplot(fig)
+                    plt.close(fig)
+
+                    n_goals = int((shots["event_type"] == "Goal").sum())
+                    n_target = int(shots["event_type"].isin(["Goal", "SavedShot"]).sum())
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Shots", len(shots))
+                    c2.metric("On target", n_target)
+                    c3.metric("Goals", n_goals)
+
+                    with st.expander(f"{team_name} — shot list"):
+                        st.dataframe(
+                            shots[["minute", "player", "event_type"]],
+                            width="stretch", hide_index=True,
+                        )
+
+                def _draw_goal_mouth(team_name: str, team_id: int) -> None:
+                    """Front view of the goal: where each shot crossed the
+                    goal line, in real metres (goal: 7.32 m × 2.44 m)."""
+                    shots = analytics.get_match_shots(_sm_mid, team_id)
+                    gm = (
+                        shots.dropna(subset=["end_y", "end_z"])
+                        if not shots.empty else shots
+                    )
+                    if gm.empty:
+                        st.info(t("no_goalmouth_data"))
+                        return
+
+                    # WhoScored units → metres:
+                    #   goalMouthY is % of pitch width (68 m), goal centred at 50
+                    #   goalMouthZ: crossbar (2.44 m) ≈ 38 units
+                    y_m = (gm["end_y"] * 100 - 50) * 0.68
+                    z_m = gm["end_z"] * 100 * (2.44 / 38.0)
+
+                    # Fixed window so the goal keeps its real proportions;
+                    # extreme wide/high misses are counted, not plotted.
+                    _X_WIN, _Z_WIN = 8.0, 4.2
+                    _in_view = (y_m.abs() <= _X_WIN) & (z_m <= _Z_WIN)
+                    n_off = int((~_in_view).sum())
+                    gm, y_m, z_m = gm[_in_view], y_m[_in_view], z_m[_in_view]
+
+                    fig, ax = plt.subplots(figsize=(7, 3.4))
+                    ax.set_facecolor("#5d8c3f")
+                    # net
+                    ax.add_patch(plt.Rectangle(
+                        (-3.66, 0), 7.32, 2.44, fill=False, hatch="++",
+                        edgecolor="white", linewidth=0, alpha=0.25, zorder=1,
+                    ))
+                    # ground + goal frame
+                    ax.axhline(0, color="white", lw=2, zorder=2)
+                    ax.plot([-3.66, -3.66, 3.66, 3.66], [0, 2.44, 2.44, 0],
+                            color="white", lw=4, zorder=3,
+                            solid_capstyle="round")
+
+                    for etype, color in _SM_COLORS.items():
+                        m = (gm["event_type"] == etype).to_numpy()
+                        if not m.any():
+                            continue
+                        is_goal = etype == "Goal"
+                        ax.scatter(
+                            y_m[m], z_m[m], s=130 if is_goal else 70,
+                            color=color, edgecolors="white",
+                            linewidths=1.0 if is_goal else 0.6,
+                            alpha=0.95, zorder=5 if is_goal else 4,
+                            label=etype,
+                        )
+
+                    ax.set_xlim(-_X_WIN, _X_WIN)
+                    ax.set_ylim(-0.15, _Z_WIN)
+                    ax.set_aspect("equal")
+                    ax.set_xticks([])
+                    ax.set_yticks([])
+                    for spine in ax.spines.values():
+                        spine.set_visible(False)
+                    ax.legend(loc="upper right", fontsize=7, framealpha=0.85)
+                    if n_off:
+                        ax.text(
+                            -_X_WIN + 0.3, _Z_WIN - 0.25,
+                            f"+{n_off} off view", color="white",
+                            fontsize=8, va="top",
+                        )
+                    ax.set_title(team_name, fontsize=12, pad=10)
+                    st.pyplot(fig)
+                    plt.close(fig)
+
+                    n_goals = int((gm["event_type"] == "Goal").sum())
+                    n_target = int(gm["event_type"].isin(["Goal", "SavedShot"]).sum())
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Shots plotted", len(gm) + n_off)
+                    c2.metric("On target", n_target)
+                    c3.metric("Goals", n_goals)
+
+                _draw_team = (
+                    _draw_shot_map if si_view == t("shot_map") else _draw_goal_mouth
+                )
+                sm_home, sm_away = st.columns(2)
+                with sm_home:
+                    _draw_team(str(_sm_row["home"]), int(_sm_row["home_team_id"]))
+                with sm_away:
+                    _draw_team(str(_sm_row["away"]), int(_sm_row["away_team_id"]))
+
+                if si_view == t("shot_map"):
+                    st.caption(
+                        "Source: fact_events (WhoScored) · Dot = shot origin · "
+                        "Goal / MissedShots / SavedShot / ShotOnPost are WhoScored outcomes · "
+                        "On target = Goal + SavedShot · Penalty shootouts excluded"
+                    )
+                else:
+                    st.caption(
+                        "Source: fact_events (WhoScored goalMouthY/goalMouthZ) · "
+                        "Front view of the goal in real metres (7.32 m × 2.44 m) · "
+                        "Dot = where the shot crossed the goal-line plane · "
+                        "Penalty shootouts excluded"
+                    )
+
+            st.divider()
+
+        else:
+            # ── Pitch Danger Heatmap ─────────────────────────────
+            st.subheader(t("pitch_danger_heatmap"))
+
+            hm_df = analytics.get_heatmap_data(si_season, _si_team_id, _si_competition_val)
+
+            if hm_df.empty:
+                st.info("No shot data with coordinates for this selection.")
+            else:
+                scope = si_team_choice
+                hm_title = f"{metric_label} by zone — {si_season} · {scope}"
+
+                X_BANDS = list(range(0, 101, 10))
+                Y_BANDS = list(range(0, 61, 10))
+                grid = np.full((len(Y_BANDS), len(X_BANDS)), np.nan)
+                for _, r in hm_df.iterrows():
+                    xb, yb = int(r["x_band"]), int(r["y_band"])
+                    if xb in X_BANDS and yb in Y_BANDS:
+                        grid[Y_BANDS.index(yb), X_BANDS.index(xb)] = float(r[metric_col] or 0)
+
+                x_edges = np.array(X_BANDS + [105], dtype=float)
+                y_edges = np.array(Y_BANDS + [68],  dtype=float)
+
+                pitch = _Pitch(
+                    pitch_type="custom", pitch_length=105, pitch_width=68,
+                    pitch_color="grass", stripe=True, line_color="white", line_zorder=2,
+                )
+                fig, ax = pitch.draw(figsize=(12, 7))
+
+                hm_mesh = ax.pcolormesh(
+                    x_edges, y_edges, grid,
+                    cmap="Reds", alpha=0.75, zorder=1, vmin=0,
+                )
+                plt.colorbar(hm_mesh, ax=ax, shrink=0.6, label=metric_label)
+                ax.set_title(hm_title, fontsize=13, pad=12)
+
+                st.pyplot(fig)
+                plt.close(fig)
+
+                with st.expander("Zone data table"):
+                    st.dataframe(
+                        hm_df[["x_band", "y_band", "shots", "goals", "avg_xg", "conversion_rate"]],
+                        width='stretch',
+                    )
+
+            st.divider()
 
         # ── Section 2 — Player Finishing Quality ──────────────────
         st.subheader(t("player_finishing"))
@@ -1340,10 +1526,9 @@ with tab_passnet:
 
             pitch = _PnPitch(
                 pitch_type="custom", pitch_length=105, pitch_width=68,
-                pitch_color="#1a472a", line_color="white", line_zorder=2,
+                pitch_color="grass", stripe=True, line_color="white", line_zorder=2,
             )
             fig, ax = pitch.draw(figsize=(8, 5.5))
-            fig.patch.set_facecolor("#1a472a")
 
             max_count = int(edges_f["pass_count"].max()) if not edges_f.empty else 1
             for r in edges_f.itertuples():
@@ -1368,7 +1553,7 @@ with tab_passnet:
                     ha="center", va="center", color="white",
                     fontsize=7, fontweight="bold", zorder=4,
                 )
-            ax.set_title(team_name, color="white", fontsize=12, pad=10)
+            ax.set_title(team_name, fontsize=12, pad=10)
             st.pyplot(fig)
             plt.close(fig)
 
