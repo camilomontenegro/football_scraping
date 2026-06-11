@@ -22,6 +22,14 @@ _engine: Engine | None = None
 
 
 def get_engine() -> Engine:
+    """
+    Return a SQLAlchemy engine, creating it only once.
+
+    Resolution order:
+      1. Return the cached engine if already initialised.
+      2. Re-use the shared engine from loaders.common (avoids duplicate pools).
+      3. Build a new engine from environment variables in the project-root .env.
+    """
     global _engine
     if _engine is not None:
         return _engine
@@ -82,6 +90,7 @@ def get_db_summary() -> dict:
 
 
 def get_seasons_in_db() -> set[tuple[str, str]]:
+    """Return the set of (competition, season) tuples currently stored in the database."""
     eng = get_engine()
     with eng.connect() as conn:
         rows = conn.execute(text(
@@ -102,6 +111,12 @@ _TOTAL_BY_SOURCE = {
 
 
 def get_coverage_by_source(competition: str, season_label: str) -> list[dict]:
+    """
+    Return per-source match coverage for a given competition and season.
+
+    Compares the number of matches already loaded against the expected total
+    for each data source. Sources without a known total return None for 'total'.
+    """
     eng = get_engine()
     with eng.connect() as conn:
         rows = conn.execute(text("""
@@ -118,6 +133,19 @@ def get_coverage_by_source(competition: str, season_label: str) -> list[dict]:
 
 
 def get_recent_matches(limit: int = 20) -> pd.DataFrame:
+    """
+    Return the most recently ingested matches with team names and scores.
+
+    Joins dim_team twice (home and away) to resolve canonical team names.
+    Ordered by match_id DESC as a proxy for ingestion recency.
+
+    Args:
+        limit: Maximum number of rows to return (default 20).
+
+    Returns:
+        DataFrame with columns: match_id, match_date, season, home_team,
+        away_team, home_score, away_score, data_source.
+    """
     return query_df("""
         SELECT m.match_id, m.match_date, m.season,
                ht.canonical_name AS home_team,
@@ -132,6 +160,20 @@ def get_recent_matches(limit: int = 20) -> pd.DataFrame:
 
 
 def get_player_review_stats() -> dict:
+    """
+    Return aggregate statistics for the player_review deduplication queue.
+
+    The player_review table holds player name matches that could not be
+    resolved automatically and require manual review. A single query computes
+    all four metrics to minimise round-trips.
+
+    Returns:
+        Dict with keys:
+            total      – total entries in the queue.
+            unresolved – entries still pending review.
+            resolved   – entries already actioned.
+            avg_score  – mean similarity score of unresolved entries (0.0 if none).
+    """
     eng = get_engine()
     with eng.connect() as conn:
         row = conn.execute(text("""
@@ -152,8 +194,25 @@ def get_player_review_stats() -> dict:
 
 
 def get_player_review_queue(limit: int = 50) -> pd.DataFrame:
+    """
+    Return the top unresolved entries from the player_review queue.
+
+    Rows are ordered by similarity_score DESC so that the easiest matches
+    (highest confidence) appear first, making manual triage more efficient.
+    NULLs are placed last.
+
+    Args:
+        limit: Maximum number of rows to return (default 50).
+
+    Returns:
+        DataFrame with columns: id, source_name, source_system, competition,
+        season, source_team_name, source_team_id, suggested_player_name,
+        similarity_score.
+    """
     return query_df("""
         SELECT pr.id, pr.source_name, pr.source_system,
+               pr.competition, pr.season,
+               pr.source_team_name, pr.source_team_id,
                p.canonical_name AS suggested_player_name,
                pr.similarity_score
         FROM player_review pr

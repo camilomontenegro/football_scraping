@@ -66,10 +66,10 @@ def _ensure_loaders() -> None:
     if _loaders_loaded:
         return
     from loaders.common import engine
-    from loaders.team_loader import load_teams
-    from loaders.player_loader import load_players
-    from loaders.match_loader import load_matches
-    from loaders.fact_loader import load_shots, load_events, load_injuries
+    from loaders.team_loader_generico import load_teams
+    from loaders.player_loader_generico import load_players
+    from loaders.match_loader_generico import load_matches
+    from loaders.fact_loader_generico import load_shots, load_events, load_injuries
     _engine = engine
     _load_teams = load_teams
     _load_players = load_players
@@ -324,6 +324,11 @@ def _reference_has_source(competition: str, season: str, source: str) -> bool:
     return False
 
 
+def _sofascore_season_available(competition: str, season: str) -> bool:
+    from scrapers.sofascore_seasons import sofascore_season_available
+    return sofascore_season_available(competition, season)
+
+
 # ─────────────────────────────────────────────────────────────────────
 # Competiciones registradas en la base de datos (dim_competition)
 # ─────────────────────────────────────────────────────────────────────
@@ -368,28 +373,25 @@ _CATEGORY_LABELS = {
 
 
 def grouped_db_competitions() -> List[tuple]:
-    """Lista de competiciones agrupadas por categoría, filtradas por `dim_competition`.
+    """Lista de competiciones agrupadas por categoría para el menú del wizard.
 
-    Sólo aparecen las competiciones que cumplen TODAS las condiciones:
-        • Existen en `dim_competition.canonical_name` (la BD manda).
-        • Tienen configuración en `COMPETITIONS` (necesaria para scrapear).
-
-    El orden dentro de cada grupo respeta el de `WORKING_COMPETITIONS`
-    cuando es posible y deja al final las competiciones de BD que no estén
-    listadas allí (ordenadas alfabéticamente).
+    Sólo aparecen las de `WORKING_COMPETITION_NAMES` que además estén en
+    `dim_competition` (hay que haber ejecutado `load_competitions` antes).
+    El catálogo amplio `COMPETITIONS` (27 entradas) no se muestra en el menú.
     """
-    valid_db = db_competition_names()
-    available = [name for name in valid_db if name in COMPETITIONS]
+    from wizard.competitions import WORKING_COMPETITION_NAMES
 
-    # Orden preferido según WORKING_COMPETITIONS
+    valid_db = db_competition_names()
+    available = [
+        name for name in WORKING_COMPETITION_NAMES
+        if name in valid_db and name in COMPETITIONS
+    ]
+
     ordered: list[str] = []
     for names in WORKING_COMPETITIONS.values():
         for name in names:
             if name in available and name not in ordered:
                 ordered.append(name)
-    for name in sorted(available):
-        if name not in ordered:
-            ordered.append(name)
 
     grouped: Dict[str, list[str]] = {}
     for name in ordered:
@@ -418,7 +420,10 @@ def available_sources_for_competition(
         available.append("transfermarkt")
 
     sf = sources_map.get("sofascore", {})
-    if sf.get("tournament_id") is not None and _reference_has_source(competition, season, "sofascore"):
+    if sf.get("tournament_id") is not None and (
+        _reference_has_source(competition, season, "sofascore")
+        or _sofascore_season_available(competition, season)
+    ):
         available.append("sofascore")
 
     us = sources_map.get("understat", {})
@@ -434,8 +439,13 @@ def available_sources_for_competition(
         available.append("statsbomb")
 
     ws = sources_map.get("whoscored", {})
-    if ws.get("tournament_id") is not None and _reference_has_source(competition, season, "whoscored"):
-        available.append("whoscored")
+    if (
+        ws.get("tournament_id") is not None
+        and _reference_has_source(competition, season, "whoscored")
+    ):
+        from scrapers.whoscored_scraper import whoscored_season_available
+        if whoscored_season_available(competition, season):
+            available.append("whoscored")
 
     return available
 
@@ -492,8 +502,7 @@ def run_scraping(
     season_start = get_season_start_year(season)
 
     if from_date:
-        logger.info("[INFO] from_date=%s — informativo (los scrapers genéricos "
-                    "descargan toda la temporada).", from_date)
+        logger.info("[INFO] Mantenimiento desde fecha %s (partidos >= fecha).", from_date)
     if full_refresh:
         logger.info("[INFO] full_refresh=True — se ignorará la caché local.")
 
@@ -613,6 +622,8 @@ def run_scraping(
             scrape_whoscored(
                 season=season,
                 competition=competition or "La Liga",
+                from_date=from_date,
+                full_refresh=full_refresh,
             )
         except Exception as e:
             logger.warning("WhoScored falló: %s", e)
@@ -621,24 +632,80 @@ def run_scraping(
 # ─────────────────────────────────────────────────────────────────────
 # FASE DE CARGA
 # ─────────────────────────────────────────────────────────────────────
-def run_load(cancel_event: Optional[threading.Event] = None) -> None:
+def run_load(
+    competition: Optional[str] = None,
+    season: Optional[str] = None,
+    cancel_event: Optional[threading.Event] = None,
+) -> None:
+    """Carga la BD para la (competition, season) indicada.
+
+    Si `competition` es None, itera por WORKING_COMPETITION_NAMES. `season`
+    se normaliza al formato YYYY_YYYY que usan los paths data/clean.
+    """
     _ensure_loaders()
-    logger.info("── CARGANDO DIMENSIONES ────────────────────────────")
-    for name, fn in [("teams", _load_teams), ("players", _load_players), ("matches", _load_matches)]:
+
+    from sqlalchemy import text
+    from utils.data_paths import clean_dir, normalize_season
+
+    season_label = normalize_season(season) or season or "2025_2026"
+    targets = [competition] if competition else sorted(WORKING_COMPETITION_NAMES)
+
+    def _comp_id(conn, name: str) -> Optional[int]:
+        conf = get_competition(name)
+        if not conf:
+            return None
+        code = conf.get("sources", {}).get("transfermarkt", {}).get("league_code")
+        if not code:
+            return None
+        return conn.execute(
+            text("SELECT canonical_id FROM dim_competition WHERE id_transfermarkt = :c"),
+            {"c": code},
+        ).scalar()
+
+    for comp_name in targets:
         _raise_if_cancelled(cancel_event)
-        try:
-            with _engine.begin() as conn:
-                fn(conn)
-        except Exception as e:
-            logger.error("Error loading %s: %s", name, e, exc_info=True)
-    logger.info("── CARGANDO HECHOS (FACTS) ─────────────────────────")
-    for name, fn in [("shots", _load_shots), ("events", _load_events), ("injuries", _load_injuries)]:
-        _raise_if_cancelled(cancel_event)
-        try:
-            with _engine.begin() as conn:
-                fn(conn)
-        except Exception as e:
-            logger.error("Error loading %s: %s", name, e, exc_info=True)
+        paths = {
+            "ss": clean_dir(comp_name, season_label, "sofascore"),
+            "tm": clean_dir(comp_name, season_label, "transfermarkt"),
+            "ws": clean_dir(comp_name, season_label, "whoscored"),
+            "us": clean_dir(comp_name, season_label, "understat"),
+            "sb": clean_dir(comp_name, season_label, "statsbomb"),
+        }
+
+        with _engine.begin() as conn:
+            comp_id = _comp_id(conn, comp_name)
+        if not comp_id:
+            logger.warning(
+                "%s: sin competition_id en dim_competition (ejecuta load_competitions). Skip.",
+                comp_name,
+            )
+            continue
+
+        logger.info("── CARGANDO DIMENSIONES — %s ────────────", comp_name)
+        for name, fn, kwargs in [
+            ("teams",   _load_teams,   dict(ss_path=paths["ss"], tm_path=paths["tm"], ws_path=paths["ws"], us_path=paths["us"], sb_path=paths["sb"])),
+            ("players", _load_players, dict(tm_path=paths["tm"], ss_path=paths["ss"], ws_path=paths["ws"], us_path=paths["us"], sb_path=paths["sb"])),
+            ("matches", _load_matches, dict(ss_path=paths["ss"], competition_id=comp_id, ws_path=paths["ws"], us_path=paths["us"], sb_path=paths["sb"])),
+        ]:
+            _raise_if_cancelled(cancel_event)
+            try:
+                with _engine.begin() as conn:
+                    fn(conn, **kwargs)
+            except Exception as e:
+                logger.error("Error loading %s en %s: %s", name, comp_name, e, exc_info=True)
+
+        logger.info("── CARGANDO HECHOS — %s ─────────────────", comp_name)
+        for name, fn, kwargs in [
+            ("shots",    _load_shots,    dict(ss_path=paths["ss"], competition_id=comp_id, us_path=paths["us"])),
+            ("events",   _load_events,   dict(ss_path=paths["ss"], sb_path=paths["sb"], ws_path=paths["ws"])),
+            ("injuries", _load_injuries, dict(tm_path=paths["tm"])),
+        ]:
+            _raise_if_cancelled(cancel_event)
+            try:
+                with _engine.begin() as conn:
+                    fn(conn, **kwargs)
+            except Exception as e:
+                logger.error("Error loading %s en %s: %s", name, comp_name, e, exc_info=True)
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -646,6 +713,7 @@ def run_load(cancel_event: Optional[threading.Event] = None) -> None:
 # ─────────────────────────────────────────────────────────────────────
 def run_pipeline(
     scrape: bool = False,
+    load: bool = False,
     competition: Optional[str] = None,
     source: str = "all",
     season: str = "2024/2025",
@@ -662,6 +730,9 @@ def run_pipeline(
         logger.info("   Competición: %s", competition)
     logger.info("   Temporada: %s", season)
     logger.info("   Fuente:    %s", source)
+    logger.info("   Modo:      %s", " + ".join(
+        f for f, v in [("scrape", scrape), ("load", load), ("update", update)] if v
+    ) or "solo load")
 
     try:
         _raise_if_cancelled(cancel_event)
@@ -677,11 +748,21 @@ def run_pipeline(
             return
 
         if update:
-            logger.info("── MODO INCREMENTAL: buscando última fecha en BD ────")
+            logger.info("── MODO MANTENIMIENTO: última fecha en BD ───────────")
             last_date = get_last_match_date(competition or "La Liga", season)
             if last_date:
-                from_date = last_date
-                logger.info("   Último partido en BD: %s → scraping desde esa fecha", from_date)
+                # Mantener fecha manual del wizard si es más reciente que la BD.
+                if from_date and str(from_date) > str(last_date):
+                    logger.info(
+                        "   Fecha manual %s (más reciente que BD %s) → se usa la manual",
+                        from_date, last_date,
+                    )
+                else:
+                    from_date = last_date
+                    logger.info(
+                        "   Último partido en BD: %s → scrapers desde esa fecha",
+                        from_date,
+                    )
                 current_season = get_current_season()
                 if current_season != season:
                     logger.info(
@@ -710,7 +791,7 @@ def run_pipeline(
                     season=season,
                     match_ids=match_ids,
                     from_date=from_date,
-                    full_refresh=scrape,
+                    full_refresh=scrape and not update,
                     cancel_event=cancel_event,
                 )
             except PipelineCancelled:
@@ -719,15 +800,22 @@ def run_pipeline(
                 logger.error("Error fatal en fase de scraping: %s", e, exc_info=True)
                 raise SystemExit(1)
 
-        _raise_if_cancelled(cancel_event)
-        logger.info("── FASE 2/3: CARGA EN DB ────────────────────────────")
-        try:
-            run_load(cancel_event=cancel_event)
-        except PipelineCancelled:
-            raise
-        except Exception as e:
-            logger.error("Error fatal en fase de carga: %s", e, exc_info=True)
-            raise SystemExit(1)
+        if load:
+            _raise_if_cancelled(cancel_event)
+            logger.info("── FASE 2/3: CARGA EN DB ────────────────────────────")
+            try:
+                run_load(competition=competition, season=season, cancel_event=cancel_event)
+            except PipelineCancelled:
+                raise
+            except Exception as e:
+                logger.error("Error fatal en fase de carga: %s", e, exc_info=True)
+                raise SystemExit(1)
+        elif scrape:
+            logger.info("")
+            logger.info("   Los datos se han descargado a data/raw/ y data/clean/.")
+            logger.info("   Para cargarlos en la BD ejecuta:")
+            logger.info("     python wizard/pipeline_runner.py --load")
+            logger.info("")
 
         logger.info("=================================================================")
         logger.info("   PIPELINE COMPLETADO EXITOSAMENTE")
@@ -749,7 +837,10 @@ def run_pipeline(
 # ─────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Football Data Pipeline (unified)")
-    parser.add_argument("--scrape", action="store_true")
+    parser.add_argument("--scrape", action="store_true",
+                        help="Descargar datos (scraping). No carga en BD automáticamente.")
+    parser.add_argument("--load", action="store_true",
+                        help="Cargar CSVs existentes a BD.")
     parser.add_argument("--update", action="store_true")
     parser.add_argument("--competition", "-c", type=str, default=None)
     parser.add_argument("--source", "-s", default="all",
@@ -769,8 +860,14 @@ if __name__ == "__main__":
     if args.list:
         list_available_competitions()
     else:
+        # Si no se pide ni --scrape ni --load ni --update ni --check,
+        # mostrar ayuda para evitar ejecuciones vacías.
+        if not any([args.scrape, args.load, args.update, args.check]):
+            parser.print_help()
+            raise SystemExit(0)
         run_pipeline(
             scrape=args.scrape,
+            load=args.load,
             competition=args.competition,
             source=args.source,
             season=args.season,

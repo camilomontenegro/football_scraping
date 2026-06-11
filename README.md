@@ -1,5 +1,36 @@
 # Football Scraping Wizard
 
+## 🐳 Inicio rápido con Docker
+
+Requisitos: **Docker Desktop** instalado y corriendo.
+
+```powershell
+# 1. Clonar el repositorio
+git clone <url-del-repo>
+cd football_stadium
+
+# 2. Configurar variables de entorno
+copy .env.example .env
+notepad .env
+# Rellena DB_PASSWORD con tu contraseña de PostgreSQL
+
+# 3. Restaurar la base de datos
+docker compose up db
+# Espera a ver: "database system is ready to accept connections"
+# Abre otra terminal:
+docker cp db/migrations/football_db_backup.dump football_postgres_db:/tmp/football_db_backup.dump
+docker exec football_postgres_db pg_restore -U postgres -d football_db --clean /tmp/football_db_backup.dump
+
+# 4. Levantar todo el proyecto
+docker compose up
+```
+
+Accede al dashboard en: **http://localhost:8501**
+
+> **Nota:** Las credenciales de Cloudinary solo son necesarias si se quieren volver a ejecutar los scrapers de fotos de jugadores.
+
+---
+
 Pipeline ETL de fútbol que combina varios scrapers (WhoScored, SofaScore, Understat, Transfermarkt, StatsBomb) en una única base de datos PostgreSQL, con un wizard interactivo y soporte multi‑competición (LaLiga, Bundesliga, Premier League, Champions, Mundial, etc.).
 
 ---

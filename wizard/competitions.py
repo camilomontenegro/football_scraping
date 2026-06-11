@@ -17,9 +17,28 @@ Uso:
 """
 from typing import Dict, Any, Optional
 
+__all__ = [
+    "COMPETITIONS",
+    "WORKING_COMPETITIONS",
+    "WORKING_COMPETITION_NAMES",
+    "TRANSFERMARKT_COMPETITION_SLUGS",
+    "get_competition",
+    "get_competition_by_country",
+    "get_source_ids",
+    "get_source_config",
+    "get_competition_slug_transfermarkt",
+    "get_season_start_year",
+    "get_available_seasons",
+    "list_competitions",
+    "get_all_sources",
+    # Legacy aliases kept for backwards compat with old scripts.competitions consumers.
+    "LALIGA",
+    "LALIGA_IDS",
+]
+
 TRANSFERMARKT_COMPETITION_SLUGS: Dict[str, str] = {
     "La Liga": "laliga",
-    "Segunda DivisiÃ³n": "laliga2",
+    "Segunda División": "laliga2",
     "Premier League": "premier-league",
     "Championship": "championship",
     "Bundesliga": "bundesliga",
@@ -49,16 +68,6 @@ WORKING_COMPETITIONS: Dict[str, list[str]] = {
     "Torneos continentales": [
         "Champions League",
         "Europa League",
-        "Europa Conference League",
-        "European Championship",
-        "Copa America",
-    ],
-    "Torneos intercontinentales": [
-        "FIFA World Cup",
-        # "FIFA Club World Cup": retirado del wizard hasta que tengamos
-        # datos de esta competicion en el resto de fuentes (Sofascore,
-        # WhoScored, Understat, StatsBomb). Si se vuelve a habilitar,
-        # anadirlo aqui de nuevo.
     ],
 }
 
@@ -95,7 +104,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "La Liga",
             },
             "statsbomb": {
-                "competition_id": 11,
+                "competition_id": None,
                 "name": "La Liga",
             },
             "whoscored": {
@@ -158,7 +167,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Premier League",
             },
             "statsbomb": {
-                "competition_id": 2,
+                "competition_id": None,
                 "name": "Premier League",
             },
             "whoscored": {
@@ -221,7 +230,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Bundesliga",
             },
             "statsbomb": {
-                "competition_id": 3,
+                "competition_id": None,
                 "name": "Bundesliga",
             },
             "whoscored": {
@@ -255,14 +264,14 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Serie A",
             },
             "statsbomb": {
-                "competition_id": 4,
+                "competition_id": None,
                 "name": "Serie A",
             },
             "whoscored": {
-                "region_id": 106,
-                "tournament_id": 13,
+                "region_id": 108,
+                "tournament_id": 5,
                 "name": "Serie A",
-                "slug": "italia-serie-a",
+                "slug": "italy-serie-a",
             },
         },
     },
@@ -289,14 +298,14 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Ligue 1",
             },
             "statsbomb": {
-                "competition_id": 7,
+                "competition_id": None,
                 "name": "Ligue 1",
             },
             "whoscored": {
                 "region_id": 74,
-                "tournament_id": 11,
+                "tournament_id": 22,
                 "name": "Ligue 1",
-                "slug": "francia-ligue-1",
+                "slug": "france-ligue-1",
             },
         },
     },
@@ -319,7 +328,7 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Primeira Liga",
             },
             "understat": {
-                "league": "Primeira_Liga",
+                "league": None,
                 "name": "Primeira Liga",
             },
             "statsbomb": {
@@ -327,9 +336,10 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Primeira Liga",
             },
             "whoscored": {
-                "region_id": 178,
-                "tournament_id": 187,
+                "region_id": 177,
+                "tournament_id": 21,
                 "name": "Primeira Liga",
+                "slug": "portugal-liga",
             },
         },
     },
@@ -352,17 +362,18 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Eredivisie",
             },
             "understat": {
-                "league": "Eredivisie",
+                "league": None,
                 "name": "Eredivisie",
             },
             "statsbomb": {
-                "competition_id": 8,
+                "competition_id": None,
                 "name": "Eredivisie",
             },
             "whoscored": {
                 "region_id": 155,
-                "tournament_id": 10,
+                "tournament_id": 13,
                 "name": "Eredivisie",
+                "slug": "netherlands-eredivisie",
             },
         },
     },
@@ -389,13 +400,14 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Champions League",
             },
             "statsbomb": {
-                "competition_id": 16,
+                "competition_id": None,
                 "name": "Champions League",
             },
             "whoscored": {
                 "region_id": 250,
                 "tournament_id": 12,
                 "name": "Champions League",
+                "slug": "europa-champions-league",
             },
         },
     },
@@ -418,13 +430,14 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Europa League",
             },
             "statsbomb": {
-                "competition_id": 17,
+                "competition_id": None,
                 "name": "Europa League",
             },
             "whoscored": {
                 "region_id": 250,
                 "tournament_id": 30,
                 "name": "Europa League",
+                "slug": "europa-europa-league",
             },
         },
     },
@@ -453,9 +466,10 @@ COMPETITIONS: Dict[str, Dict[str, Any]] = {
                 "name": "Europa Conference League",
             },
             "whoscored": {
-                "region_id": 2,
-                "tournament_id": 1504,
+                "region_id": 250,
+                "tournament_id": 715,
                 "name": "Europa Conference League",
+                "slug": "europe-conference-league",
             },
         },
     },
@@ -848,3 +862,16 @@ def list_competitions() -> list[Dict[str, Any]]:
 def get_all_sources() -> list[str]:
     """Lista todas las fuentes de datos disponibles."""
     return ["transfermarkt", "sofascore", "understat", "statsbomb", "whoscored"]
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# COMPATIBILIDAD CON CÓDIGO LEGACY (scripts.competitions)
+# ═══════════════════════════════════════════════════════════════════════
+
+LALIGA = COMPETITIONS["La Liga"]
+LALIGA_IDS = {
+    "transfermarkt": LALIGA["sources"]["transfermarkt"]["league_code"],
+    "sofascore": LALIGA["sources"]["sofascore"]["tournament_id"],
+    "understat": LALIGA["sources"]["understat"]["league"],
+    "statsbomb": LALIGA["sources"]["statsbomb"]["competition_id"],
+}

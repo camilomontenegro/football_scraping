@@ -216,15 +216,64 @@ def _upsert_stadium_scd2(conn, row: dict) -> str:
     """), {"tid": tm_id, "s": season}).fetchone()
 
     if conflict:
-        log.warning(
-            "SCD2 conflict tm_id=%s season=%s: ya existe fila %s con "
-            "rango [%s, %s] y datos distintos. No se inserta para preservar "
-            "la historia. Si los datos nuevos son correctos, ejecuta "
-            "scripts/compact_dim_stadium.py --force o repara manualmente.",
-            tm_id, season, conflict.stadium_id,
+        ex_id = conflict.stadium_id
+        params = {
+            "canonical_team_id":     _resolve_canonical_team_id(conn, tm_id),
+            "stadium_name":          _to_py(row.get("stadium_name")),
+            "capacity":              _to_py(row.get("capacity")),
+            "seats_total":           _to_py(row.get("seats_total")),
+            "seats_covered":         _to_py(row.get("seats_covered")),
+            "seats_vip":             _to_py(row.get("seats_vip")),
+            "vip_boxes":             _to_py(row.get("vip_boxes")),
+            "seats_standing":        _to_py(row.get("seats_standing")),
+            "inaugurated_year":      _to_py(row.get("inaugurated_year")),
+            "built_year":            _to_py(row.get("built_year")),
+            "refurbished_year":      _to_py(row.get("refurbished_year")),
+            "owner":                 _to_py(row.get("owner")),
+            "operator":              _to_py(row.get("operator")),
+            "address":               _to_py(row.get("address")),
+            "city":                  _to_py(row.get("city")),
+            "country":               _to_py(row.get("country")),
+            "construction_cost":     _to_py(row.get("construction_cost")),
+            "surface":               _to_py(row.get("surface")),
+            "architect":             _to_py(row.get("architect")),
+            "tm_url":                _to_py(row.get("tm_url")),
+            "data_hash":             h,
+            "id":                    ex_id,
+        }
+        conn.execute(text("""
+            UPDATE dim_stadium
+            SET canonical_team_id = COALESCE(:canonical_team_id, canonical_team_id),
+                stadium_name = :stadium_name,
+                capacity = :capacity,
+                seats_total = :seats_total,
+                seats_covered = :seats_covered,
+                seats_vip = :seats_vip,
+                vip_boxes = :vip_boxes,
+                seats_standing = :seats_standing,
+                inaugurated_year = :inaugurated_year,
+                built_year = :built_year,
+                refurbished_year = :refurbished_year,
+                owner = :owner,
+                operator = :operator,
+                address = :address,
+                city = :city,
+                country = :country,
+                construction_cost = :construction_cost,
+                surface = :surface,
+                architect = :architect,
+                tm_url = :tm_url,
+                data_hash = :data_hash,
+                updated_at = NOW()
+            WHERE stadium_id = :id
+        """), params)
+        log.info(
+            "SCD2 refresh tm_id=%s season=%s: fila %s actualizada con datos TM "
+            "(rango [%s, %s] sin cambiar).",
+            tm_id, season, ex_id,
             conflict.valid_from_season, conflict.valid_to_season,
         )
-        return "conflict"
+        return "refreshed"
 
     # 3) Insertar nueva fila SCD2 con rango [season, season]
     canonical_team_id = _resolve_canonical_team_id(conn, tm_id)
@@ -295,7 +344,7 @@ def load_stadiums(
         return 0
 
     log.info("[START] Cargando dim_stadium (SCD2) desde %d CSV(s)…", len(files))
-    counts = {"inserted": 0, "extended": 0, "noop": 0, "conflict": 0, "skipped": 0}
+    counts = {"inserted": 0, "extended": 0, "noop": 0, "refreshed": 0, "skipped": 0}
 
     for f in files:
         df = safe_read_csv(f)
@@ -326,12 +375,12 @@ def load_stadiums(
         log.info("  + %s — %d filas procesadas", rel_path, len(df))
 
     log.info(
-        "[OK] dim_stadium SCD2 — insertadas=%d, extendidas=%d, noop=%d, "
-        "conflict=%d, skipped=%d",
-        counts["inserted"], counts["extended"], counts["noop"],
-        counts["conflict"], counts["skipped"],
+        "[OK] dim_stadium SCD2 — insertadas=%d, extendidas=%d, refrescadas=%d, "
+        "noop=%d, skipped=%d",
+        counts["inserted"], counts["extended"], counts.get("refreshed", 0),
+        counts["noop"], counts["skipped"],
     )
-    return counts["inserted"] + counts["extended"]
+    return counts["inserted"] + counts["extended"] + counts.get("refreshed", 0)
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────

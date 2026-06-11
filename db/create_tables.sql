@@ -27,7 +27,6 @@ CREATE TABLE dim_team (
     country VARCHAR(80),
     id_sofascore INTEGER,
     id_understat INTEGER,
-    id_statsbomb VARCHAR(50),
     id_whoscored INTEGER,
     id_transfermarkt INTEGER,
     created_at TIMESTAMP DEFAULT NOW()
@@ -40,10 +39,6 @@ WHERE
 CREATE UNIQUE INDEX ux_team_understat ON dim_team (id_understat)
 WHERE
     id_understat IS NOT NULL;
-
-CREATE UNIQUE INDEX ux_team_statsbomb ON dim_team (id_statsbomb)
-WHERE
-    id_statsbomb IS NOT NULL;
 
 CREATE UNIQUE INDEX ux_team_whoscored ON dim_team (id_whoscored)
 WHERE
@@ -63,8 +58,8 @@ CREATE TABLE dim_player (
     id_sofascore INTEGER,
     id_understat INTEGER,
     id_transfermarkt INTEGER,
-    id_statsbomb VARCHAR(50),
     id_whoscored INTEGER,
+    photo_url TEXT,
     created_at TIMESTAMP DEFAULT NOW()
 );
 
@@ -75,10 +70,6 @@ WHERE
 CREATE UNIQUE INDEX ux_player_understat ON dim_player (id_understat)
 WHERE
     id_understat IS NOT NULL;
-
-CREATE UNIQUE INDEX ux_player_statsbomb ON dim_player (id_statsbomb)
-WHERE
-    id_statsbomb IS NOT NULL;
 
 CREATE UNIQUE INDEX ux_player_whoscored ON dim_player (id_whoscored)
 WHERE
@@ -101,7 +92,9 @@ CREATE TABLE player_review (
     created_at TIMESTAMP DEFAULT NOW(),
     reviewed_at TIMESTAMP,
     source_team_id VARCHAR(50),
-    source_team_name VARCHAR(150)
+    source_team_name VARCHAR(150),
+    competition VARCHAR(100),
+    season VARCHAR(20)
 );
 
 CREATE INDEX IF NOT EXISTS idx_player_review_source ON player_review (source_system, source_id);
@@ -125,7 +118,6 @@ CREATE TABLE dim_competition(
     id_understat VARCHAR(50),
     -- Transfermarkt usa códigos alfanuméricos como ES1, GB1, CL.
     id_transfermarkt VARCHAR(50),
-    id_statsbomb VARCHAR(50),
     id_whoscored INTEGER,
     created_at TIMESTAMP DEFAULT NOW()
 );
@@ -159,7 +151,6 @@ CREATE TABLE dim_match (
     data_source VARCHAR(50),
     id_sofascore INTEGER,
     id_understat INTEGER,
-    id_statsbomb VARCHAR(50),
     id_whoscored INTEGER,
     -- Enrichment columns (populated post-load)
     attendance INTEGER,
@@ -177,10 +168,6 @@ WHERE
 CREATE UNIQUE INDEX ux_match_understat ON dim_match (id_understat)
 WHERE
     id_understat IS NOT NULL;
-
-CREATE UNIQUE INDEX ux_match_statsbomb ON dim_match (id_statsbomb)
-WHERE
-    id_statsbomb IS NOT NULL;
 
 CREATE UNIQUE INDEX ux_match_whoscored ON dim_match (id_whoscored)
 WHERE
@@ -274,7 +261,11 @@ CREATE TABLE fact_injuries (
     date_from DATE,
     date_until DATE,
     days_absent INTEGER,
-    matches_missed SMALLINT
+    matches_missed SMALLINT,
+    -- Club donde estaba el jugador durante la lesión (Transfermarkt)
+    club_name VARCHAR(200),
+    club_id_tm INTEGER,
+    club_slug VARCHAR(150)
 );
 
 CREATE UNIQUE INDEX ux_injuries_unique ON fact_injuries (
@@ -314,7 +305,14 @@ CREATE TABLE dim_stadium (
     capacity              INTEGER,
     capacity_intl         INTEGER,
     seats_total           INTEGER,
+    seats_covered         INTEGER,
+    seats_vip             INTEGER,
+    vip_boxes             SMALLINT,
+    seats_standing        INTEGER,
+    inaugurated_year      SMALLINT,
     built_year            SMALLINT,
+    refurbished_year      SMALLINT,
+    construction_cost     VARCHAR(120),
     owner                 VARCHAR(200),
     operator              VARCHAR(200),
     address               VARCHAR(300),
@@ -333,7 +331,12 @@ CREATE TABLE dim_stadium (
     wikidata_qid          VARCHAR(20),
     latitude              DECIMAL(9,6),
     longitude             DECIMAL(9,6),
+    altitude_m            INTEGER,
+    timezone              VARCHAR(64),
+    roof_type             VARCHAR(20),
+    wikipedia_url         VARCHAR(500),
     image_url             TEXT,
+    is_current            BOOLEAN DEFAULT TRUE,
 
     -- SHA1 hex de los campos comparables, para detectar cambios rápido
     data_hash             CHAR(40),

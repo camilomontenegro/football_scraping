@@ -268,7 +268,7 @@ def choose_operation() -> str:
         "¿Qué quieres hacer?",
         [
             "Descargar temporada completa",
-            "Actualizar datos con juegos nuevos",
+            "Actualizar desde última fecha en BD",
             "Descargar estadios por temporada",
         ],
         default="Descargar temporada completa",
@@ -347,6 +347,11 @@ def _reference_has_source(competition: str, season: str, source: str) -> bool:
     return False
 
 
+def _sofascore_season_available(competition: str, season: str) -> bool:
+    from scrapers.sofascore_seasons import sofascore_season_available
+    return sofascore_season_available(competition, season)
+
+
 def _available_sources_for(comp_conf: Dict[str, Any], competition: str, season: str) -> List[str]:
     """Devuelve la lista de fuentes con datos para esta competición."""
     sources_map = comp_conf.get("sources", {})
@@ -357,7 +362,10 @@ def _available_sources_for(comp_conf: Dict[str, Any], competition: str, season: 
         available.append("transfermarkt")
 
     sf = sources_map.get("sofascore", {})
-    if sf.get("tournament_id") is not None and _reference_has_source(competition, season, "sofascore"):
+    if sf.get("tournament_id") is not None and (
+        _reference_has_source(competition, season, "sofascore")
+        or _sofascore_season_available(competition, season)
+    ):
         available.append("sofascore")
 
     # Understat — sólo para ligas nacionales.  No tiene datos fiables
@@ -371,8 +379,13 @@ def _available_sources_for(comp_conf: Dict[str, Any], competition: str, season: 
         available.append("statsbomb")
 
     ws = sources_map.get("whoscored", {})
-    if ws.get("tournament_id") is not None and _reference_has_source(competition, season, "whoscored"):
-        available.append("whoscored")
+    if (
+        ws.get("tournament_id") is not None
+        and _reference_has_source(competition, season, "whoscored")
+    ):
+        from scrapers.whoscored_scraper import whoscored_season_available
+        if whoscored_season_available(competition, season):
+            available.append("whoscored")
 
     return available
 
@@ -471,7 +484,7 @@ def _print_summary(state: Dict[str, Any]) -> None:
     elif state["full_scrape"]:
         op = "Descarga completa"
     else:
-        op = "Actualización incremental"
+        op = "Mantenimiento (desde última fecha en BD)"
 
     print("\n" + "=" * 60)
     print("  RESUMEN DE LA OPERACION")
@@ -850,6 +863,7 @@ def interactive_flow() -> None:
     match_filter = state.get("match_filter", {})
     kwargs = {
         "scrape": state["full_scrape"],
+        "load": False,
         "competition": state["competition"],
         "source": state["source"],
         "season": state["season"],
@@ -919,6 +933,7 @@ def main() -> None:
 
     kwargs = {
         "scrape": args.scrape or not args.update,
+        "load": False,
         "competition": competition,
         "source": args.source,
         "season": season,
