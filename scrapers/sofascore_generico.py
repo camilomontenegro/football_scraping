@@ -224,6 +224,12 @@ def get_match_lineups(driver: webdriver.Chrome, match_id: int) -> dict:
     return get_json(driver, f"https://api.sofascore.com/api/v1/event/{match_id}/lineups")
 
 
+def get_match_detail(driver: webdriver.Chrome, match_id: int) -> dict:
+    """Devuelve el JSON del detalle de un partido (incluye attendance, venue, referee)."""
+    data = get_json(driver, f"https://api.sofascore.com/api/v1/event/{match_id}")
+    return data.get("event", data)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # 4. ORCHESTRATOR
 # ══════════════════════════════════════════════════════════════════════════════
@@ -289,6 +295,17 @@ def scrape_sofascore(
             match_dir = base_path / f"match_{match_id}" / f"batch_id={batch_id}"
             match_dir.mkdir(parents=True, exist_ok=True)
 
+            # Detalle del partido (attendance, venue, referee)
+            try:
+                detail = get_match_detail(driver, match_id)
+                _save_json(detail, match_dir / "detail.json")
+                # Enriquecer el match con datos del detalle
+                for key in ("attendance", "venue", "referee"):
+                    if detail.get(key) is not None:
+                        m[key] = detail[key]
+            except Exception as e:
+                log.warning("Detail failed match %d: %s", match_id, e)
+
             # Tiros
             try:
                 shots_raw = get_match_shots(driver, match_id)
@@ -338,6 +355,11 @@ def transform_matches(matches: list[dict]) -> pd.DataFrame:
     """Adapta la lista cruda de partidos a las columnas de dim_match."""
     rows = []
     for m in matches:
+        attendance = m.get("attendance")
+        if attendance is None:
+            venue = m.get("venue") or {}
+            attendance = venue.get("attendance")
+
         rows.append({
             "id_sofascore":    m.get("id"),
             "match_date":      _ss_timestamp_to_date(m.get("startTimestamp")),
@@ -349,6 +371,7 @@ def transform_matches(matches: list[dict]) -> pd.DataFrame:
             "away_team_name":  m.get("awayTeam", {}).get("name"),
             "home_score":      m.get("homeScore", {}).get("current"),
             "away_score":      m.get("awayScore", {}).get("current"),
+            "attendance":      attendance,
             "data_source":     "sofascore",
         })
     return pd.DataFrame(rows)

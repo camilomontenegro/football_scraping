@@ -97,6 +97,18 @@ QUALIFIER_FLAGS = {
     "Collected": "q_collected",
     "BlockedCross": "q_blocked_cross",
     "PlayerCaughtOffside": "q_offside",
+    "OtherBodyPart": "q_other_body_part",
+    "OwnGoal": "q_own_goal",
+    "OneOnOne": "q_one_on_one",
+    "SetPiece": "q_set_piece",
+    "Penalty": "q_penalty",
+    "IntentionalGoalAssist": "q_intent_goal_assist",
+    "Tackle": "q_tackle",
+    "Interception": "q_interception",
+    "ErrorLeadsToGoal": "q_error_leads_to_goal",
+    "ErrorLeadsToShot": "q_error_leads_to_shot",
+    "SecondYellow": "q_second_yellow",
+    "RedCard": "q_red_card",
 }
 
 # Qualifier values to extract as numeric/string columns
@@ -129,6 +141,7 @@ SHOT_ZONE_FLAGS = {
     "MissHigh": "q_miss_high",
     "SmallBoxRight": "q_small_box_right",
     "SmallBoxLeft": "q_small_box_left",
+    "SmallBoxCentre": "q_small_box_centre",
     "BoxCentre": "q_box_centre",
     "BoxLeft": "q_box_left",
     "BoxRight": "q_box_right",

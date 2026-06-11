@@ -2,16 +2,25 @@
 .venv/
 venv/
 
-# Datos descargados (son muy pesados y no van al repo)
+# Datos descargados (respaldar en Desktop; no van al repo)
 data/raw/
 data/clean/
+data/exports/
+data/dumps/
 data/.cache/
+data/.import_staging/
+data/logs/
 data/*.db
-data/logs/*.log
-data/logs/wizard_latest_log.txt
+data/*.rar
+data/reference/
 
-#Dump de la base de datos
-db\dump-db_football_completa-202605190935.sql
+# Bundles / CSVs de compañeros (viven en football_scraping_backup)
+db/migrations/photo_urls.csv
+
+# Dumps de base de datos (demasiado grandes para GitHub; guardar en local/Desktop)
+data/exports/*.dump
+db/dump-*.sql
+db/*.dump
 
 # Variables de entorno (contraseñas, credenciales DB)
 .env

@@ -41,6 +41,7 @@ CACHE_PATH = PROJECT_ROOT / "data" / ".cache" / "wikidata_stadiums.json"
 STADIUM_OVERRIDES_PATH = PROJECT_ROOT / "data" / "stadium_overrides.json"
 CACHE_TTL_DAYS = 90
 CACHE_SCHEMA_VERSION = "v3"
+CHECKPOINT_EVERY = 5
 WIKIDATA_API = "https://www.wikidata.org/w/api.php"
 USER_AGENT = "football-scraping-wizard/1.0 (local data enrichment; contact: local)"
 
@@ -117,6 +118,23 @@ def _load_cache() -> dict[str, Any]:
 def _save_cache(cache: dict[str, Any]) -> None:
     CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
     CACHE_PATH.write_text(json.dumps(cache, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _checkpoint(
+    cache: dict[str, Any],
+    processed: int,
+    *,
+    conn=None,
+    dry_run: bool = False,
+    force: bool = False,
+) -> None:
+    """Persist cache (and optional DB txn) every CHECKPOINT_EVERY stadium lookups."""
+    if not force and processed % CHECKPOINT_EVERY != 0:
+        return
+    _save_cache(cache)
+    if not dry_run and conn is not None and hasattr(conn, "commit"):
+        conn.commit()
+    log.info("Checkpoint: %d stadiums processed — cache saved", processed)
 
 
 def _cache_get(cache: dict[str, Any], key: str) -> Optional[dict]:
@@ -1263,10 +1281,15 @@ def enrich_stadiums_missing_coords(
             text(sql), {"limit": limit} if limit else {},
         ).mappings().fetchall()
 
-    updates = _enrich_coords_rows(
-        rows, cache, dry_run, use_wikidata=use_wikidata, write_engine=connectable,
-    )
-    _save_cache(cache)
+    try:
+        updates = _enrich_coords_rows(
+            rows, cache, dry_run, use_wikidata=use_wikidata, write_engine=connectable,
+        )
+    except KeyboardInterrupt:
+        log.warning("Interrupted — saving cache (%d entries)", len(cache))
+        raise
+    finally:
+        _save_cache(cache)
     return updates
 
 
@@ -1311,10 +1334,12 @@ def _enrich_coords_rows(
             )
         except Exception as exc:
             log.warning("Skipping stadium_id=%s: %s", row["stadium_id"], exc)
+            _checkpoint(cache, idx, dry_run=dry_run)
             continue
 
         if not data.get("latitude") or not data.get("longitude"):
             log.warning("  no coordinates found")
+            _checkpoint(cache, idx, dry_run=dry_run)
             continue
 
         coords_found += 1
@@ -1327,6 +1352,7 @@ def _enrich_coords_rows(
             if data.get(c) not in (None, "")
         ]
         if not update_cols:
+            _checkpoint(cache, idx, dry_run=dry_run)
             continue
 
         updates += 1
@@ -1335,11 +1361,16 @@ def _enrich_coords_rows(
                 "  dry-run lat=%.4f lon=%.4f qid=%s fields=%s",
                 data["latitude"], data["longitude"], data.get("wikidata_qid"), update_cols,
             )
+            _checkpoint(cache, idx, dry_run=dry_run)
             continue
 
         team_id = row.get("canonical_team_id")
         with write_engine.begin() as conn:
             rows_updated += _propagate_coords_to_team(conn, team_id, data, update_cols)
+        _checkpoint(cache, idx, dry_run=dry_run)
+
+    if total and total % CHECKPOINT_EVERY != 0:
+        _checkpoint(cache, total, dry_run=dry_run, force=True)
 
     log.info(
         "Coordinate enrichment complete: %d/%d teams with coords (%d dim_stadium rows updated).",
@@ -1387,19 +1418,18 @@ def enrich_all_stadiums(conn_or_engine=engine, dry_run: bool = False,
     cache = _load_cache()
     updates = 0
     connectable = conn_or_engine
-    context = (
-        connectable.begin()
-        if hasattr(connectable, "begin") and not hasattr(connectable, "execute")
-        else None
-    )
 
-    if context is not None:
-        with context as conn:
-            updates = _enrich_with_connection(conn, sql, cache, dry_run, limit)
-    else:
-        updates = _enrich_with_connection(connectable, sql, cache, dry_run, limit)
-
-    _save_cache(cache)
+    try:
+        if hasattr(connectable, "connect") and not hasattr(connectable, "execute"):
+            with connectable.connect() as conn:
+                updates = _enrich_with_connection(conn, sql, cache, dry_run, limit)
+        else:
+            updates = _enrich_with_connection(connectable, sql, cache, dry_run, limit)
+    except KeyboardInterrupt:
+        log.warning("Interrupted — saving cache (%d entries)", len(cache))
+        raise
+    finally:
+        _save_cache(cache)
     return updates
 
 
@@ -1426,8 +1456,10 @@ def _enrich_with_connection(conn, sql: str, cache: dict[str, Any],
                 "Skipping stadium_id=%s after enrichment error: %s",
                 row["stadium_id"], exc,
             )
+            _checkpoint(cache, idx, conn=conn, dry_run=dry_run)
             continue
         if not data:
+            _checkpoint(cache, idx, conn=conn, dry_run=dry_run)
             continue
         update_cols = [
             c for c in (
@@ -1438,10 +1470,12 @@ def _enrich_with_connection(conn, sql: str, cache: dict[str, Any],
             if data.get(c) not in (None, "")
         ]
         if not update_cols:
+            _checkpoint(cache, idx, conn=conn, dry_run=dry_run)
             continue
         updates += 1
         if dry_run:
             log.info("dry-run stadium_id=%s fields=%s", row["stadium_id"], update_cols)
+            _checkpoint(cache, idx, conn=conn, dry_run=dry_run)
             continue
         conn.execute(text(f"""
             UPDATE dim_stadium
@@ -1449,6 +1483,10 @@ def _enrich_with_connection(conn, sql: str, cache: dict[str, Any],
                 updated_at = NOW()
             WHERE stadium_id = :stadium_id
         """), {**data, "stadium_id": row["stadium_id"]})
+        _checkpoint(cache, idx, conn=conn, dry_run=dry_run)
+
+    if total and total % CHECKPOINT_EVERY != 0:
+        _checkpoint(cache, total, conn=conn, dry_run=dry_run, force=True)
     return updates
 
 

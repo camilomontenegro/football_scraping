@@ -179,12 +179,14 @@ def render() -> None:
     op_download = t("download_full_season")
     op_update = t("update_new_games")
     op_stadiums = t("download_stadiums")
+    op_load = t("load_to_db")
     operation = st.radio(
         t("what_to_do"),
-        [op_download, op_update, op_stadiums],
+        [op_download, op_update, op_load, op_stadiums],
         key="wiz_operation",
     )
     stadiums_only = operation == op_stadiums
+    load_only = operation == op_load
     full_scrape = operation == op_download
 
     # En modo estadios: SOLO se elige la temporada. La descarga itera todas
@@ -251,6 +253,73 @@ def render() -> None:
                 st.error(f"Stadium pipeline failed: {exc}")
 
         # Log persistente
+        log_buf = st.session_state.get("wiz_log") or []
+        if log_buf:
+            st.markdown(f"**{t('pipeline_log')}**")
+            st.code("\n".join(log_buf), language="text")
+            if _LOG_PATH.exists():
+                st.caption(f"Full log file: `{_LOG_PATH}`")
+        return
+
+    # ── Modo: Cargar datos en DB ─────────────────────────────────
+    if load_only:
+        comp_options = _competition_options()
+        labels = [label for label, _ in comp_options]
+        label_to_name = {label: name for label, name in comp_options}
+
+        all_label = "Todas las competiciones"
+        chosen_label = st.selectbox(
+            t("competition"),
+            [all_label] + labels,
+            key="wiz_load_competition_label",
+        )
+        load_competition = None if chosen_label == all_label else label_to_name[chosen_label]
+
+        season_opts = _season_options()
+        default_season = get_current_season()
+        default_idx = (
+            season_opts.index(default_season)
+            if default_season in season_opts else len(season_opts) - 1
+        )
+        load_season = st.selectbox(
+            t("season"), season_opts, index=default_idx, key="wiz_load_season",
+        )
+
+        comp_display = load_competition or "Todas (WORKING_COMPETITIONS)"
+        st.info(
+            "Modo **carga**: se leerán los CSVs de `data/clean/` y se cargarán "
+            "en la base de datos (dimensiones + hechos). No se ejecuta scraping."
+        )
+        st.markdown(f"**{t('operation_summary')}**")
+        st.markdown(
+            f"- **Acción:** Cargar datos en DB (clean → dim_* / fact_*)\n"
+            f"- **Competición:** {comp_display}\n"
+            f"- **Temporada:** {load_season}"
+        )
+
+        running = st.session_state.get("wizard_running", False)
+        run_clicked = st.button(
+            "Ejecutar carga en DB",
+            type="primary",
+            disabled=running,
+            key="wiz_run_load",
+        )
+        if run_clicked:
+            kwargs = {
+                "scrape": False,
+                "load": True,
+                "competition": load_competition,
+                "source": "all",
+                "season": load_season,
+                "update": False,
+            }
+            with st.spinner("Cargando datos en la base de datos..."):
+                exc = _execute_pipeline(kwargs)
+            if exc is None:
+                st.success(t("pipeline_completed"))
+            else:
+                st.error(f"{t('pipeline_failed')}: {exc}")
+
         log_buf = st.session_state.get("wiz_log") or []
         if log_buf:
             st.markdown(f"**{t('pipeline_log')}**")

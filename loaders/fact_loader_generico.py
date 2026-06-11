@@ -17,13 +17,15 @@ Schema destino:
     fact_shots:    shot_id, match_id, player_id, team_id, minute, x, y, xg,
                    result, shot_type, situation, data_source
     fact_events:   event_id, match_id, player_id, team_id, event_type,
-                   minute, second, x, y, end_x, end_y, outcome, data_source
+                   minute, second, x, y, end_x, end_y, outcome, data_source,
+                   qualifiers (JSONB, WhoScored), whoscored_event_id
     fact_injuries: injury_id, player_id, season, injury_type,
                    date_from, date_until, days_absent, matches_missed
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Optional
@@ -452,8 +454,153 @@ def load_shots(conn, ss_path: Path, competition_id: int, us_path: Optional[Path]
 
 # ── FACT_EVENTS ───────────────────────────────────────────────────────────────
 
+def _qualifiers_json(val) -> Optional[str]:
+    """Normaliza qualifiers del CSV WhoScored a JSON string para JSONB."""
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return None
+    if isinstance(val, dict):
+        return json.dumps(val, ensure_ascii=False)
+    if isinstance(val, str):
+        s = val.strip()
+        if not s:
+            return None
+        try:
+            return json.dumps(json.loads(s), ensure_ascii=False)
+        except json.JSONDecodeError:
+            return None
+    return None
+
+
+def _build_qualifiers_from_columns(row: dict) -> Optional[str]:
+    """Reconstruye JSONB qualifiers desde columnas individuales q_* del CSV enriched.
+
+    El enriched_events extractor genera columnas individuales (q_right_foot,
+    q_goal_mouth_y, etc.) en vez de un blob JSON. Esta función las reagrupa
+    en un dict JSON para almacenar en la columna JSONB de fact_events.
+    """
+    quals = {}
+
+    # Columnas de valor (float/string)
+    _val_cols = {
+        "q_zone": "Zone", "q_length": "Length", "q_angle": "Angle",
+        "q_pass_end_x": "PassEndX", "q_pass_end_y": "PassEndY",
+        "q_goal_mouth_y": "GoalMouthY", "q_goal_mouth_z": "GoalMouthZ",
+        "q_blocked_x": "BlockedX", "q_blocked_y": "BlockedY",
+        "q_jersey_number": "JerseyNumber", "q_player_pos": "PlayerPosition",
+        "q_related_event_id": "RelatedEventId",
+        "q_opposite_related_event": "OppositeRelatedEvent",
+    }
+    for csv_col, qname in _val_cols.items():
+        v = row.get(csv_col)
+        if v is not None and str(v).strip() not in ("", "nan"):
+            try:
+                quals[qname] = float(v)
+            except (ValueError, TypeError):
+                quals[qname] = str(v)
+
+    # Columnas booleanas (1/0)
+    _flag_cols = {
+        "q_right_foot": "RightFoot", "q_left_foot": "LeftFoot",
+        "q_head": "Head", "q_head_pass": "HeadPass",
+        "q_cross": "Cross", "q_chipped": "Chipped", "q_longball": "Longball",
+        "q_offensive": "Offensive", "q_defensive": "Defensive",
+        "q_freekick": "FreekickTaken", "q_indirect_freekick": "IndirectFreekickTaken",
+        "q_direct_freekick": "DirectFreekick", "q_corner": "CornerTaken",
+        "q_throw_in": "ThrowIn", "q_goal_kick": "GoalKick", "q_foul": "Foul",
+        "q_assisted": "Assisted", "q_intent_assist": "IntentionalAssist",
+        "q_key_pass": "KeyPass", "q_shot_assist": "ShotAssist",
+        "q_big_chance": "BigChance", "q_big_chance_created": "BigChanceCreated",
+        "q_fast_break": "FastBreak", "q_regular_play": "RegularPlay",
+        "q_individual_play": "IndividualPlay", "q_first_touch": "FirstTouch",
+        "q_layoff": "LayOff", "q_throughball": "Throughball", "q_volley": "Volley",
+        "q_standing_save": "StandingSave", "q_diving_save": "DivingSave",
+        "q_blocked": "Blocked", "q_outfielder_block": "OutfielderBlock",
+        "q_from_corner": "FromCorner", "q_leading_to_goal": "LeadingToGoal",
+        "q_yellow": "Yellow", "q_aerial_foul": "AerialFoul",
+        "q_keeper_save_inbox": "KeeperSaveInTheBox",
+        "q_keeper_save_obox": "KeeperSaveObox",
+        "q_parried_safe": "ParriedSafe", "q_parried_danger": "ParriedDanger",
+        "q_collected": "Collected", "q_blocked_cross": "BlockedCross",
+        "q_offside": "PlayerCaughtOffside",
+        # Shot zone flags
+        "q_shot_low_left": "LowLeft", "q_shot_low_centre": "LowCentre",
+        "q_shot_low_right": "LowRight", "q_shot_high_left": "HighLeft",
+        "q_shot_high_centre": "HighCentre", "q_shot_high_right": "HighRight",
+        "q_miss_left": "MissLeft", "q_miss_right": "MissRight",
+        "q_miss_high": "MissHigh", "q_small_box_right": "SmallBoxRight",
+        "q_small_box_left": "SmallBoxLeft", "q_box_centre": "BoxCentre",
+        "q_box_left": "BoxLeft", "q_box_right": "BoxRight",
+        "q_oob_centre": "OutOfBoxCentre", "q_oob_left": "OutOfBoxLeft",
+        "q_oob_deep_left": "OutOfBoxDeepLeft", "q_deep_box_left": "DeepBoxLeft",
+    }
+    for csv_col, qname in _flag_cols.items():
+        v = row.get(csv_col)
+        if v is not None and _safe_int(v) == 1:
+            quals[qname] = True
+
+    return json.dumps(quals, ensure_ascii=False) if quals else None
+
+
+def _derive_body_part(row: dict) -> Optional[str]:
+    """Deriva body_part de las flags q_right_foot, q_left_foot, q_head."""
+    if _safe_int(row.get("q_right_foot")) == 1:
+        return "RightFoot"
+    if _safe_int(row.get("q_left_foot")) == 1:
+        return "LeftFoot"
+    if _safe_int(row.get("q_head")) == 1:
+        return "Head"
+    # OtherBodyPart no tiene flag propia en el extractor actual
+    return None
+
+
+def _derive_shot_zone(row: dict) -> Optional[str]:
+    """Deriva la zona del campo desde donde se tira."""
+    _zones = [
+        ("q_box_centre", "BoxCentre"), ("q_box_left", "BoxLeft"),
+        ("q_box_right", "BoxRight"), ("q_oob_centre", "OutOfBoxCentre"),
+        ("q_oob_left", "OutOfBoxLeft"), ("q_oob_deep_left", "OutOfBoxDeepLeft"),
+        ("q_deep_box_left", "DeepBoxLeft"),
+        ("q_small_box_right", "SmallBoxRight"), ("q_small_box_left", "SmallBoxLeft"),
+    ]
+    for col, name in _zones:
+        if _safe_int(row.get(col)) == 1:
+            return name
+    return None
+
+
+def _derive_shot_placement(row: dict) -> Optional[str]:
+    """Deriva hacia dónde va el tiro en la portería."""
+    _placements = [
+        ("q_shot_low_left", "LowLeft"), ("q_shot_low_centre", "LowCentre"),
+        ("q_shot_low_right", "LowRight"), ("q_shot_high_left", "HighLeft"),
+        ("q_shot_high_centre", "HighCentre"), ("q_shot_high_right", "HighRight"),
+    ]
+    for col, name in _placements:
+        if _safe_int(row.get(col)) == 1:
+            return name
+    return None
+
+
+def _derive_situation_detail(row: dict) -> Optional[str]:
+    """Deriva la situación de juego del tiro/gol."""
+    _situations = [
+        ("q_regular_play", "RegularPlay"), ("q_from_corner", "FromCorner"),
+        ("q_fast_break", "FastBreak"), ("q_direct_freekick", "DirectFreekick"),
+    ]
+    # Penalty se detecta mejor desde el event_type o situation, pero lo incluimos
+    for col, name in _situations:
+        if _safe_int(row.get(col)) == 1:
+            return name
+    return None
+
+
 def _load_events_source(conn, source: str, file_pattern: str, files_dir: Path) -> int:
-    """Carga eventos de una fuente genérica desde events_clean.json."""
+    """Carga eventos de una fuente genérica desde CSV.
+
+    Para WhoScored enriched_events: extrae columnas individuales q_* y las
+    mapea tanto a columnas dedicadas (body_part, goal_mouth_y, etc.) como
+    al blob JSONB qualifiers.
+    """
     files = list(files_dir.glob(file_pattern.replace(".json", ".csv")))
 
     if not files:
@@ -484,8 +631,10 @@ def _load_events_source(conn, source: str, file_pattern: str, files_dir: Path) -
     tid_col = {
         "sofascore": "team_id_ss",
         "statsbomb": "team_id_sb",
-        "whoscored": "whoscored_team_id",          # WhoScored no tiene team_id en events
+        "whoscored": "whoscored_team_id",
     }.get(source)
+
+    is_ws = source == "whoscored"
 
     count = skipped = 0
     for row in all_rows:
@@ -494,14 +643,10 @@ def _load_events_source(conn, source: str, file_pattern: str, files_dir: Path) -
         tid = _team_id_by_source(conn, source, _safe_int(row.get(tid_col))) if tid_col else None
 
         if not mid or not pid or not tid:
-            # Descartamos el evento si falta cualquier FK.
-            # NUNCA inventar el team_id asumiendo home/away: corromperia los
-            # eventos del visitante. Mejor reportar como skipped y resolverlo
-            # aguas arriba (cargar el equipo en dim_team).
             skipped += 1
             continue
 
-        # Asegura normalización de coordenadas en  formato 1-0 antes de insertar
+        # Asegura normalización de coordenadas en formato 0-1 antes de insertar
         x_norm, y_norm = _normalize_coordinates(
             _safe_float(row.get("x")),
             _safe_float(row.get("y"))
@@ -511,22 +656,143 @@ def _load_events_source(conn, source: str, file_pattern: str, files_dir: Path) -
             _safe_float(row.get("end_y"))
         )
 
+        # ── Qualifiers (solo WhoScored) ──────────────────────────
+        if is_ws:
+            # Dos formatos posibles de CSV:
+            #   a) events.csv antiguo: columna "qualifiers" con JSON string
+            #   b) enriched_events.csv: columnas individuales q_*
+            quals_raw = row.get("qualifiers")
+            quals = _qualifiers_json(quals_raw)
+
+            # Si no hay columna qualifiers, reconstruir desde q_*
+            if quals is None and row.get("q_right_foot") is not None:
+                quals = _build_qualifiers_from_columns(row)
+
+            # Parsear el JSON para extraer campos individuales
+            # (funciona tanto si el JSON viene del CSV como si fue reconstruido)
+            qdict: dict = {}
+            if quals:
+                try:
+                    qdict = json.loads(quals)
+                except (json.JSONDecodeError, TypeError):
+                    qdict = {}
+
+            ws_eid = _safe_int(row.get("event_id")) or _safe_int(row.get("whoscored_event_id"))
+
+            # Body part: primero de q_* columns, luego de JSON
+            body_part = _derive_body_part(row)
+            if body_part is None:
+                if qdict.get("RightFoot"):
+                    body_part = "RightFoot"
+                elif qdict.get("LeftFoot"):
+                    body_part = "LeftFoot"
+                elif qdict.get("Head"):
+                    body_part = "Head"
+                elif qdict.get("OtherBodyPart"):
+                    body_part = "OtherBodyPart"
+
+            # Numeric values: q_* columns fallback a JSON
+            gm_y = _safe_float(row.get("q_goal_mouth_y")) or _safe_float(qdict.get("GoalMouthY"))
+            gm_z = _safe_float(row.get("q_goal_mouth_z")) or _safe_float(qdict.get("GoalMouthZ"))
+            angle = _safe_float(row.get("q_angle")) or _safe_float(qdict.get("Angle"))
+            length = _safe_float(row.get("q_length")) or _safe_float(qdict.get("Length"))
+            pe_x = _safe_float(row.get("q_pass_end_x")) or _safe_float(qdict.get("PassEndX"))
+            pe_y = _safe_float(row.get("q_pass_end_y")) or _safe_float(qdict.get("PassEndY"))
+
+            # Boolean flags: q_* columns fallback a JSON
+            is_assisted = True if (_safe_int(row.get("q_assisted")) == 1 or qdict.get("Assisted")) else None
+            is_indiv = True if (_safe_int(row.get("q_individual_play")) == 1 or qdict.get("IndividualPlay")) else None
+            is_big = True if (_safe_int(row.get("q_big_chance")) == 1 or qdict.get("BigChance")) else None
+            is_kp = True if (_safe_int(row.get("q_key_pass")) == 1 or qdict.get("KeyPass")) else None
+            is_fb = True if (_safe_int(row.get("q_fast_break")) == 1 or qdict.get("FastBreak")) else None
+
+            # Shot zone: q_* columns fallback a JSON
+            shot_zone = _derive_shot_zone(row)
+            if shot_zone is None:
+                for zn in ("BoxCentre", "BoxLeft", "BoxRight", "OutOfBoxCentre",
+                           "OutOfBoxLeft", "SmallBoxCentre", "SmallBoxRight", "SmallBoxLeft"):
+                    if qdict.get(zn):
+                        shot_zone = zn
+                        break
+
+            # Shot placement
+            shot_placement = _derive_shot_placement(row)
+            if shot_placement is None:
+                for sp in ("LowLeft", "LowCentre", "LowRight",
+                           "HighLeft", "HighCentre", "HighRight"):
+                    if qdict.get(sp):
+                        shot_placement = sp
+                        break
+
+            # Situation detail
+            sit_detail = _derive_situation_detail(row)
+            if sit_detail is None:
+                for sd in ("RegularPlay", "FromCorner", "FastBreak",
+                           "DirectFreekick", "SetPiece", "Penalty"):
+                    if qdict.get(sd):
+                        sit_detail = sd
+                        break
+            blk_x = _safe_float(row.get("q_blocked_x"))
+            blk_y = _safe_float(row.get("q_blocked_y"))
+        else:
+            quals = None
+            ws_eid = None
+            body_part = gm_y = gm_z = angle = length = None
+            pe_x = pe_y = None
+            is_assisted = is_indiv = is_big = is_kp = is_fb = None
+            shot_zone = shot_placement = sit_detail = None
+            blk_x = blk_y = None
+
         conn.execute(text("""
             INSERT INTO fact_events
                 (match_id, player_id, team_id, event_type,
                  minute, second, x, y, end_x, end_y,
-                 outcome, data_source)
+                 outcome, data_source, qualifiers, whoscored_event_id,
+                 body_part, goal_mouth_y, goal_mouth_z,
+                 angle, length, pass_end_x, pass_end_y,
+                 is_assisted, is_individual_play, is_big_chance,
+                 is_key_pass, is_fast_break,
+                 shot_zone, shot_placement, situation_detail,
+                 blocked_x, blocked_y)
             VALUES
                 (:mid, :pid, :tid, :etype,
                  :min, :sec, :x, :y, :ex, :ey,
-                 :out, :src)
+                 :out, :src, CAST(:quals AS jsonb), :ws_eid,
+                 :body_part, :gm_y, :gm_z,
+                 :angle, :length, :pe_x, :pe_y,
+                 :is_assisted, :is_indiv, :is_big,
+                 :is_kp, :is_fb,
+                 :shot_zone, :shot_placement, :sit_detail,
+                 :blk_x, :blk_y)
             ON CONFLICT (
                 match_id, player_id, event_type, minute,
                 COALESCE(second, -1),
                 COALESCE(x, -1.0),
                 COALESCE(y, -1.0),
                 data_source)
-            DO NOTHING
+            DO UPDATE SET
+                qualifiers = COALESCE(EXCLUDED.qualifiers, fact_events.qualifiers),
+                whoscored_event_id = COALESCE(
+                    EXCLUDED.whoscored_event_id, fact_events.whoscored_event_id),
+                end_x = COALESCE(EXCLUDED.end_x, fact_events.end_x),
+                end_y = COALESCE(EXCLUDED.end_y, fact_events.end_y),
+                body_part = COALESCE(EXCLUDED.body_part, fact_events.body_part),
+                goal_mouth_y = COALESCE(EXCLUDED.goal_mouth_y, fact_events.goal_mouth_y),
+                goal_mouth_z = COALESCE(EXCLUDED.goal_mouth_z, fact_events.goal_mouth_z),
+                angle = COALESCE(EXCLUDED.angle, fact_events.angle),
+                length = COALESCE(EXCLUDED.length, fact_events.length),
+                pass_end_x = COALESCE(EXCLUDED.pass_end_x, fact_events.pass_end_x),
+                pass_end_y = COALESCE(EXCLUDED.pass_end_y, fact_events.pass_end_y),
+                is_assisted = COALESCE(EXCLUDED.is_assisted, fact_events.is_assisted),
+                is_individual_play = COALESCE(EXCLUDED.is_individual_play, fact_events.is_individual_play),
+                is_big_chance = COALESCE(EXCLUDED.is_big_chance, fact_events.is_big_chance),
+                is_key_pass = COALESCE(EXCLUDED.is_key_pass, fact_events.is_key_pass),
+                is_fast_break = COALESCE(EXCLUDED.is_fast_break, fact_events.is_fast_break),
+                shot_zone = COALESCE(EXCLUDED.shot_zone, fact_events.shot_zone),
+                shot_placement = COALESCE(EXCLUDED.shot_placement, fact_events.shot_placement),
+                situation_detail = COALESCE(EXCLUDED.situation_detail, fact_events.situation_detail),
+                blocked_x = COALESCE(EXCLUDED.blocked_x, fact_events.blocked_x),
+                blocked_y = COALESCE(EXCLUDED.blocked_y, fact_events.blocked_y)
         """), {
             "mid":   mid,
             "pid":   pid,
@@ -538,8 +804,27 @@ def _load_events_source(conn, source: str, file_pattern: str, files_dir: Path) -
             "y":     y_norm,
             "ex":    ex_norm,
             "ey":    ey_norm,
-            "out":   row.get("outcome") or None,
+            "out":   row.get("outcome") or row.get("outcome_type") or None,
             "src":   source,
+            "quals": quals,
+            "ws_eid": ws_eid,
+            "body_part": body_part,
+            "gm_y": gm_y,
+            "gm_z": gm_z,
+            "angle": angle,
+            "length": length,
+            "pe_x": pe_x,
+            "pe_y": pe_y,
+            "is_assisted": is_assisted,
+            "is_indiv": is_indiv,
+            "is_big": is_big,
+            "is_kp": is_kp,
+            "is_fb": is_fb,
+            "shot_zone": shot_zone,
+            "shot_placement": shot_placement,
+            "sit_detail": sit_detail,
+            "blk_x": blk_x,
+            "blk_y": blk_y,
         })
         count += 1
 

@@ -138,6 +138,36 @@ def _clean_numeric(value: Optional[float]) -> Optional[float]:
     return float(value)
 
 
+# Sanity bounds — anything outside these ranges is treated as bad data.
+_TEMP_MIN, _TEMP_MAX = -60.0, 60.0
+_HUMIDITY_MIN, _HUMIDITY_MAX = 0.0, 100.0
+_WIND_MAX = 300.0
+_PRECIP_MAX = 500.0
+
+
+def _validate_weather(weather: dict) -> dict | None:
+    """Return the weather dict with outliers NULLed, or None if temp is bad."""
+    temp = weather.get("temperature_c")
+    if temp is None:
+        return None
+    if not (_TEMP_MIN <= temp <= _TEMP_MAX):
+        return None  # reject the entire record if temp is garbage
+
+    hum = weather.get("humidity_pct")
+    if hum is not None and not (_HUMIDITY_MIN <= hum <= _HUMIDITY_MAX):
+        weather["humidity_pct"] = None
+
+    wind = weather.get("wind_speed_kmh")
+    if wind is not None and not (0 <= wind <= _WIND_MAX):
+        weather["wind_speed_kmh"] = None
+
+    precip = weather.get("precipitation_mm")
+    if precip is not None and not (0 <= precip <= _PRECIP_MAX):
+        weather["precipitation_mm"] = None
+
+    return weather
+
+
 def _approx_weather_code(precip_mm_h: Optional[float], humidity_pct: Optional[float]) -> int:
     p = precip_mm_h or 0.0
     if p >= 3.0:
@@ -447,6 +477,9 @@ def enrich_weather(
 
             for day, match_ids in dates_by_match.items():
                 weather = cache.get(_cache_key(provider, lat, lon, day))
+                if not weather:
+                    continue
+                weather = _validate_weather(dict(weather))
                 if not weather:
                     continue
                 for match_id in match_ids:
