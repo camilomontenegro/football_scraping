@@ -69,14 +69,12 @@ DEFAULT_DIR = PROJECT_ROOT / "data" / "exports"
 STADIUM_EXPORT_COLS = [
     "id_transfermarkt_team", "team_slug",
     "valid_from_season", "valid_to_season",
-    "stadium_name", "capacity", "capacity_intl", "seats_total",
-    "built_year", "owner", "operator",
-    "address", "city", "country", "surface",
-    "architect", "naming_rights", "previous_names_raw",
-    "pitch_length_m", "pitch_width_m", "has_pitch_heating",
+    "stadium_name", "capacity", "seats_total", "vip_boxes",
+    "built_year", "construction_cost", "owner", "operator",
+    "address", "city", "country", "surface", "architect",
     "tm_url",
     "wikidata_qid", "latitude", "longitude",
-    "altitude_m", "timezone", "roof_type",
+    "altitude_m", "timezone",
     "wikipedia_url", "image_url",
     "data_hash", "data_source",
 ]
@@ -130,11 +128,11 @@ def _resolve_match_cols(conn) -> list[str]:
 
 
 _INT_STADIUM_COLS = {
-    "id_transfermarkt_team", "capacity", "capacity_intl", "seats_total",
-    "built_year", "pitch_length_m", "pitch_width_m", "altitude_m",
+    "id_transfermarkt_team", "capacity", "seats_total", "vip_boxes",
+    "built_year", "altitude_m",
 }
 _FLOAT_STADIUM_COLS = {"latitude", "longitude"}
-_BOOL_STADIUM_COLS = {"has_pitch_heating"}
+_BOOL_STADIUM_COLS: set[str] = set()
 
 
 def _safe_int(v) -> int | None:

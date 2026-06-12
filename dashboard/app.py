@@ -103,6 +103,10 @@ def _render_stadium_detail(row: pd.Series) -> None:
             meta.append(f"**Architect:** {row['architect']}")
         if pd.notna(row.get("owner")):
             meta.append(f"**Owner:** {row['owner']}")
+        if pd.notna(row.get("timezone")):
+            meta.append(f"**Timezone:** {row['timezone']}")
+        if pd.notna(row.get("altitude_m")):
+            meta.append(f"**Altitude:** {int(row['altitude_m'])} m")
         if pd.notna(lat) and pd.notna(lon):
             meta.append(f"**Coords:** {float(lat):.4f}, {float(lon):.4f}")
         if meta:
@@ -1095,6 +1099,7 @@ with tab_match_ctx:
                            f"{ws['min_temp']:.0f}° / {ws['max_temp']:.0f}°")
                 wm4.metric(t("rainy_matches"), _fmt(ws["rainy_matches"]))
 
+                # ── Temperature over the season (line chart) ──────
                 df_w = explore.get_weather_by_match(_mc_season, _mc_team, _mc_comp)
                 if not df_w.empty and "match_date" in df_w.columns:
                     st.subheader(t("temp_over_season"))
@@ -1102,7 +1107,6 @@ with tab_match_ctx:
                     df_w["temperature_c"] = pd.to_numeric(
                         df_w["temperature_c"], errors="coerce"
                     )
-                    # Average when multiple matches share a date
                     chart_df = (
                         df_w.groupby("match_date")["temperature_c"]
                         .mean()
@@ -1112,8 +1116,195 @@ with tab_match_ctx:
                     )
                     st.line_chart(chart_df)
 
-                    with st.expander(t("results")):
+                # ── Temperature by stadium / venue ────────────────
+                df_venue = explore.get_weather_by_venue(
+                    _mc_season, _mc_team, _mc_comp,
+                )
+                if not df_venue.empty:
+                    st.subheader(t("temperature") + " — " + t("stadiums"))
+                    _venue_sort = st.radio(
+                        t("sort_order"),
+                        [t("descending"), t("ascending")],
+                        horizontal=True, key="weather_venue_sort",
+                    )
+                    _venue_asc = _venue_sort == t("ascending")
+                    df_venue_sorted = df_venue.sort_values(
+                        "avg_temp", ascending=_venue_asc
+                    ).head(20)
+
+                    fig_wv, ax_wv = plt.subplots(
+                        figsize=(10, max(3, len(df_venue_sorted) * 0.5))
+                    )
+                    fig_wv.patch.set_facecolor("#0e1117")
+                    ax_wv.set_facecolor("#0e1117")
+
+                    _venue_labels = [
+                        (
+                            f"{r.venue} ({r.home_team})"
+                            if pd.notna(r.home_team) and r.home_team
+                            else str(r.venue)
+                        )
+                        for r in df_venue_sorted.itertuples()
+                    ]
+                    _avg_temps = df_venue_sorted["avg_temp"].values.astype(float)
+                    _min_temps = df_venue_sorted["min_temp"].values.astype(float)
+                    _max_temps = df_venue_sorted["max_temp"].values.astype(float)
+
+                    # Error bars: min to max range
+                    _err_low = _avg_temps - _min_temps
+                    _err_high = _max_temps - _avg_temps
+
+                    _bar_colors = [
+                        "#e74c3c" if t > 25 else "#3498db" if t < 10 else "#f39c12"
+                        for t in _avg_temps
+                    ]
+                    ax_wv.barh(
+                        _venue_labels, _avg_temps,
+                        xerr=[_err_low, _err_high],
+                        color=_bar_colors,
+                        error_kw={"ecolor": "#aaa", "capsize": 3, "linewidth": 0.8},
+                    )
+                    ax_wv.set_xlabel("°C (avg, min–max range)", color="white")
+                    ax_wv.tick_params(colors="white")
+                    for spine in ax_wv.spines.values():
+                        spine.set_color("#444")
+                    ax_wv.invert_yaxis()
+                    plt.tight_layout()
+                    st.pyplot(fig_wv)
+                    plt.close(fig_wv)
+
+                    # Venue data table
+                    _wv_display = df_venue.rename(columns={
+                        "venue": "Stadium", "home_team": "Home Team",
+                        "matches": "Matches", "avg_temp": "Avg °C",
+                        "min_temp": "Min °C", "max_temp": "Max °C",
+                        "avg_humidity": "Avg Humidity %", "rainy": "Rainy Matches",
+                    })
+                    st.dataframe(_wv_display, width="stretch")
+
+                    st.caption(
+                        "Venues from match_stadium_id (dim_stadium), not only venue_name. "
+                        "Color: red > 25°C · orange 10–25°C · blue < 10°C. "
+                        "Error bars show min–max range across matches at that venue."
+                    )
+
+                # ── Cross-season temperature for a specific stadium/team ──
+                st.subheader("📊 " + t("temperature") + " — " + t("season_trend"))
+                _wcs1, _wcs2 = st.columns(2)
+                with _wcs1:
+                    _venue_list = explore.get_venues_list(_mc_team)
+                    _venue_sel = st.selectbox(
+                        "Stadium / Venue",
+                        [t("all_teams")] + _venue_list,
+                        key="weather_venue_sel",
+                    )
+                    _venue_pick = None if _venue_sel == t("all_teams") else _venue_sel
+                with _wcs2:
+                    _team_list_w = explore.get_teams_for_season(
+                        _mc_season, _mc_comp
+                    ) if _mc_season else []
+                    _team_sel_w = st.selectbox(
+                        t("team"),
+                        [t("all_teams")] + _team_list_w,
+                        key="weather_team_cross",
+                    )
+                    _team_pick_w = None if _team_sel_w == t("all_teams") else _team_sel_w
+
+                if _venue_pick or _team_pick_w:
+                    df_cross = explore.get_weather_venue_across_seasons(
+                        _venue_pick, _team_pick_w,
+                    )
+                    if df_cross.empty:
+                        st.info(t("no_weather_data"))
+                    else:
+                        # ── Metrics ──
+                        _wcm1, _wcm2, _wcm3 = st.columns(3)
+                        _all_avg = df_cross["avg_temp"].astype(float).mean()
+                        _all_min = df_cross["min_temp"].astype(float).min()
+                        _all_max = df_cross["max_temp"].astype(float).max()
+                        _wcm1.metric(t("avg_temp"), f"{_all_avg:.1f} °C")
+                        _wcm2.metric(t("min_temp"), f"{_all_min:.0f} °C")
+                        _wcm3.metric(t("max_temp"), f"{_all_max:.0f} °C")
+
+                        # ── Bar chart: avg temp per season with error bars ──
+                        fig_wcs, ax_wcs = plt.subplots(figsize=(10, 5))
+                        fig_wcs.patch.set_facecolor("#0e1117")
+                        ax_wcs.set_facecolor("#0e1117")
+
+                        _seasons = df_cross["season"].values
+                        _avgs = df_cross["avg_temp"].values.astype(float)
+                        _mins = df_cross["min_temp"].values.astype(float)
+                        _maxs = df_cross["max_temp"].values.astype(float)
+                        _err_l = _avgs - _mins
+                        _err_h = _maxs - _avgs
+
+                        _cs_colors = [
+                            "#e74c3c" if v > 25 else "#3498db" if v < 10 else "#f39c12"
+                            for v in _avgs
+                        ]
+                        ax_wcs.bar(
+                            _seasons, _avgs,
+                            yerr=[_err_l, _err_h],
+                            color=_cs_colors,
+                            error_kw={"ecolor": "#aaa", "capsize": 4, "linewidth": 0.8},
+                        )
+                        # Value labels on bars
+                        for i, (s, v) in enumerate(zip(_seasons, _avgs)):
+                            ax_wcs.text(
+                                i, v + _err_h[i] + 0.5,
+                                f"{v:.1f}°",
+                                ha="center", va="bottom",
+                                fontsize=9, color="white", fontweight="bold",
+                            )
+                        ax_wcs.set_ylabel("°C", color="white")
+                        ax_wcs.set_xlabel(t("season"), color="white")
+                        ax_wcs.tick_params(colors="white", axis="both")
+                        for spine in ax_wcs.spines.values():
+                            spine.set_color("#444")
+                        plt.xticks(rotation=45, ha="right")
+                        plt.tight_layout()
+                        st.pyplot(fig_wcs)
+                        plt.close(fig_wcs)
+
+                        # ── Match-level scatter over time ──
+                        df_matches_w = explore.get_weather_matches_for_venue(
+                            _venue_pick, _team_pick_w,
+                        )
+                        if not df_matches_w.empty:
+                            df_matches_w["match_date"] = pd.to_datetime(
+                                df_matches_w["match_date"]
+                            )
+                            df_matches_w["temperature_c"] = pd.to_numeric(
+                                df_matches_w["temperature_c"], errors="coerce"
+                            )
+                            _scatter_df = (
+                                df_matches_w.set_index("match_date")[["temperature_c"]]
+                                .rename(columns={"temperature_c": "°C"})
+                                .sort_index()
+                            )
+                            st.line_chart(_scatter_df)
+
+                        # ── Data table ──
+                        _wcs_display = df_cross.rename(columns={
+                            "season": t("season"), "matches": t("matches"),
+                            "avg_temp": "Avg °C", "min_temp": "Min °C",
+                            "max_temp": "Max °C", "avg_humidity": "Avg Humidity %",
+                            "rainy": t("rainy_matches"),
+                        })
+                        st.dataframe(_wcs_display, width="stretch")
+
+                        st.caption(
+                            "Color: red > 25°C · orange 10–25°C · blue < 10°C. "
+                            "Error bars show min–max range per season."
+                        )
+                else:
+                    st.info("Selecciona un estadio o equipo para ver la evolución por temporada.")
+
+                with st.expander(t("results")):
+                    if not df_w.empty:
                         st.dataframe(df_w, width="stretch")
+                    else:
+                        st.info(t("no_weather_data"))
 
     # ── Attendance ───────────────────────────────────────────
     with t_attendance:
@@ -1125,26 +1316,70 @@ with tab_match_ctx:
                 st.info(t("no_attendance_data"))
             else:
                 att_vals = pd.to_numeric(df_att["attendance"], errors="coerce").dropna()
-                am1, am2, am3, am4 = st.columns(4)
+                _has_fill_match = "fill_pct" in df_att.columns and df_att["fill_pct"].notna().any()
+                if _has_fill_match:
+                    am1, am2, am3, am4, am5 = st.columns(5)
+                else:
+                    am1, am2, am3, am4 = st.columns(4)
                 am1.metric(t("matches"), _fmt(len(df_att)))
                 am2.metric(t("avg_attendance"), _fmt(att_vals.mean()))
                 am3.metric(t("max_attendance"), _fmt(att_vals.max()))
-                am4.metric(t("total_attendance"), _fmt(att_vals.sum()))
+                am4.metric("Min", _fmt(att_vals.min()))
+                if _has_fill_match:
+                    avg_fill = df_att["fill_pct"].dropna().mean()
+                    am5.metric("Avg Fill %", f"{avg_fill:.1f}%")
 
-                # Attendance by team chart (home)
+                # ── Attendance trend over the season ─────────────
+                df_trend = explore.get_attendance_trend(
+                    _mc_season, _mc_team, _mc_comp,
+                )
+                if not df_trend.empty and "match_date" in df_trend.columns:
+                    st.subheader(t("attendance") + " — " + t("season_trend"))
+                    df_trend["match_date"] = pd.to_datetime(df_trend["match_date"])
+                    df_trend["attendance"] = pd.to_numeric(
+                        df_trend["attendance"], errors="coerce"
+                    )
+                    trend_chart = (
+                        df_trend.groupby("match_date")["attendance"]
+                        .mean()
+                        .sort_index()
+                        .rename(t("attendance"))
+                        .to_frame()
+                    )
+                    st.line_chart(trend_chart)
+
+                # ── Attendance by team (with capacity utilization) ─
                 if _mc_team is None:
                     df_att_team = explore.get_attendance_by_team(_mc_season, _mc_comp)
                     if not df_att_team.empty:
                         st.subheader(t("attendance_by_team"))
                         top_att = df_att_team.head(20)
+
+                        has_fill = "fill_pct" in top_att.columns and top_att["fill_pct"].notna().any()
+
                         fig_att, ax_att = plt.subplots(
-                            figsize=(10, max(3, len(top_att) * 0.45))
+                            figsize=(10, max(3, len(top_att) * 0.5))
                         )
                         fig_att.patch.set_facecolor("#0e1117")
                         ax_att.set_facecolor("#0e1117")
-                        ax_att.barh(
-                            top_att["team"], top_att["avg_attendance"], color="#1abc9c"
+
+                        bars = ax_att.barh(
+                            top_att["team"],
+                            top_att["avg_attendance"],
+                            color="#1abc9c",
                         )
+                        # Annotate fill % on bars when available
+                        if has_fill:
+                            for bar, fp in zip(bars, top_att["fill_pct"]):
+                                if pd.notna(fp):
+                                    ax_att.text(
+                                        bar.get_width() + 50,
+                                        bar.get_y() + bar.get_height() / 2,
+                                        f"{fp:.0f}%",
+                                        va="center", fontsize=8,
+                                        color="#f39c12", fontweight="bold",
+                                    )
+
                         ax_att.set_xlabel(t("avg_attendance"), color="white")
                         ax_att.tick_params(colors="white")
                         for spine in ax_att.spines.values():
@@ -1154,41 +1389,81 @@ with tab_match_ctx:
                         st.pyplot(fig_att)
                         plt.close(fig_att)
 
+                        if has_fill:
+                            st.caption(
+                                "Orange % = avg fill rate (avg attendance / stadium capacity × 100). "
+                                "Source: dim_stadium capacity."
+                            )
+
+                        # ── Table with full data ───────────────────
+                        _att_display = top_att.rename(columns={
+                            "team": "Team", "home_matches": "Home Matches",
+                            "avg_attendance": "Avg", "max_attendance": "Max",
+                            "min_attendance": "Min", "total_attendance": "Total",
+                            "capacity": "Stadium Capacity", "fill_pct": "Fill %",
+                        })
+                        st.dataframe(_att_display, width="stretch")
+
                 with st.expander(t("results")):
-                    st.dataframe(df_att, width="stretch")
+                    _att_cols_rename = {
+                        "match_date": "Date", "home_team": "Home",
+                        "away_team": "Away", "home_score": "HG",
+                        "away_score": "AG", "attendance": "Attendance",
+                        "stadium": "Stadium", "venue_name": "Raw Venue",
+                        "capacity": "Capacity", "fill_pct": "Fill %",
+                    }
+                    _att_display = df_att.rename(
+                        columns={k: v for k, v in _att_cols_rename.items()
+                                 if k in df_att.columns}
+                    )
+                    st.dataframe(_att_display, width="stretch")
 
     # ── Referees ─────────────────────────────────────────────
     with t_referees:
         if _mc_season is None:
             st.info(t("select_season"))
         else:
-            df_ref = explore.get_referee_stats(_mc_season, _mc_comp)
+            df_ref = explore.get_referee_stats(_mc_season, _mc_comp, _mc_team)
             if df_ref.empty:
                 st.info(t("no_referee_data"))
             else:
+                _ref_avg_cpm = round(
+                    float(df_ref["cards_per_match"].dropna().mean()), 2
+                ) if not df_ref["cards_per_match"].dropna().empty else 0
+
                 rm1, rm2, rm3, rm4 = st.columns(4)
                 rm1.metric(t("referees_section"), len(df_ref))
-                rm2.metric(t("matches"),
-                           _fmt(df_ref["matches_officiated"].sum()))
-                rm3.metric(t("yellow_cards"),
+                rm2.metric(t("yellow_cards"),
                            _fmt(df_ref["yellow_cards"].sum()))
-                rm4.metric(t("red_cards"),
+                rm3.metric(t("red_cards"),
                            _fmt(df_ref["red_cards"].sum()))
+                rm4.metric("Avg Cards/Match", f"{_ref_avg_cpm:.2f}")
 
+                _ref_scope_label = (
+                    f" ({_mc_team})" if _mc_team else ""
+                )
                 display_ref = df_ref.rename(columns={
                     "referee": "Referee",
                     "matches_officiated": "Matches",
-                    "yellow_cards": "Yellows",
-                    "red_cards": "Reds",
-                    "total_cards": "Total Cards",
-                    "cards_per_match": "Cards/Match",
+                    "yellow_cards": f"Yellows{_ref_scope_label}",
+                    "red_cards": f"Reds{_ref_scope_label}",
+                    "total_cards": f"Total Cards{_ref_scope_label}",
+                    "cards_per_match": f"Cards/Match{_ref_scope_label}",
                 })
                 st.dataframe(display_ref, width="stretch")
 
-                # Top 10 referees by cards per match (min 5 matches)
-                strict_ref = df_ref[df_ref["matches_officiated"] >= 5].copy()
+                # Chart: top referees by cards per match (min 3 matches)
+                _min_ref_matches = 3 if _mc_team else 5
+                strict_ref = df_ref[
+                    df_ref["matches_officiated"] >= _min_ref_matches
+                ].copy()
                 if not strict_ref.empty:
-                    st.subheader(t("referees_section") + " — Cards/Match")
+                    _chart_title = (
+                        f"Cards/Match vs {_mc_team}"
+                        if _mc_team
+                        else "Cards/Match (all teams)"
+                    )
+                    st.subheader(_chart_title)
                     top_strict = strict_ref.sort_values(
                         "cards_per_match", ascending=False
                     ).head(15)
@@ -1197,13 +1472,24 @@ with tab_match_ctx:
                     )
                     fig_ref.patch.set_facecolor("#0e1117")
                     ax_ref.set_facecolor("#0e1117")
+                    # Stacked yellow + red bar
+                    _ref_y = top_strict["yellow_cards"].values / top_strict["matches_officiated"].values
+                    _ref_r = top_strict["red_cards"].values / top_strict["matches_officiated"].values
                     ax_ref.barh(
-                        top_strict["referee"],
-                        top_strict["cards_per_match"],
-                        color="#e74c3c",
+                        top_strict["referee"], _ref_y,
+                        color="#f1c40f", label="Yellows/Match",
+                    )
+                    ax_ref.barh(
+                        top_strict["referee"], _ref_r,
+                        left=_ref_y,
+                        color="#e74c3c", label="Reds/Match",
                     )
                     ax_ref.set_xlabel("Cards per match", color="white")
                     ax_ref.tick_params(colors="white")
+                    ax_ref.legend(
+                        facecolor="#1a1a2e", edgecolor="#444",
+                        labelcolor="white", fontsize=9,
+                    )
                     for spine in ax_ref.spines.values():
                         spine.set_color("#444")
                     ax_ref.invert_yaxis()
@@ -1211,9 +1497,15 @@ with tab_match_ctx:
                     st.pyplot(fig_ref)
                     plt.close(fig_ref)
 
+                _ref_caption = (
+                    f"Cards scoped to {_mc_team}. "
+                    if _mc_team else ""
+                )
                 st.caption(
-                    "Source: dim_referee + dim_match (referee_id FK) + fact_events (cards). "
-                    "Min. 5 matches for chart. Cards/Match = (yellows + reds) / matches."
+                    f"Source: dim_referee + dim_match + fact_events. "
+                    f"{_ref_caption}"
+                    f"Min. {_min_ref_matches} matches for chart. "
+                    "Cards/Match = (yellows + reds) / matches."
                 )
 
     # ── Managers ──────────────────────────────────────────────
@@ -1221,27 +1513,36 @@ with tab_match_ctx:
         if _mc_season is None:
             st.info(t("select_season"))
         else:
-            df_mgr = explore.get_manager_stats(_mc_season, _mc_comp)
+            df_mgr = explore.get_manager_stats(_mc_season, _mc_comp, _mc_team)
             if df_mgr.empty:
                 st.info(t("no_manager_data"))
             else:
-                mm1, mm2 = st.columns(2)
+                _mgr_total_matches = int(df_mgr["matches"].sum())
+                _mgr_total_wins = int(df_mgr["wins"].sum())
+                _mgr_avg_ppct = round(
+                    float(df_mgr["points_pct"].mean()), 1
+                ) if not df_mgr["points_pct"].dropna().empty else 0
+
+                mm1, mm2, mm3, mm4 = st.columns(4)
                 mm1.metric(t("managers_section"), len(df_mgr))
-                mm2.metric(t("matches"),
-                           _fmt(df_mgr["matches"].sum() // 2))
+                mm2.metric(t("matches"), _fmt(_mgr_total_matches))
+                mm3.metric(t("wins"), _fmt(_mgr_total_wins))
+                mm4.metric(t("points_pct"), f"{_mgr_avg_ppct:.1f}%")
 
                 display_mgr = df_mgr.rename(columns={
                     "manager": "Manager",
-                    "team": "Team (most recent)",
+                    "team": "Team",
                     "matches": "Matches",
                     "wins": "W", "draws": "D", "losses": "L",
                     "goals_for": "GF", "goals_against": "GA",
-                    "avg_gf": "Avg GF", "points_pct": "Points %",
+                    "avg_gf": "Avg GF", "avg_ga": "Avg GA",
+                    "points_pct": "Points %",
                 })
                 st.dataframe(display_mgr, width="stretch")
 
-                # Top 15 managers by points %
-                top_mgr = df_mgr.sort_values("points_pct", ascending=False).head(15)
+                # Top 15 managers by points %  (min 3 matches for chart)
+                chart_mgr = df_mgr[df_mgr["matches"] >= 3].copy()
+                top_mgr = chart_mgr.sort_values("points_pct", ascending=False).head(15)
                 if not top_mgr.empty:
                     st.subheader(t("manager_record"))
                     fig_mgr, ax_mgr = plt.subplots(
@@ -1253,9 +1554,19 @@ with tab_match_ctx:
                         f"{r.manager} ({r.team})"
                         for r in top_mgr.itertuples()
                     ]
-                    ax_mgr.barh(labels_mgr, top_mgr["points_pct"], color="#e67e22")
-                    ax_mgr.set_xlabel(t("points_pct"), color="white")
+                    # Stacked W/D/L bar
+                    bar_w = top_mgr["wins"].values
+                    bar_d = top_mgr["draws"].values
+                    bar_l = top_mgr["losses"].values
+                    ax_mgr.barh(labels_mgr, bar_w, color="#2ecc71", label="W")
+                    ax_mgr.barh(labels_mgr, bar_d, left=bar_w, color="#f39c12", label="D")
+                    ax_mgr.barh(labels_mgr, bar_l, left=bar_w + bar_d, color="#e74c3c", label="L")
+                    ax_mgr.set_xlabel(t("matches"), color="white")
                     ax_mgr.tick_params(colors="white")
+                    ax_mgr.legend(
+                        facecolor="#1a1a2e", edgecolor="#444",
+                        labelcolor="white", fontsize=9,
+                    )
                     for spine in ax_mgr.spines.values():
                         spine.set_color("#444")
                     ax_mgr.invert_yaxis()
@@ -1264,9 +1575,8 @@ with tab_match_ctx:
                     plt.close(fig_mgr)
 
                 st.caption(
-                    "Source: dim_match (manager_home / manager_away text columns, "
-                    "populated from WhoScored match_enrichment). "
-                    "Min. 3 matches to appear. Points % = points won / max possible × 100."
+                    "Source: dim_match (manager_home / manager_away, WhoScored). "
+                    "Points % = points won / max possible × 100."
                 )
 
 
@@ -1407,9 +1717,9 @@ with tab_passnet:
 with tab_stadiums:
     st.header(t("stadiums"))
     st.caption(
-        "Estadios por equipo — fuente: Transfermarkt. "
-        "Modelo SCD2: una fila por estado del estadio, con rango de "
-        "temporadas. Lanza la descarga desde la pestaña Wizard."
+        "Estadios por equipo — fuentes: Transfermarkt + enriquecimiento Wikidata. "
+        "Modelo SCD2: una fila por estado del estadio. "
+        "Los partidos usan match_stadium_id (sedes neutrales incluidas)."
     )
 
     if not explore._stadium_table_exists():
@@ -1453,6 +1763,12 @@ with tab_stadiums:
                 value="", key="st_search",
             ).strip() or None
 
+        st_include_venues = st.checkbox(
+            "Incluir sedes solo de partido (match-venue)",
+            value=False,
+            key="st_include_match_venues",
+        )
+
         season_q  = None if st_season  == "All seasons"      else st_season
         comp_q    = None if st_comp    == "All competitions" else st_comp
         country_q = None if st_country == "All countries"    else st_country
@@ -1460,6 +1776,7 @@ with tab_stadiums:
         # ── Tarjetas resumen ─────────────────────────────────────
         summary = explore.get_stadium_summary(
             season=season_q, competition=comp_q, country=country_q,
+            include_match_venues=st_include_venues,
         )
         m1, m2, m3, m4 = st.columns(4)
         m1.metric(t("stadiums"),        _fmt(summary["n_stadiums"]))
@@ -1474,6 +1791,7 @@ with tab_stadiums:
         df_st = explore.get_stadiums(
             season=season_q, competition=comp_q,
             country=country_q, search=st_search,
+            include_match_venues=st_include_venues,
         )
         if df_st.empty:
             st.info(
@@ -1486,8 +1804,9 @@ with tab_stadiums:
             display_df = df_st.copy()
             display_df.columns = [
                 "stadium_id", "Team", "Season", "Stadium", "Capacity",
-                "Built", "Owner", "City", "Country", "Surface",
-                "Architect", "Lat", "Lon", "Transfermarkt URL",
+                "Seats", "Built", "Owner", "City", "Country", "Surface",
+                "Architect", "Lat", "Lon", "Altitude m", "Timezone",
+                "Source", "Transfermarkt URL",
                 "image_url", "wikipedia_url", "wikidata_qid",
             ]
             table_df = display_df.drop(
@@ -1542,10 +1861,9 @@ with tab_stadiums:
                 plt.close(fig_st)
 
         st.caption(
-            "Source: dim_stadium (Transfermarkt, SCD2). Granularidad: una "
-            "fila por estado del estadio. Si la fila tiene "
-            "valid_from_season=valid_to_season, sólo cubre esa temporada; "
-            "si cubre un rango, no hubo cambio en esos años."
+            "Source: dim_stadium (Transfermarkt + Wikidata, SCD2). "
+            "Partidos enlazan vía match_stadium_id; el fill % de asistencia "
+            "usa la capacidad del estadio real del partido."
         )
 
 

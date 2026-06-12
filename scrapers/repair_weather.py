@@ -51,7 +51,7 @@ SUMMARY_SQL = text("""
               AND EXISTS (
                   SELECT 1
                   FROM dim_stadium s
-                  WHERE s.canonical_team_id = m.home_team_id
+                  WHERE s.stadium_id = COALESCE(m.match_stadium_id, m.stadium_id)
                     AND s.latitude IS NOT NULL
                     AND s.longitude IS NOT NULL
               )
@@ -62,7 +62,7 @@ SUMMARY_SQL = text("""
               AND NOT EXISTS (
                   SELECT 1
                   FROM dim_stadium s
-                  WHERE s.canonical_team_id = m.home_team_id
+                  WHERE s.stadium_id = COALESCE(m.match_stadium_id, m.stadium_id)
                     AND s.latitude IS NOT NULL
                     AND s.longitude IS NOT NULL
               )
@@ -92,7 +92,7 @@ BY_TEAM_SQL = text("""
                EXISTS (
                    SELECT 1
                    FROM dim_stadium s
-                   WHERE s.canonical_team_id = m.home_team_id
+                   WHERE s.stadium_id = COALESCE(m.match_stadium_id, m.stadium_id)
                      AND s.latitude IS NOT NULL
                      AND s.longitude IS NOT NULL
                )
@@ -124,7 +124,7 @@ BLOCKING_STADIUMS_SQL = text("""
            MIN(m.match_date) AS first_match,
            MAX(m.match_date) AS last_match
     FROM dim_match m
-    JOIN dim_stadium s ON s.canonical_team_id = m.home_team_id
+    JOIN dim_stadium s ON s.stadium_id = COALESCE(m.match_stadium_id, m.stadium_id)
     LEFT JOIN dim_team t ON t.canonical_id = s.canonical_team_id
     WHERE m.match_date IS NOT NULL
       AND m.temperature_c IS NULL
@@ -141,10 +141,9 @@ FILLABLE_RECENT_SQL = text("""
     JOIN LATERAL (
         SELECT 1
         FROM dim_stadium s
-        WHERE s.canonical_team_id = m.home_team_id
+        WHERE s.stadium_id = COALESCE(m.match_stadium_id, m.stadium_id)
           AND s.latitude IS NOT NULL
           AND s.longitude IS NOT NULL
-        ORDER BY s.valid_to_season DESC
         LIMIT 1
     ) s ON TRUE
     WHERE m.match_date IS NOT NULL
@@ -163,10 +162,9 @@ FILLABLE_MATCHES_SQL = text("""
     JOIN LATERAL (
         SELECT latitude, longitude
         FROM dim_stadium
-        WHERE canonical_team_id = m.home_team_id
+        WHERE stadium_id = COALESCE(m.match_stadium_id, m.stadium_id)
           AND latitude IS NOT NULL
           AND longitude IS NOT NULL
-        ORDER BY valid_to_season DESC
         LIMIT 1
     ) s ON TRUE
     WHERE m.match_date IS NOT NULL

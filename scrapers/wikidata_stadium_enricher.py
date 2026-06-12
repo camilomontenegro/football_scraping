@@ -50,6 +50,7 @@ _MIN_REQUEST_INTERVAL = 6.0
 _429_BACKOFF_SECONDS = 65.0
 _MAX_429_RETRIES = 3
 _NOMINATIM_SEARCH = "https://nominatim.openstreetmap.org/search"
+_NOMINATIM_REVERSE = "https://nominatim.openstreetmap.org/reverse"
 _last_geocode_request = 0.0
 _MIN_GEOCODE_INTERVAL = 1.1
 _COUNTRY_TO_ISO2 = {
@@ -392,6 +393,64 @@ def _wikipedia_url_from_entity(entity: dict, lang: str = "es") -> Optional[str]:
     if not title:
         return None
     return f"https://{lang}.wikipedia.org/wiki/{quote(title.replace(' ', '_'))}"
+
+
+def capacity_from_entity(entity: dict | None) -> Optional[int]:
+    """Lee aforo (P1083 maximum capacity) de una entidad Wikidata."""
+    if not entity:
+        return None
+    for claim in (entity.get("claims") or {}).get("P1083") or []:
+        if claim.get("rank") == "deprecated":
+            continue
+        mainsnak = claim.get("mainsnak") or {}
+        if mainsnak.get("snaktype") != "value":
+            continue
+        datavalue = mainsnak.get("datavalue") or {}
+        if datavalue.get("type") != "quantity":
+            continue
+        amount = (datavalue.get("value") or {}).get("amount")
+        if amount is None:
+            continue
+        try:
+            cap = int(float(str(amount).lstrip("+")))
+        except (ValueError, TypeError):
+            continue
+        if 500 <= cap <= 250_000:
+            return cap
+    return None
+
+
+def capacity_from_qid_or_venue(qid: str) -> Optional[int]:
+    """P1083 en la entidad o en su sede P115 (p. ej. QID de club)."""
+    if not qid or not str(qid).startswith("Q"):
+        return None
+    entity = _fetch_entity(qid)
+    if not entity:
+        return None
+    cap = capacity_from_entity(entity)
+    if cap:
+        return cap
+    venue_id = _best_claim(entity.get("claims") or {}, "P115")
+    if not venue_id:
+        return None
+    venue = _fetch_entity(str(venue_id))
+    return capacity_from_entity(venue)
+
+
+def capacity_from_club_name(club_name: str) -> Optional[int]:
+    """Resuelve aforo vía sede P115 del club en Wikidata."""
+    for club in _club_search_names(club_name):
+        qid = (
+            _search_entity_id(club, language="en")
+            or _search_entity_id(club, language="es")
+            or _search_entity_id(club, language="it")
+        )
+        if not qid:
+            continue
+        cap = capacity_from_qid_or_venue(qid)
+        if cap:
+            return cap
+    return None
 
 
 def _fetch_entities(qids: list[str]) -> dict[str, dict]:
@@ -811,6 +870,213 @@ def _nominatim_geocode(
         return None
 
 
+def _city_from_nominatim_address(addr: dict) -> Optional[str]:
+    """Pick the best city-like label from a Nominatim address dict."""
+    for key in ("city", "town", "village", "municipality", "county", "state_district"):
+        val = (addr.get(key) or "").strip()
+        if val:
+            return val
+    return None
+
+
+def _format_nominatim_street_address(addr: dict) -> Optional[str]:
+    """Construye calle + CP/ciudad desde el dict address de Nominatim."""
+    road = (
+        addr.get("road") or addr.get("pedestrian") or addr.get("stadium")
+        or addr.get("footway") or ""
+    ).strip()
+    if not road:
+        return None
+    house = (addr.get("house_number") or "").strip()
+    street = f"{road} {house}".strip() if house else road
+    postcode = (addr.get("postcode") or "").strip()
+    city = _city_from_nominatim_address(addr)
+    tail = " ".join(p for p in (postcode, city) if p)
+    return f"{street}, {tail}" if tail else street
+
+
+def reverse_geocode_address(lat: float, lon: float) -> Optional[str]:
+    """Resolve street address from coordinates via Nominatim reverse geocoding."""
+    _geocode_rate_limit()
+    try:
+        resp = _SESSION.get(
+            _NOMINATIM_REVERSE,
+            params={
+                "lat": lat,
+                "lon": lon,
+                "format": "json",
+                "addressdetails": 1,
+                "zoom": 18,
+            },
+            timeout=(5, 20),
+        )
+        if not resp.ok:
+            return None
+        data = resp.json()
+        addr = data.get("address") or {}
+        formatted = _format_nominatim_street_address(addr)
+        if formatted and len(formatted) >= 8:
+            return formatted
+        display = (data.get("display_name") or "").strip()
+        if display:
+            parts = [p.strip() for p in display.split(",") if p.strip()]
+            if len(parts) >= 3:
+                return ", ".join(parts[:4])
+        return formatted
+    except (Timeout, RequestException, ValueError, TypeError, KeyError) as exc:
+        log.debug("Nominatim reverse address failed for %.4f,%.4f: %s", lat, lon, exc)
+        return None
+
+
+_SURFACE_WD_TO_TM: dict[str, str] = {
+    "grass": "Césped natural",
+    "natural grass": "Césped natural",
+    "association football pitch": "Césped natural",
+    "hybrid grass": "Césped híbrido",
+    "artificial turf": "Césped artificial",
+    "synthetic turf": "Césped artificial",
+    "artificial grass": "Césped artificial",
+}
+
+
+def _year_from_claims(claims: dict) -> Optional[int]:
+    for prop in ("P1619", "P571"):
+        val = _claim_value(claims, prop)
+        if not isinstance(val, str):
+            continue
+        m = re.search(r"(\d{4})", val)
+        if not m:
+            continue
+        year = int(m.group(1))
+        if 1800 <= year <= 2035:
+            return year
+    return None
+
+
+def _surface_from_entity(entity: dict, related: Optional[dict[str, dict]] = None) -> Optional[str]:
+    related = related or {}
+    mat_id = _claim_value((entity.get("claims") or {}), "P186")
+    if not mat_id:
+        return None
+    mat = related.get(str(mat_id)) or _fetch_entity(str(mat_id))
+    if not mat:
+        return None
+    label = (_entity_label(mat) or "").strip().lower()
+    if not label:
+        return None
+    for key, tm_val in _SURFACE_WD_TO_TM.items():
+        if key in label:
+            return tm_val
+    if "grass" in label and "artificial" not in label and "synthetic" not in label:
+        return "Césped natural"
+    return None
+
+
+def enrichment_from_entity(
+    qid: str,
+    entity: dict,
+    related: Optional[dict[str, dict]] = None,
+) -> dict:
+    """Campos enriquecibles desde una entidad Wikidata de estadio."""
+    related = related or {}
+    claims = entity.get("claims") or {}
+    row = _row_from_entity(qid, entity, related)
+
+    owner_id = _claim_value(claims, "P127")
+    if owner_id:
+        owner_ent = related.get(str(owner_id)) or _fetch_entity(str(owner_id))
+        if owner_ent:
+            row["owner"] = _entity_label(owner_ent)
+
+    built = _year_from_claims(claims)
+    if built:
+        row["built_year"] = built
+
+    surface = _surface_from_entity(entity, related)
+    if surface:
+        row["surface"] = surface
+
+    country_id = _best_claim(claims, "P17")
+    if country_id:
+        c_ent = related.get(str(country_id)) or _fetch_entity(str(country_id))
+        if c_ent:
+            row["country"] = _entity_label(c_ent)
+
+    cap = capacity_from_entity(entity)
+    if cap:
+        row["capacity"] = cap
+        if not row.get("seats_total"):
+            row["seats_total"] = cap
+
+    return row
+
+
+def enrichment_from_qid(qid: str) -> dict:
+    if not qid or not str(qid).startswith("Q"):
+        return {}
+    entity = _fetch_entity(str(qid))
+    if not entity:
+        return {}
+    if _entity_is_stadium_like(entity):
+        return enrichment_from_entity(str(qid), entity)
+    venue_id = _best_claim(entity.get("claims") or {}, "P115")
+    if venue_id:
+        venue = _fetch_entity(str(venue_id))
+        if venue:
+            return enrichment_from_entity(str(venue_id), venue)
+    return enrichment_from_entity(str(qid), entity)
+
+
+def city_from_wikidata_qid(qid: str) -> Optional[str]:
+    """Ciudad vía P131 (located in administrative territorial entity)."""
+    if not qid or not str(qid).startswith("Q"):
+        return None
+    entity = _fetch_entity(str(qid))
+    if not entity:
+        return None
+    loc_id = _best_claim(entity.get("claims") or {}, "P131")
+    if not loc_id:
+        return None
+    loc = _fetch_entity(str(loc_id))
+    if not loc:
+        return None
+    label = _entity_label(loc)
+    return label.strip() if label else None
+
+
+def reverse_geocode_city(lat: float, lon: float) -> Optional[str]:
+    """Resolve city name from coordinates via Nominatim reverse geocoding."""
+    addr = _reverse_geocode_address_dict(lat, lon, zoom=10)
+    return _city_from_nominatim_address(addr) if addr else None
+
+
+def reverse_geocode_country(lat: float, lon: float) -> Optional[str]:
+    """País desde Nominatim reverse geocoding."""
+    addr = _reverse_geocode_address_dict(lat, lon, zoom=5)
+    if not addr:
+        return None
+    return (addr.get("country") or "").strip() or None
+
+
+def _reverse_geocode_address_dict(
+    lat: float, lon: float, *, zoom: int = 10,
+) -> Optional[dict]:
+    _geocode_rate_limit()
+    try:
+        resp = _SESSION.get(
+            _NOMINATIM_REVERSE,
+            params={"lat": lat, "lon": lon, "format": "json", "zoom": zoom},
+            timeout=(5, 20),
+        )
+        if not resp.ok:
+            return None
+        data = resp.json()
+        return data.get("address") or {}
+    except (Timeout, RequestException, ValueError, TypeError, KeyError) as exc:
+        log.debug("Nominatim reverse failed for %.4f,%.4f: %s", lat, lon, exc)
+        return None
+
+
 # Manual fallbacks when Nominatim fails (sponsor names, Spanish TM labels, etc.).
 _TEAM_STADIUM_COORDS: dict[str, tuple[float, float]] = {
     "basaksehir": (41.0941, 28.7839),
@@ -906,7 +1172,7 @@ def _load_json_stadium_overrides() -> None:
             k: entry.get(k)
             for k in (
                 "latitude", "longitude", "wikidata_qid",
-                "image_url", "wikipedia_url",
+                "image_url", "wikipedia_url", "address", "city", "country",
             )
             if entry.get(k) not in (None, "")
         }
@@ -941,7 +1207,7 @@ def _enrich_override_from_wikidata(data: dict) -> dict:
     return data
 
 
-def _lookup_stadium_override(team: str, stadium_name: str) -> dict:
+def _lookup_stadium_override(team: str, stadium_name: str, *, enrich: bool = True) -> dict:
     """Manual coords/metadata: JSON file + dicts embebidos en este módulo."""
     _load_json_stadium_overrides()
     blob = _normalize_override_key(f"{team} {stadium_name}")
@@ -952,7 +1218,9 @@ def _lookup_stadium_override(team: str, stadium_name: str) -> dict:
             lat, lon = data.get("latitude"), data.get("longitude")
             if lat is not None and lon is not None and not data.get("timezone"):
                 data["timezone"] = _derive_timezone(float(lat), float(lon))
-            return _enrich_override_from_wikidata(data)
+            if enrich:
+                return _enrich_override_from_wikidata(data)
+            return data
 
     for key, extra in _STADIUM_OVERRIDE_EXTRAS.items():
         if key in blob:
@@ -1257,14 +1525,23 @@ def enrich_stadiums_missing_coords(
 ) -> int:
     """Enrich stadiums missing lat/lon, prioritising weather-blocked venues."""
     sql = MISSING_COORDS_SQL if weather_gaps_only else """
-        SELECT s.stadium_id, s.stadium_name, s.team_slug, s.wikidata_qid,
+        SELECT s.stadium_id,
+               s.canonical_team_id,
+               s.stadium_name,
+               s.address,
+               s.city,
+               s.country,
+               s.team_slug,
+               s.wikidata_qid,
                COALESCE(t.canonical_name, s.team_slug) AS team,
-               0 AS blocked_matches
+               0 AS blocked_matches,
+               NULL::text AS competition_country,
+               NULL::text AS domestic_country
         FROM dim_stadium s
         LEFT JOIN dim_team t ON t.canonical_id = s.canonical_team_id
-        WHERE COALESCE(s.is_current, TRUE) = TRUE
+        WHERE s.data_source = 'transfermarkt'
           AND (s.latitude IS NULL OR s.longitude IS NULL)
-        ORDER BY s.stadium_name NULLS LAST
+        ORDER BY s.stadium_id
     """
     if limit:
         sql += " LIMIT :limit"

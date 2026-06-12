@@ -32,8 +32,7 @@ log = logging.getLogger(__name__)
 
 _DATA_FIELDS = [
     "stadium_name", "capacity",
-    "seats_total", "seats_covered", "seats_vip", "vip_boxes", "seats_standing",
-    "inaugurated_year", "built_year", "refurbished_year",
+    "seats_total", "vip_boxes", "built_year",
     "owner", "operator", "address", "city", "country",
     "construction_cost", "surface", "architect",
 ]

@@ -3,10 +3,11 @@ from sqlalchemy import text
 from loaders.common import engine
 
 COLS = [
-    "stadium_name", "capacity", "seats_total", "built_year", "city", "country",
-    "previous_names_raw", "pitch_length_m", "pitch_width_m", "naming_rights",
-    "architect", "operator", "latitude", "longitude", "wikidata_qid", "image_url",
-    "surface", "owner", "address", "capacity_intl", "has_pitch_heating",
+    "stadium_name", "capacity", "seats_total", "vip_boxes", "built_year",
+    "construction_cost", "city", "country",
+    "architect", "operator", "latitude", "longitude", "timezone", "altitude_m",
+    "wikidata_qid", "wikipedia_url", "image_url",
+    "surface", "owner", "address", "tm_url",
 ]
 
 with engine.connect() as conn:

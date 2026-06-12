@@ -232,6 +232,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "no_attendance_data":    {"es": "No hay datos de asistencia para esta selección.", "en": "No attendance data for this selection."},
     "no_referee_data":       {"es": "No hay datos de árbitros. Ejecuta la migración add_dim_referee.sql y carga datos.", "en": "No referee data. Run add_dim_referee.sql migration and load data."},
     "no_manager_data":       {"es": "No hay datos de managers. Ejecuta add_whoscored_stats.sql y el extractor.", "en": "No manager data. Run add_whoscored_stats.sql and the extractor."},
+    "players_tracked":       {"es": "Jugadores registrados", "en": "Players tracked"},
 
     # ── DB connection error ─────────────────────────────────
     "db_error":              {"es": "No se puede conectar a la base de datos. Revisa tu archivo .env.",
