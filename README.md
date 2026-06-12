@@ -26,6 +26,7 @@ docker compose up db
 docker cp "db/migrations/<nombre_del_dump>" football_postgres_db:/tmp/football_db_backup.dump
 docker exec football_postgres_db pg_restore -U postgres -d football_db --clean /tmp/football_db_backup.dump
 # Nota: es normal ver ~150 warnings "errors ignored on restore" la primera vez — no es un error
+# Espera 2-3 minutos tras el restore antes de continuar (postgres procesa índices en segundo plano)
 
 # 4. Levantar todo el proyecto
 docker compose up
