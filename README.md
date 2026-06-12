@@ -9,19 +9,23 @@ Requisitos: **Docker Desktop** instalado y corriendo.
 git clone -b noelia/docker https://github.com/camilomontenegro/football_scraping.git
 cd football_scraping
 
-
 # 2. Configurar variables de entorno
+# Windows:
 copy .env.example .env
 notepad .env
+# Mac/Linux:
+# cp .env.example .env && nano .env
 # Rellena DB_PASSWORD con tu contraseña de PostgreSQL
 
 # 3. Restaurar la base de datos
 docker compose up db
 # Espera a ver: "database system is ready to accept connections"
 # Abre otra terminal:
-# Sustituye <nombre_del_dump> por el nombre del archivo que te hayan pasado (ej: football_db_full_2026-06-11.dump)
-docker cp db/migrations/<nombre_del_dump> football_postgres_db:/tmp/football_db_backup.dump
+# Coloca el archivo .dump recibido dentro de db/migrations/ (puede estar en una subcarpeta)
+# Sustituye <nombre_del_dump> por la ruta relativa al archivo (ej: football_db_final.dump o subcarpeta/archivo.dump)
+docker cp "db/migrations/<nombre_del_dump>" football_postgres_db:/tmp/football_db_backup.dump
 docker exec football_postgres_db pg_restore -U postgres -d football_db --clean /tmp/football_db_backup.dump
+# Nota: es normal ver ~150 warnings "errors ignored on restore" la primera vez — no es un error
 
 # 4. Levantar todo el proyecto
 docker compose up
