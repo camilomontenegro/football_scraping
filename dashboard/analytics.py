@@ -38,6 +38,49 @@ def _resolve_team_id(team: str | None) -> int | None:
     return int(row[0]) if row else None
 
 
+def _fact_events_has_end_z() -> bool:
+    """True if the optional end_z column exists (db/add_end_z_fact_events.sql)."""
+    df = query_df("""
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'fact_events' AND column_name = 'end_z'
+    """)
+    return not df.empty
+
+
+def get_match_shots(match_id: int, team_id: int) -> pd.DataFrame:
+    """Shot events of one team in one match (WhoScored).
+
+    Returns: player, event_type, minute, x, y, end_x, end_y, end_z —
+    coordinates normalised 0-1. event_type ∈ Goal / MissedShots /
+    SavedShot / ShotOnPost.
+    end_x/end_y (goal-line crossing point) and end_z (height, optional
+    column) are NULL until the pipeline populates them from WhoScored's
+    goalMouthY/goalMouthZ — the UI draws trajectories and the goal-mouth
+    view only for rows that have them.
+    Penalty-shootout attempts (minute > 120) are excluded — they all sit
+    on the penalty spot and would distort the map and the shot counts.
+    """
+    end_z_col = "e.end_z" if _fact_events_has_end_z() else "NULL AS end_z"
+    df = query_df(f"""
+        SELECT p.canonical_name AS player, e.event_type, e.minute,
+               e.x, e.y, e.end_x, e.end_y, {end_z_col}
+        FROM fact_events e
+        JOIN dim_player p ON p.canonical_id = e.player_id
+        WHERE e.match_id = :mid
+          AND e.team_id = :tid
+          AND e.data_source = 'whoscored'
+          AND e.event_type IN ('Goal', 'MissedShots', 'SavedShot', 'ShotOnPost')
+          AND e.minute <= 120
+          AND e.x IS NOT NULL AND e.y IS NOT NULL
+        ORDER BY e.minute, e.second
+    """, {"mid": match_id, "tid": team_id})
+    if df.empty:
+        return df
+    for col in ("x", "y", "end_x", "end_y", "end_z"):
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
+
+
 def get_heatmap_data(
     season_label: str,
     team_id: int | None,

@@ -6,8 +6,9 @@ Requisitos: **Docker Desktop** instalado y corriendo.
 
 ```powershell
 # 1. Clonar el repositorio
-git clone <url-del-repo>
-cd football_stadium
+git clone -b noelia/docker https://github.com/camilomontenegro/football_scraping.git
+cd football_scraping
+
 
 # 2. Configurar variables de entorno
 copy .env.example .env
@@ -18,7 +19,8 @@ notepad .env
 docker compose up db
 # Espera a ver: "database system is ready to accept connections"
 # Abre otra terminal:
-docker cp db/migrations/football_db_backup.dump football_postgres_db:/tmp/football_db_backup.dump
+# Sustituye <nombre_del_dump> por el nombre del archivo que te hayan pasado (ej: football_db_full_2026-06-11.dump)
+docker cp db/migrations/<nombre_del_dump> football_postgres_db:/tmp/football_db_backup.dump
 docker exec football_postgres_db pg_restore -U postgres -d football_db --clean /tmp/football_db_backup.dump
 
 # 4. Levantar todo el proyecto
@@ -41,7 +43,7 @@ Asumiendo Windows + PowerShell, Python 3.12 y PostgreSQL ya instalado y arrancad
 
 ```powershell
 # 1) Posicionarse en la raíz del proyecto
-cd C:\Users\ivanm\Desktop\Dev\Mercanza\football_scraping_wizard
+cd football_scraping
 
 # 2) Crear y activar el entorno virtual
 python -m venv .venv
