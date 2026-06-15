@@ -6,6 +6,7 @@
 -- ══════════════════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS fact_transfers (
     transfer_id   SERIAL PRIMARY KEY,
+    -- relación obligatorio con jugador. Cada registro de valor de transferencia  debe tener un jugador asociado.
     player_id     INTEGER NOT NULL REFERENCES dim_player (canonical_id),
 
     -- Temporada del fichaje (formato DB: 'YYYY/YYYY')
@@ -48,6 +49,7 @@ CREATE INDEX IF NOT EXISTS idx_transfers_to_team   ON fact_transfers (to_team_id
 -- ══════════════════════════════════════════════════════════
 CREATE TABLE IF NOT EXISTS fact_market_value (
     mv_id         SERIAL PRIMARY KEY,
+    -- relación obligatorio con jugador. Cada registro de valor de mercado debe tener un jugador asociado.
     player_id     INTEGER NOT NULL REFERENCES dim_player (canonical_id),
 
     -- Fecha de la valoración
@@ -58,6 +60,7 @@ CREATE TABLE IF NOT EXISTS fact_market_value (
     market_value_raw VARCHAR(100),        -- texto original: "80 mill. €"
 
     -- Club en ese momento
+    -- relacion opcional con dim_team. Como  habra equipos que no estén en dim_team , habra registros de valor de mercado sin equipo asociado
     club_id       INTEGER REFERENCES dim_team (canonical_id),
     club_name     VARCHAR(200),
     id_tm_club    INTEGER,                -- id de TM para trazabilidad
@@ -65,6 +68,7 @@ CREATE TABLE IF NOT EXISTS fact_market_value (
     created_at    TIMESTAMP DEFAULT NOW()
 );
 
+-- Un jugador puede tener múltiples valoraciones a lo largo del tiempo, pero no debería haber duplicados para el mismo jugador en la misma fecha. Por eso usamos un índice único que combina player_id y value_date.
 CREATE UNIQUE INDEX IF NOT EXISTS ux_market_value_unique
     ON fact_market_value (player_id, value_date);
 

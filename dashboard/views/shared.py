@@ -7,6 +7,51 @@ from __future__ import annotations
 
 import pandas as pd
 import streamlit as st
+<<<<<<< HEAD
+# used to create custom legend entries for scatter markers in market value chart
+from matplotlib.lines import Line2D  # noqa: F401 — re-exported for players.py
+ 
+from dashboard import explore
+from dashboard.i18n import t
+ 
+
+def _fmt(n) -> str:
+    return f"{int(n):,}".replace(",", ".")
+def _fmt_eur(euros) -> str:
+    """
+    Formats a euro value as a human-readable string.
+    Used throughout the market value and transfer history tabs.
+ 
+    Examples:
+        _fmt_eur(38000000) → "€38.0M"
+        _fmt_eur(500000)   → "€500K"
+        _fmt_eur(None)     → "—"
+    """
+    if euros is None:
+        return "—"
+    if isinstance(euros, float) and pd.isna(euros):
+        return "—"
+    if abs(euros) >= 1_000_000:
+        return f"€{euros/1_000_000:.1f}M"
+    if abs(euros) >= 1_000:
+        return f"€{euros/1_000:.0f}K"
+    return f"€{euros:,}"
+ 
+ 
+def _fmt_team_history_date_to(row: pd.Series) -> str:
+    """
+    Formats the date_to column for the Career History table.
+ 
+    - If date_to is NULL and the team is 'Retirado', the player retired
+      at that club so we show 'Retired' instead of a date.
+    - If date_to is NULL and the team is not 'Retirado', the player is
+      still at that club so we show 'Present'.
+    - Otherwise, format the date normally as dd/mm/yyyy.
+    """
+    if pd.isna(row["date_to"]):
+        return "Retired" if row["team"] == "Retirado" else "Present"
+    return pd.Timestamp(row["date_to"]).strftime("%d/%m/%Y")
+=======
 
 from dashboard import explore
 from dashboard.i18n import t
@@ -15,6 +60,7 @@ from dashboard.i18n import t
 def _fmt(n) -> str:
     return f"{int(n):,}".replace(",", ".")
 
+>>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
 
 def _render_stadium_detail(row: pd.Series) -> None:
     """Detail panel: photo, metadata and external links for one stadium row."""
