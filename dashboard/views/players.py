@@ -1,26 +1,23 @@
 """
 dashboard/views/players.py
 ==========================
-Players — discipline, goalkeepers, player detail, injuries.
-
+Players — discipline, goalkeepers, player detail, injuries,
+market value and transfer history.
+ 
 Split out of app.py so st.navigation only executes the selected page
 (the old st.tabs layout ran every tab's queries on every rerun).
 """
 from __future__ import annotations
-
-<<<<<<< HEAD
+ 
 from datetime import date as _date_cls
-
-=======
->>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
+ 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as st
-<<<<<<< HEAD
 from dateutil.relativedelta import relativedelta
 from matplotlib.lines import Line2D
-
+ 
 from dashboard import explore, player_detail
 from dashboard.i18n import t
 from dashboard.views.shared import (
@@ -29,47 +26,42 @@ from dashboard.views.shared import (
     _fmt_team_history_date_to,
     _tab_selectors,
 )
-=======
-
-from dashboard import explore, player_detail
-from dashboard.i18n import t
-from dashboard.views.shared import _fmt, _tab_selectors
-
->>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
-
+ 
+ 
 def render() -> None:
     st.header(t("tab_players"))
-
-<<<<<<< HEAD
+ 
     t_discipline, t_gk, t_detail, t_injuries, t_market_value, t_transfer_history = st.tabs(
-        [t("tab_players"), t("tab_goalkeepers"), "Player Detail", t("tab_injuries"),t("tab_market_value"),
-        t("tab_transfer_history")]
-=======
-    t_discipline, t_gk, t_detail, t_injuries = st.tabs(
-        [t("tab_players"), t("tab_goalkeepers"), "Player Detail", t("tab_injuries")]
->>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
+        [
+            t("tab_players"),
+            t("tab_goalkeepers"),
+            "Player Detail",
+            t("tab_injuries"),
+            t("tab_market_value"),
+            t("tab_transfer_history"),
+        ]
     )
-
+ 
     # ── Discipline ──────────────────────────────────────────
     with t_discipline:
         _pl_comp, _pl_season, _pl_team = _tab_selectors("players", all_seasons=True)
-
+ 
         df = explore.get_player_discipline(_pl_season, _pl_team, _pl_comp)
         if df.empty:
             st.info("No player data found for this selection.")
         else:
             m1, m2, m3, m4 = st.columns(4)
             m1.metric(t("players_tracked"), df["player"].nunique())
-            m2.metric(t("total_goals"), _fmt(df['goals'].sum()))
-            m3.metric(t("yellow_cards"), _fmt(df['yellow_cards'].sum()))
-            m4.metric(t("red_cards"), _fmt(df['red_cards'].sum()))
-
+            m2.metric(t("total_goals"), _fmt(df["goals"].sum()))
+            m3.metric(t("yellow_cards"), _fmt(df["yellow_cards"].sum()))
+            m4.metric(t("red_cards"), _fmt(df["red_cards"].sum()))
+ 
             display_df = df.copy()
             if _pl_season is not None:
                 display_df = display_df.drop(columns=["season"], errors="ignore")
-
-            st.dataframe(display_df, width='stretch')
-
+ 
+            st.dataframe(display_df, width="stretch")
+ 
             if _pl_team is None and not df.empty:
                 top10 = df.groupby("player")["goals"].sum().nlargest(10).reset_index()
                 if not top10.empty:
@@ -90,16 +82,16 @@ def render() -> None:
                     plt.tight_layout()
                     st.pyplot(fig_pl)
                     plt.close(fig_pl)
-
+ 
             st.caption(
                 "Goals and xG: fact_shots (all sources) · Cards: fact_events (SofaScore incidents + StatsBomb)\n"
                 "Rows show per-season accumulation when All seasons is selected."
             )
-
+ 
     # ── Goalkeepers ─────────────────────────────────────────
     with t_gk:
         _gk_comp, _gk_season, _gk_team = _tab_selectors("gk")
-
+ 
         if _gk_season is None:
             st.info(t("select_season"))
         else:
@@ -111,13 +103,13 @@ def render() -> None:
                 total_saves = int(df["saves"].sum())
                 avg_save_pct = round(float(df["save_pct"].dropna().mean()), 1) if not df["save_pct"].dropna().empty else 0
                 total_cs = int(df["clean_sheets"].sum())
-
+ 
                 m1, m2, m3, m4 = st.columns(4)
                 m1.metric(t("gk_tracked"), gk_count)
                 m2.metric(t("total_saves"), _fmt(total_saves))
                 m3.metric(t("avg_save_pct"), f"{avg_save_pct:.1f}%")
                 m4.metric(t("clean_sheets"), _fmt(total_cs))
-
+ 
                 display_df = df.rename(columns={
                     "goalkeeper": "Goalkeeper",
                     "team": "Team",
@@ -130,7 +122,7 @@ def render() -> None:
                     "goals_saved_above_expected": "Goals Saved Above Expected",
                     "clean_sheets": "Clean Sheets",
                 })
-                st.dataframe(display_df, width='stretch')
+                st.dataframe(display_df, width="stretch")
                 st.caption(
                     "Stats are scoped to matches where each GK appeared in event data (substitutions, cards, etc.) — "
                     "used as a proxy for matches played. "
@@ -139,7 +131,7 @@ def render() -> None:
                     "xG Conceded = total expected-goal value of shots faced · "
                     "Goals Saved Above Expected = saves − xG conceded (positive = outperforming)"
                 )
-
+ 
     # ── Player Detail ───────────────────────────────────────
     with t_detail:
         try:
@@ -147,48 +139,28 @@ def render() -> None:
         except ImportError:
             st.error("Install mplsoccer: pip install mplsoccer")
             st.stop()
-<<<<<<< HEAD
  
-=======
-
->>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
         _pd_all = player_detail.get_all_players()
         _pd_search = st.text_input("Search player", key="pd_search", placeholder="Type a name…")
         _pd_filtered = _pd_all[
             _pd_all["canonical_name"].str.contains(_pd_search, case=False, na=False)
         ] if _pd_search else _pd_all
         _pd_names = _pd_filtered["canonical_name"].tolist()
-<<<<<<< HEAD
  
-=======
-
->>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
         _pd_selected_name = st.selectbox(
             "Select player", options=_pd_names if _pd_names else ["(no match)"],
             key="pd_select", disabled=not _pd_names,
         )
-<<<<<<< HEAD
  
-=======
-
->>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
         _pd_row = (
             _pd_filtered[_pd_filtered["canonical_name"] == _pd_selected_name]
             if _pd_names else pd.DataFrame()
         )
-<<<<<<< HEAD
  
         if not _pd_row.empty:
             _pd = _pd_row.iloc[0]
             _pd_cid = int(_pd["canonical_id"])
  
-=======
-
-        if not _pd_row.empty:
-            _pd = _pd_row.iloc[0]
-            _pd_cid = int(_pd["canonical_id"])
-
->>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
             # ═══════════════════════════════════════════════════════
             # SECTION 1 — PLAYER CARD (LaLiga-style header)
             # ═══════════════════════════════════════════════════════
@@ -197,15 +169,9 @@ def render() -> None:
                 "Season", _sm_seasons_all, key="pd_season_global",
             )
             _pd_season_val = None if _pd_season_sel == "All" else _pd_season_sel
-<<<<<<< HEAD
  
             _summary = player_detail.get_player_summary_stats(_pd_cid, _pd_season_sel)
  
-=======
-
-            _summary = player_detail.get_player_summary_stats(_pd_cid, _pd_season_sel)
-
->>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
             # ── Header row: photo + ficha técnica ────────────────
             _photo_col, _info_col = st.columns([1, 3])
             with _photo_col:
@@ -217,7 +183,6 @@ def render() -> None:
                         '<div style="width:120px;height:120px;border-radius:50%;'
                         'background:#2c3e50;display:flex;align-items:center;'
                         'justify-content:center;font-size:2.5em;color:#7f8c8d">'
-<<<<<<< HEAD
                         "?</div>",
                         unsafe_allow_html=True,
                     )
@@ -240,37 +205,15 @@ def render() -> None:
                 _current_team_df = player_detail.get_player_team_history(_pd_cid, all_time=True)
                 _current_team_df = _current_team_df[_current_team_df["team"] != "Retirado"]
                 _team_name = _current_team_df.iloc[0]["team"] if not _current_team_df.empty else "—"
-=======
-                        '?</div>',
-                        unsafe_allow_html=True,
-                    )
-            with _info_col:
-                # Player name large
-                st.markdown(
-                    f'<h1 style="margin:0;padding:0;font-size:2em">'
-                    f'{_pd["canonical_name"]}</h1>',
-                    unsafe_allow_html=True,
-                )
-                # Team badge
-                _team_name = _summary.get("team") or "—"
->>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
                 st.markdown(
                     f'<span style="font-size:1.1em;color:#aaa">{_team_name}</span>',
                     unsafe_allow_html=True,
                 )
-<<<<<<< HEAD
  
                 # Ficha técnica row — born, nationality, position
                 _ft_items = []
                 _bd = _pd["birth_date"]
                 if _bd:
-=======
-                # Ficha técnica row
-                _ft_items = []
-                _bd = _pd["birth_date"]
-                if _bd:
-                    from datetime import date as _date_cls
->>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
                     _age = (_date_cls.today() - _bd).days // 365
                     _ft_items.append(f"**Born:** {_bd.strftime('%d/%m/%Y')} ({_age} yrs)")
                 if _pd["nationality"]:
@@ -278,11 +221,7 @@ def render() -> None:
                 if _pd["position"]:
                     _ft_items.append(f"**Position:** {_pd['position']}")
                 st.markdown(" · ".join(_ft_items) if _ft_items else "—")
-<<<<<<< HEAD
  
-=======
-
->>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
                 # Source badges
                 _sources_map = {
                     "StatsBomb": _pd["id_statsbomb"], "Understat": _pd["id_understat"],
@@ -298,7 +237,6 @@ def render() -> None:
                         f'border-radius:4px;margin-right:4px;font-size:0.75em">{_src}</span>'
                     )
                 st.markdown(" ".join(_badge_parts), unsafe_allow_html=True)
-<<<<<<< HEAD
  
             st.divider()
  
@@ -327,11 +265,7 @@ def render() -> None:
                 st.dataframe(_team_history, width="stretch", hide_index=True)
  
             st.divider()
-=======
-
-            st.divider()
-
->>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
+ 
             # ═══════════════════════════════════════════════════════
             # SECTION 2 — STATS GRID (LaLiga-style numbers)
             # ═══════════════════════════════════════════════════════
@@ -340,7 +274,7 @@ def render() -> None:
                 f'<h3 style="margin-bottom:0.3em">Statistics — {_season_label}</h3>',
                 unsafe_allow_html=True,
             )
-
+ 
             def _stat_card(label: str, value, col):
                 """Render a single stat as a large number + label."""
                 col.markdown(
@@ -349,21 +283,21 @@ def render() -> None:
                     f'<div style="font-size:0.85em;color:#999">{label}</div></div>',
                     unsafe_allow_html=True,
                 )
-
+ 
             # Row 1: Goals · Shots · xG · Matches
             _r1c1, _r1c2, _r1c3, _r1c4 = st.columns(4)
             _stat_card(t("goals"),   _summary["goals"],   _r1c1)
             _stat_card("Shots",      _summary["shots"],   _r1c2)
             _stat_card("xG",        f'{_summary["xg"]:.2f}', _r1c3)
             _stat_card(t("matches"), _summary["matches"], _r1c4)
-
+ 
             # Row 2: Penalties · Penalty Goals · Yellow · Red
             _r2c1, _r2c2, _r2c3, _r2c4 = st.columns(4)
-            _stat_card("Penalties",      _summary["penalties"],     _r2c1)
-            _stat_card("Penalty Goals",  _summary["penalty_goals"], _r2c2)
-            _stat_card(t("yellow_cards"), _summary["yellows"],      _r2c3)
-            _stat_card(t("red_cards"),    _summary["reds"],         _r2c4)
-
+            _stat_card("Penalties",       _summary["penalties"],     _r2c1)
+            _stat_card("Penalty Goals",   _summary["penalty_goals"], _r2c2)
+            _stat_card(t("yellow_cards"), _summary["yellows"],       _r2c3)
+            _stat_card(t("red_cards"),    _summary["reds"],          _r2c4)
+ 
             # Row 3: Derived metrics
             _conv = round(
                 (_summary["goals"] / _summary["shots"] * 100) if _summary["shots"] else 0, 1
@@ -373,25 +307,26 @@ def render() -> None:
                 _summary["goals"] / _summary["matches"] if _summary["matches"] else 0, 2
             )
             _r3c1, _r3c2, _r3c3, _r3c4 = st.columns(4)
-            _stat_card("Conversion %", f"{_conv}%", _r3c1)
+            _stat_card("Conversion %", f"{_conv}%",              _r3c1)
             _stat_card("Goals − xG",   f"{_g_minus_xg_total:+.2f}", _r3c2)
-            _stat_card("Goals/Match",   f"{_gpm:.2f}", _r3c3)
+            _stat_card("Goals/Match",   f"{_gpm:.2f}",           _r3c3)
             _r3c4.write("")  # empty cell
-
+ 
             st.divider()
-
+ 
             # ═══════════════════════════════════════════════════════
             # SECTION 3 — RADAR CHART (player vs league / another player)
             # ═══════════════════════════════════════════════════════
             _comp_info = player_detail.get_player_primary_competition(_pd_cid, _pd_season_sel)
-            _p_vals = player_detail._player_radar_row(_pd_cid, _pd_season_sel,
-                        _comp_info[0] if _comp_info else None) if _comp_info else None
-
+            _p_vals = player_detail._player_radar_row(
+                _pd_cid, _pd_season_sel,
+                _comp_info[0] if _comp_info else None,
+            ) if _comp_info else None
+ 
             if _p_vals is not None and _comp_info is not None:
                 _comp_id_radar, _comp_name = _comp_info
                 _labels = player_detail._RADAR_METRICS
-
-                # ── Compare-to selector ──────────────────────────
+ 
                 _cmp_col1, _cmp_col2 = st.columns([1, 2])
                 with _cmp_col1:
                     _cmp_mode = st.radio(
@@ -400,10 +335,10 @@ def render() -> None:
                         key="pd_cmp_mode",
                         horizontal=True,
                     )
-
+ 
                 _cmp_label = f"{_comp_name} avg"
                 _cmp_vals = None
-
+ 
                 if _cmp_mode == "Another player":
                     with _cmp_col2:
                         _cmp_search = st.text_input(
@@ -435,57 +370,47 @@ def render() -> None:
                     _cmp_vals = player_detail.get_league_avg_radar(
                         _comp_id_radar, _pd_season_sel, exclude_player=_pd_cid,
                     )
-
+ 
                 if _cmp_vals is not None:
                     st.subheader(f"{_pd['canonical_name']} vs {_cmp_label}")
                     _n = len(_labels)
-
-                    # ── Normalise each axis independently (0-100) ──
-                    # Use max of both + 20% headroom so neither touches the edge
+ 
                     _axis_max = [
                         max(abs(_p_vals[i]), abs(_cmp_vals[i]), 1e-9) * 1.2
                         for i in range(_n)
                     ]
                     _p_norm = [(_p_vals[i] / _axis_max[i]) * 100 for i in range(_n)]
                     _c_norm = [(_cmp_vals[i] / _axis_max[i]) * 100 for i in range(_n)]
-
+ 
                     _angles = np.linspace(0, 2 * np.pi, _n, endpoint=False).tolist()
                     _p_norm += [_p_norm[0]]
                     _c_norm += [_c_norm[0]]
                     _angles_closed = _angles + [_angles[0]]
-
-                    _fig_r, _ax_r = plt.subplots(
-                        figsize=(5, 5), subplot_kw=dict(polar=True),
-                    )
+ 
+                    _fig_r, _ax_r = plt.subplots(figsize=(5, 5), subplot_kw=dict(polar=True))
                     _fig_r.patch.set_facecolor("#0e1117")
                     _ax_r.set_facecolor("#0e1117")
-
-                    # Concentric reference rings
-                    _ring_vals = [25, 50, 75, 100]
-                    for _rv in _ring_vals:
+ 
+                    for _rv in [25, 50, 75, 100]:
                         _ax_r.plot(
-                            _angles_closed,
-                            [_rv] * (_n + 1),
+                            _angles_closed, [_rv] * (_n + 1),
                             color="#333", linewidth=0.4, linestyle="-", zorder=0,
                         )
-
-                    # Player 1 (red)
+ 
                     _ax_r.plot(
                         _angles_closed, _p_norm, "o-",
                         linewidth=2.2, color="#e74c3c", markersize=6,
                         label=_pd["canonical_name"], zorder=3,
                     )
                     _ax_r.fill(_angles_closed, _p_norm, alpha=0.20, color="#e74c3c")
-
-                    # Player 2 / League avg (blue)
+ 
                     _ax_r.plot(
                         _angles_closed, _c_norm, "o-",
                         linewidth=2.2, color="#3498db", markersize=6,
                         label=_cmp_label, zorder=3,
                     )
                     _ax_r.fill(_angles_closed, _c_norm, alpha=0.20, color="#3498db")
-
-                    # Value annotations next to each vertex
+ 
                     _fmt_val = lambda v, i: (
                         f"{v:.1f}%" if _labels[i] == "Conversion %" else f"{v:.2f}"
                     )
@@ -503,17 +428,13 @@ def render() -> None:
                             ha="center", va="center",
                             fontsize=7.5, fontweight="bold", color="#3498db",
                         )
-
-                    # Axis labels
+ 
                     _ax_r.set_xticks(_angles)
-                    _ax_r.set_xticklabels(
-                        _labels, color="white", fontsize=10, fontweight="600",
-                    )
-                    _ax_r.set_yticklabels([])  # hide radial ticks
-                    _ax_r.set_ylim(0, 130)     # room for annotations
+                    _ax_r.set_xticklabels(_labels, color="white", fontsize=10, fontweight="600")
+                    _ax_r.set_yticklabels([])
+                    _ax_r.set_ylim(0, 130)
                     _ax_r.spines["polar"].set_color("#444")
                     _ax_r.grid(color="#444", linewidth=0.3)
-
                     _ax_r.legend(
                         loc="upper center", bbox_to_anchor=(0.5, -0.06),
                         ncol=2, frameon=True,
@@ -521,7 +442,7 @@ def render() -> None:
                         labelcolor="white", fontsize=10,
                     )
                     _fig_r.tight_layout()
-
+ 
                     _rc1, _rc2 = st.columns([3, 2])
                     with _rc1:
                         st.pyplot(_fig_r)
@@ -529,31 +450,25 @@ def render() -> None:
                     with _rc2:
                         _rv_df = pd.DataFrame({
                             "Metric": _labels,
-                            _pd["canonical_name"]: [
-                                _fmt_val(_p_vals[i], i) for i in range(_n)
-                            ],
-                            _cmp_label: [
-                                _fmt_val(_cmp_vals[i], i) for i in range(_n)
-                            ],
+                            _pd["canonical_name"]: [_fmt_val(_p_vals[i], i) for i in range(_n)],
+                            _cmp_label: [_fmt_val(_cmp_vals[i], i) for i in range(_n)],
                         })
                         st.dataframe(_rv_df, width="stretch", hide_index=True)
-                        _caption = (
+                        st.caption(
                             "Per-match averages. Conversion % is per-shot."
                             if _cmp_mode == "Another player"
-                            else "Per-match averages vs league (excluding this player). "
-                                 "Conversion % is per-shot."
+                            else "Per-match averages vs league (excluding this player). Conversion % is per-shot."
                         )
-                        st.caption(_caption)
                 else:
                     if _cmp_mode == "Another player":
                         st.info("No shot data for this player in the same competition/season.")
                     else:
                         st.info("Not enough league data to compute average.")
-
+ 
                 st.divider()
-
+ 
             # ═══════════════════════════════════════════════════════
-            # SECTION 4 — SHOT MAP  (kept from before)
+            # SECTION 4 — SHOT MAP
             # ═══════════════════════════════════════════════════════
             st.subheader("Shot Map")
             _sm_sources = ["All"] + player_detail.get_player_shot_sources(_pd_cid)
@@ -587,7 +502,7 @@ def render() -> None:
                     disabled=_sm_matches_df.empty,
                 )
             _sm_match_id = _sm_match_options.get(_sm_match_label)
-
+ 
             _shots_df = player_detail.get_player_shots(
                 _pd_cid, _pd_season_sel, _sm_source, _sm_match_id
             )
@@ -628,7 +543,7 @@ def render() -> None:
                 _st3.metric("xG", _total_xg)
                 _st4.metric("Goals − xG", f"{_g_minus_xg:+.2f}")
             st.divider()
-
+ 
             # ═══════════════════════════════════════════════════════
             # SECTION 5 — SEASONAL STATS + INJURIES + MDM
             # ═══════════════════════════════════════════════════════
@@ -640,7 +555,7 @@ def render() -> None:
                 _ss_df.columns = ["Season", "Competition", "Shots", "Goals", "xG"]
                 st.dataframe(_ss_df, width="stretch", hide_index=True)
             st.divider()
-
+ 
             st.subheader("Injury History")
             _inj_df = player_detail.get_player_injuries(_pd_cid)
             if _inj_df.empty:
@@ -650,7 +565,7 @@ def render() -> None:
                                     "Days absent", "Matches missed"]
                 st.dataframe(_inj_df, width="stretch", hide_index=True)
             st.divider()
-
+ 
             with st.expander("Source Identity (MDM)"):
                 _mdm_df = player_detail.get_player_mdm(_pd_cid)
                 if _mdm_df.empty:
@@ -658,11 +573,11 @@ def render() -> None:
                 else:
                     _mdm_df.columns = ["Source", "Name used", "Source ID", "Score", "Resolved"]
                     st.dataframe(_mdm_df, width="stretch", hide_index=True)
-
+ 
     # ── Injuries (aggregate) ────────────────────────────────
     with t_injuries:
         _inj_comp, _inj_season, _inj_team = _tab_selectors("injuries", all_seasons=True)
-
+ 
         df = explore.get_injuries_standalone(_inj_season, _inj_team)
         if df.empty:
             st.info("No injury data found for this selection.")
@@ -671,17 +586,17 @@ def render() -> None:
             total_days = int(pd.to_numeric(df["days_absent"], errors="coerce").fillna(0).sum())
             total_missed = int(pd.to_numeric(df["matches_missed"], errors="coerce").fillna(0).sum())
             ongoing = int(df["date_until"].isna().sum())
-
+ 
             m1, m2, m3, m4 = st.columns(4)
             m1.metric(t("total_injuries"), _fmt(total_inj))
             m2.metric(t("total_days_absent"), _fmt(total_days))
             m3.metric(t("total_matches_missed"), _fmt(total_missed))
             m4.metric(t("ongoing_injuries"), _fmt(ongoing))
-
+ 
             df_render = df.copy()
             df_render["date_until"] = df_render["date_until"].fillna("Ongoing").astype(str)
-            st.dataframe(df_render, width='stretch')
-
+            st.dataframe(df_render, width="stretch")
+ 
             breakdown = explore.get_injury_type_breakdown(_inj_season, _inj_team)
             if not breakdown.empty:
                 st.subheader(t("top_injury_types"))
@@ -702,18 +617,18 @@ def render() -> None:
                 plt.tight_layout()
                 st.pyplot(fig_inj)
                 plt.close(fig_inj)
-
+ 
             if _inj_season is None:
                 trend = explore.get_injury_season_trend(_inj_team)
                 if not trend.empty:
                     st.subheader(t("season_trend"))
-                    st.dataframe(trend, width='stretch')
-
+                    st.dataframe(trend, width="stretch")
+ 
             st.caption(
                 "Source: fact_injuries (Transfermarkt)\n"
                 "date_until = NULL means the player was still injured at time of data collection."
             )
-<<<<<<< HEAD
+ 
     # ── Market Value ─────────────────────────────────────────
     with t_market_value:
         st.subheader(t("mv_title"))
@@ -1119,5 +1034,4 @@ def render() -> None:
                 ]
                 st.dataframe(_th_display, width="stretch", hide_index=True)
                 st.caption(t("transfer_caption"))
-=======
->>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
+ 
