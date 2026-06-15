@@ -27,6 +27,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as st
+# Used to work out player's age from birth date in  market value tab 
+from dateutil.relativedelta import relativedelta
+# used to create custom legend entries for scatter marker in market value chart
+from matplotlib.lines import Line2D  
 
 # Make sibling modules (loaders/, pipeline_runner.py, etc.) importable when run
 # as `streamlit run dashboard/app.py` from `football_scraping/`.
@@ -64,6 +68,39 @@ except Exception:
 def _fmt(n) -> str:
     return f"{int(n):,}".replace(",", ".")
 
+def _fmt_eur(v) -> str:
+    """
+    Formats a euro value as a human-readable string.
+    Used throughout the market value tab to display prices consistently.
+
+    Examples:
+        _fmt_eur(38000000) → "€38.0M"
+        _fmt_eur(500000)   → "€500K"
+        _fmt_eur(None)     → "—"
+    """
+    if v is None:
+        return "—"
+    if isinstance(v, float) and pd.isna(v):
+        return "—"
+    if abs(v) >= 1_000_000:
+        return f"€{v/1_000_000:.1f}M"
+    if abs(v) >= 1_000:
+        return f"€{v/1_000:.0f}K"
+    return f"€{v:,}"
+
+def _fmt_team_history_date_to(row: pd.Series) -> str:
+    """
+    Formats the date_to column for the Career History table.
+    
+    - If date_to is NULL and the team is 'Retirado', the player retired
+      at that club so we show 'Retired' instead of a date.
+    - If date_to is NULL and the team is not 'Retirado', the player is
+      still at that club so we show 'Present'.
+    - Otherwise, format the date normally as dd/mm/yyyy.
+    """
+    if pd.isna(row["date_to"]):
+        return "Retired" if row["team"] == "Retirado" else "Present"
+    return pd.Timestamp(row["date_to"]).strftime("%d/%m/%Y")
 
 def _render_stadium_detail(row: pd.Series) -> None:
     """Detail panel: photo, metadata and external links for one stadium row."""
@@ -292,13 +329,13 @@ with tab_explore:
 
 
 # ════════════════════════════════════════════════════════════════════
-# TAB 2 — PLAYERS  (Discipline · Goalkeepers · Player Detail · Injuries)
+# TAB 2 — PLAYERS  (Discipline · Goalkeepers · Player Detail · Injuries . Market Value)
 # ════════════════════════════════════════════════════════════════════
 with tab_players:
     st.header(t("tab_players"))
 
-    t_discipline, t_gk, t_detail, t_injuries = st.tabs(
-        [t("tab_players"), t("tab_goalkeepers"), "Player Detail", t("tab_injuries")]
+    t_discipline, t_gk, t_detail, t_injuries, t_market_value,t_transfer_history = st.tabs(
+        [t("tab_players"), t("tab_goalkeepers"), "Player Detail", t("tab_injuries"),t("tab_market_value"), t("tab_transfer_history")]
     )
 
     # ── Discipline ──────────────────────────────────────────
@@ -445,15 +482,26 @@ with tab_players:
                         '?</div>',
                         unsafe_allow_html=True,
                     )
+
             with _info_col:
-                # Player name large
+                # Player name with active/retired badge
+                _is_retired = player_detail.is_player_retired(_pd_cid)
+                _status_label = "Retired" if _is_retired else "Active"
+                _status_color = "#e74c3c" if _is_retired else "#2ecc71"
                 st.markdown(
                     f'<h1 style="margin:0;padding:0;font-size:2em">'
-                    f'{_pd["canonical_name"]}</h1>',
+                    f'{_pd["canonical_name"]} '
+                    f'<span style="font-size:0.45em;background:{_status_color};color:white;'
+                    f'padding:2px 8px;border-radius:4px;vertical-align:middle">{_status_label}</span>'
+                    f'</h1>',
                     unsafe_allow_html=True,
                 )
                 # Team badge
-                _team_name = _summary.get("team") or "—"
+                 # current team from fact_transfers
+                _current_team_df = player_detail.get_player_team_history(_pd_cid, all_time=True)
+                _current_team_df = _current_team_df[_current_team_df["team"] != "Retirado"]
+
+                _team_name = _current_team_df.iloc[0]["team"] if not _current_team_df.empty else "—"
                 st.markdown(
                     f'<span style="font-size:1.1em;color:#aaa">{_team_name}</span>',
                     unsafe_allow_html=True,
@@ -469,6 +517,7 @@ with tab_players:
                     _ft_items.append(f"**Nationality:** {_pd['nationality']}")
                 if _pd["position"]:
                     _ft_items.append(f"**Position:** {_pd['position']}")
+
                 st.markdown(" · ".join(_ft_items) if _ft_items else "—")
 
                 # Source badges
@@ -486,6 +535,30 @@ with tab_players:
                         f'border-radius:4px;margin-right:4px;font-size:0.75em">{_src}</span>'
                     )
                 st.markdown(" ".join(_badge_parts), unsafe_allow_html=True)
+
+            st.divider()
+
+           # ── Team history  ──────────────────────────
+            # shows clubs the player has been at, filtered by season if one is selected
+            st.subheader(t("tab_career_history"))
+
+            _team_history = player_detail.get_player_team_history(
+                _pd_cid,
+                season=_pd_season_val,
+                all_time=(_pd_season_val is None),
+            )
+            if _team_history.empty:
+                st.caption(t("career_no_data"))
+            else:
+                _team_history["date_from"] = pd.to_datetime(
+                    _team_history["date_from"], errors="coerce"
+                ).dt.strftime("%d/%m/%Y")
+                # format date_to — NULL means Present or Retired depending on team
+                _team_history["date_to"] = _team_history.apply(_fmt_team_history_date_to, axis=1)
+                # remove Retirado rows — retirement is shown in the player name badge
+                _team_history = _team_history[_team_history["team"] != "Retirado"]
+                _team_history.columns = ["Season", t("career_date_from"), t("career_date_to"), t("career_team")]
+                st.dataframe(_team_history, width="stretch", hide_index=True)
 
             st.divider()
 
@@ -870,6 +943,517 @@ with tab_players:
                 "Source: fact_injuries (Transfermarkt)\n"
                 "date_until = NULL means the player was still injured at time of data collection."
             )
+
+    # ── Market Value ─────────────────────────────────────────
+    with t_market_value:
+        st.subheader(t("mv_title"))
+
+        # ── Player selector ──────────────────────────────────
+        # Load all players and filter by search input
+        _mv_all_players = player_detail.get_all_players()
+
+        # text introduced by user
+        _mv_search = st.text_input(
+            "Search player",
+            key="mv_search",
+            placeholder="Type a name…"
+        )
+
+        # filter players by search input — if empty, show all players
+        if _mv_search:
+            _mv_filtered = _mv_all_players[
+                _mv_all_players["canonical_name"].str.contains(_mv_search, case=False, na=False)
+            ]
+        else:
+            _mv_filtered = _mv_all_players
+
+        _mv_names = _mv_filtered["canonical_name"].tolist()
+
+        # selectbox showing the filtered player names
+        # if no players match the search, show "(no match)" and disable the selector
+        _mv_selected = st.selectbox(
+            "Select player",
+            options=_mv_names if _mv_names else ["(no match)"],
+            key="mv_select",
+            disabled=not _mv_names,
+        )
+
+        # get the full row of the selected player from the filtered DataFrame
+        # if no players match, return an empty DataFrame to avoid errors downstream
+        if _mv_names:
+            _mv_row = _mv_filtered[_mv_filtered["canonical_name"] == _mv_selected]
+        else:
+            _mv_row = pd.DataFrame()
+
+        if _mv_row.empty:
+            st.info("No player selected.")
+        else:
+            _mv_player  = _mv_row.iloc[0]
+            _mv_cid     = int(_mv_player["canonical_id"])
+            _mv_pos     = _mv_player.get("position")    # used for benchmark query
+            _mv_bdate   = _mv_player.get("birth_date")  # used to convert age → date on x-axis
+
+            # ── Load data from DB ─────────────────────────────
+            # All four queries run once when the player is selected
+            _mv_history     = player_detail.get_market_value_history(_mv_cid)
+            _mv_transfers   = player_detail.get_transfer_history(_mv_cid)
+            _mv_injuries    = player_detail.get_player_injuries(_mv_cid)
+            _mv_kpis        = player_detail.get_market_value_kpis(_mv_cid)
+
+            if _mv_history.empty:
+                st.info(t("mv_no_data"))
+            else:
+                _mv_history["value_date"] = pd.to_datetime(_mv_history["value_date"])
+
+                # ── Market value table for main player ───────────
+                # shows the raw valuation history: date, age, value and club
+                with st.expander(f"Market value data — {_mv_selected}"):
+                    _mv_display = _mv_history[["value_date", "market_value", "club_name"]].copy()
+                    _mv_display["value_date"] = _mv_display["value_date"].dt.strftime("%d/%m/%Y")
+                    # calculate age at the time of each valuation using birth_date from dim_player
+                    # relativedelta handles leap years correctly unlike simple day division
+                    if _mv_bdate is not None:
+                        _mv_display["age"] = _mv_history["value_date"].apply(
+                            lambda d: relativedelta(d, pd.Timestamp(_mv_bdate)).years
+                        )
+                        # cast age to string to avoid default right-alignment inside cells
+                        _mv_display["age"] = _mv_display["age"].astype(str)
+                        # reorder columns: date, age, market_value, club
+                        _mv_display = _mv_display[["value_date", "age", "market_value", "club_name"]]
+
+                    _mv_display["market_value"] = _mv_display["market_value"].apply(_fmt_eur)
+
+                    if _mv_bdate is not None:
+                        _mv_display.columns = ["Date", "Age", "Market Value", "Club"]
+                    else:
+                        _mv_display.columns = ["Date", "Market Value", "Club"]
+
+                    st.dataframe(_mv_display, width="stretch", hide_index=True)
+
+                # ── KPI cards ─────────────────────────────────
+                # Six summary metrics shown above the chart
+                k1, k2, k3, k4, k5, k6 = st.columns(6)
+
+                # latest valuation in fact_market_value
+                k1.metric(t("mv_current_value"), _fmt_eur(_mv_kpis["current_value"]))
+
+                # highest valuation ever, with the date as delta label
+                k2.metric(
+                    t("mv_peak_value"),
+                    _fmt_eur(_mv_kpis["peak_value"]),
+                    delta=_mv_kpis["peak_date"].strftime("%b %Y")
+                    if _mv_kpis["peak_date"] is not None else None,
+                    delta_color="off",
+                )
+
+                # % drop from peak — negative means the player lost value since peak
+                k3.metric(
+                    t("mv_from_peak"),
+                    f"{_mv_kpis['pct_from_peak']:.1f}%"
+                    if _mv_kpis["pct_from_peak"] is not None else "—",
+                    delta=_fmt_eur(_mv_kpis["current_value"] - _mv_kpis["peak_value"])
+                    if _mv_kpis["peak_value"] else None,
+                    delta_color="inverse",
+                )
+
+                # absolute change vs the valuation ~12 months ago
+                k4.metric(
+                    t("mv_last_year_change"),
+                    _fmt_eur(_mv_kpis["change_last_year"]),
+                    delta_color="normal" if (_mv_kpis["change_last_year"] or 0) >= 0 else "inverse",
+                )
+
+                # number of transfers from fact_transfers
+                k5.metric(t("mv_transfers"), _mv_kpis["num_transfers"])
+
+                # position from dim_player — shown for context
+                k6.metric(t("position"), _mv_pos or "—")
+
+                st.divider()
+
+                # ── Comparison player selector (optional) ─────
+                # If the user types a name, a second selectbox appears
+                # to pick the comparison player. The comparison curve
+                # is drawn on the same chart without milestone markers.
+                _mv_cmp_search = st.text_input(
+                    t("mv_compare_player"),
+                    key="mv_cmp_search",
+                    placeholder="Type a name…",
+                )
+                # filter players by search input excluding the main player already selected
+                # if empty, return an empty DataFrame — no comparison player selected
+                if _mv_cmp_search:
+                    _mv_cmp_filtered = _mv_all_players[
+                        (_mv_all_players["canonical_name"].str.contains(_mv_cmp_search, case=False, na=False))
+                        & (_mv_all_players["canonical_id"] != _mv_cid)
+                    ]
+                else:
+                    _mv_cmp_filtered = pd.DataFrame()
+
+                _mv_cmp_history   = pd.DataFrame()
+                _mv_cmp_transfers = pd.DataFrame()
+                _mv_cmp_injuries  = pd.DataFrame()
+                _mv_cmp_name      = None
+
+                if not _mv_cmp_filtered.empty:
+                    _mv_cmp_names    = _mv_cmp_filtered["canonical_name"].tolist()
+                    _mv_cmp_selected = st.selectbox(
+                        t("mv_select_comparison"),
+                        options=_mv_cmp_names,
+                        key="mv_cmp_select",
+                    )
+                    _mv_cmp_row = _mv_cmp_filtered[
+                        _mv_cmp_filtered["canonical_name"] == _mv_cmp_selected
+                    ]
+                    if not _mv_cmp_row.empty:
+                        _mv_cmp_cid       = int(_mv_cmp_row.iloc[0]["canonical_id"])
+                        _mv_cmp_name      = _mv_cmp_selected
+
+                        # load market value history, transfers and injuries for the comparison player
+                        _mv_cmp_history   = player_detail.get_market_value_history(_mv_cmp_cid)
+                        _mv_cmp_transfers = player_detail.get_transfer_history(_mv_cmp_cid)
+                        _mv_cmp_injuries  = player_detail.get_player_injuries(_mv_cmp_cid)
+
+                        if not _mv_cmp_history.empty:
+                            _mv_cmp_history["value_date"] = pd.to_datetime(_mv_cmp_history["value_date"])
+
+                        # ── Market value table for comparison player ──────
+                        # shows the raw valuation history: date, value and club
+                        if not _mv_cmp_history.empty:
+                            _mv_cmp_bdate = _mv_cmp_row.iloc[0].get("birth_date")
+
+                            with st.expander(f"Market value data — {_mv_cmp_selected}"):
+                                _mv_cmp_display = _mv_cmp_history[["value_date", "market_value", "club_name"]].copy()
+                                _mv_cmp_display["value_date"] = _mv_cmp_display["value_date"].dt.strftime("%d/%m/%Y")
+                                # calculate age at the time of each valuation using birth_date from dim_player
+                                # relativedelta handles leap years correctly unlike simple day division
+                                if _mv_cmp_bdate is not None:
+                                    _mv_cmp_display["age"] = _mv_cmp_history["value_date"].apply(
+                                        lambda d: relativedelta(d, pd.Timestamp(_mv_cmp_bdate)).years
+                                    )
+                                    # cast age to string to avoid default right-alignment inside cells
+                                    _mv_cmp_display["age"] = _mv_cmp_display["age"].astype(str)
+                                    _mv_cmp_display = _mv_cmp_display[["value_date", "age", "market_value", "club_name"]]
+                                _mv_cmp_display["market_value"] = _mv_cmp_display["market_value"].apply(_fmt_eur)
+                                if _mv_cmp_bdate is not None:
+                                    _mv_cmp_display.columns = ["Date", "Age", "Market Value", "Club"]
+                                else:
+                                    _mv_cmp_display.columns = ["Date", "Market Value", "Club"]
+                                st.dataframe(_mv_cmp_display, width="stretch", hide_index=True)
+
+                            # ── KPI cards for comparison player ──────────────
+                            # same metrics as main player for direct comparison
+                            _mv_cmp_kpis = player_detail.get_market_value_kpis(_mv_cmp_cid)
+
+                            ck1, ck2, ck3, ck4, ck5, ck6 = st.columns(6)
+
+                            ck1.metric(t("mv_current_value"), _fmt_eur(_mv_cmp_kpis["current_value"]))
+                            ck2.metric(
+                                t("mv_peak_value"),
+                                _fmt_eur(_mv_cmp_kpis["peak_value"]),
+                                delta=_mv_cmp_kpis["peak_date"].strftime("%b %Y")
+                                if _mv_cmp_kpis["peak_date"] is not None else None,
+                                delta_color="off",
+                            )
+                            ck3.metric(
+                                t("mv_from_peak"),
+                                f"{_mv_cmp_kpis['pct_from_peak']:.1f}%"
+                                if _mv_cmp_kpis["pct_from_peak"] is not None else "—",
+                                delta=_fmt_eur(_mv_cmp_kpis["current_value"] - _mv_cmp_kpis["peak_value"])
+                                if _mv_cmp_kpis["peak_value"] else None,
+                                delta_color="inverse",
+                            )
+                            ck4.metric(
+                                t("mv_last_year_change"),
+                                _fmt_eur(_mv_cmp_kpis["change_last_year"]),
+                                delta_color="normal" if (_mv_cmp_kpis["change_last_year"] or 0) >= 0 else "inverse",
+                            )
+                            ck5.metric(t("mv_transfers"), _mv_cmp_kpis["num_transfers"])
+                            ck6.metric(t("position"), _mv_cmp_row.iloc[0].get("position") or "—")
+
+                # ── Benchmark band toggle ─────────────────────
+                # Loads percentile 25/50/75 by age for the player's position.
+                # Only available if position is known in dim_player.
+                _mv_show_benchmark = st.checkbox(
+                    t("mv_show_benchmark"), value=True, key="mv_benchmark"
+                ) if _mv_pos else False
+
+                _mv_benchmark = pd.DataFrame()
+                if _mv_show_benchmark and _mv_pos:
+                    _mv_benchmark = player_detail.get_market_value_benchmark(_mv_pos)
+
+                # ── Chart ─────────────────────────────────────
+                fig_mv, ax_mv = plt.subplots(figsize=(12, 5))
+                fig_mv.patch.set_facecolor("#0e1117")
+                ax_mv.set_facecolor("#0e1117")
+
+                # layer 1 — benchmark band (drawn first so it sits behind everything)
+                # The benchmark is indexed by age, so we convert age → date using
+                # the player's birth_date to align it with the x-axis (dates)
+                if not _mv_benchmark.empty and _mv_bdate is not None:
+                    _mv_bdate_ts = pd.Timestamp(_mv_bdate)
+                    _mv_benchmark["date"] = _mv_bdate_ts + pd.to_timedelta(
+                        _mv_benchmark["age"] * 365.25, unit="D"
+                    )
+                    # limit benchmark to the player's actual data range
+                    date_min = _mv_history["value_date"].min()
+                    date_max = _mv_history["value_date"].max()
+                    _mv_benchmark = _mv_benchmark[
+                        (_mv_benchmark["date"] >= date_min) &
+                        (_mv_benchmark["date"] <= date_max)
+                    ]
+
+                    ax_mv.fill_between(
+                        _mv_benchmark["date"],
+                        _mv_benchmark["p25"],
+                        _mv_benchmark["p75"],
+                        alpha=0.15, color="#2ecc71",
+                        label=f"{_mv_pos} benchmark (P25–P75)",
+                    )
+                    ax_mv.plot(
+                        _mv_benchmark["date"],
+                        _mv_benchmark["median"],
+                        color="#2ecc71", linewidth=1.2,
+                        linestyle="--", alpha=0.6,
+                        label=f"{_mv_pos} median",
+                    )
+
+                # layer 2 — main player curve
+                # Step chart (where="post"): value stays flat until the next valuation,
+                # which is faithful to how Transfermarkt actually works
+                ax_mv.step(
+                    _mv_history["value_date"],
+                    _mv_history["market_value"],
+                    where="post",
+                    color="#e74c3c", linewidth=2.2,
+                    label=_mv_selected, zorder=3,
+                )
+
+                # layer 3 — comparison player curve (no milestone markers to avoid clutter)
+                if not _mv_cmp_history.empty and _mv_cmp_name:
+                    ax_mv.step(
+                        _mv_cmp_history["value_date"],
+                        _mv_cmp_history["market_value"],
+                        where="post",
+                        color="#3498db", linewidth=1.8,
+                        linestyle="-", alpha=0.8,
+                        label=_mv_cmp_name, zorder=2,
+                    )
+
+                # layer 4 — transfer milestones (triangles on the main player's curve)
+                # purple = permanent transfer, orange = loan/end_of_loan, green = free
+                # unknown transfers are not shown — no economic information
+                TRANSFER_COLORS = {
+                    "transfer":    "#9b59b6",
+                    "loan":        "#f39c12",
+                    "end_of_loan": "#f39c12",
+                    "free":        "#2ecc71",
+                }
+
+                if not _mv_transfers.empty:
+                    _mv_transfers["transfer_date"] = pd.to_datetime(_mv_transfers["transfer_date"])
+                    for _, tr in _mv_transfers.iterrows():
+                        td = tr["transfer_date"]
+                        if pd.isna(td):
+                            continue
+                        # skip unknown transfers — no economic information to show
+                        transfer_color = TRANSFER_COLORS.get(tr["transfer_type"])
+                        if transfer_color is None:
+                            continue
+                        before = _mv_history[_mv_history["value_date"] <= td]
+                        if before.empty:
+                            continue
+                        mv_at_date = before.iloc[-1]["market_value"]
+                        ax_mv.scatter(td, mv_at_date, marker="^", s=80, color=transfer_color, zorder=4)
+
+                # layer 5 — injury milestones (red X on the main player's curve)
+                if not _mv_injuries.empty:
+                    _mv_injuries["date_from"] = pd.to_datetime(
+                        _mv_injuries["date_from"], errors="coerce"
+                    )
+                    for _, inj in _mv_injuries.iterrows():
+                        id_ = inj["date_from"]
+                        if pd.isna(id_):
+                            continue
+                        # find the market value at the time of the injury
+                        before = _mv_history[_mv_history["value_date"] <= id_]
+                        if before.empty:
+                            continue
+                        mv_at_date = before.iloc[-1]["market_value"]
+                        ax_mv.scatter(
+                            id_, mv_at_date,
+                            marker="x", s=60, color="#e74c3c",
+                            linewidths=1.5, zorder=4,
+                        )
+
+                # ── Axis formatting ───────────────────────────
+                ax_mv.yaxis.set_major_formatter(
+                    plt.FuncFormatter(
+                        lambda x, _: f"€{x/1_000_000:.1f}M" if x >= 1_000_000
+                        else f"€{x/1_000:.0f}K"
+                    )
+                )
+                ax_mv.tick_params(colors="white")
+                ax_mv.xaxis.label.set_color("white")
+                ax_mv.yaxis.label.set_color("white")
+                for spine in ax_mv.spines.values():
+                    spine.set_color("#444")
+                ax_mv.grid(axis="y", color="#333", linewidth=0.5, linestyle="--")
+
+                # ── Legend ────────────────────────────────────
+                # Milestone markers (transfer/loan/injury) are not in the
+                # automatic legend so we add them manually
+                _mv_legend_extra = [
+                    Line2D([0], [0], marker="^", color="w", markerfacecolor="#9b59b6",
+                        markersize=8, label="Transfer", linestyle="None"),
+                    Line2D([0], [0], marker="^", color="w", markerfacecolor="#f39c12",
+                        markersize=8, label="Loan / End of loan", linestyle="None"),
+                    Line2D([0], [0], marker="^", color="w", markerfacecolor="#2ecc71",
+                        markersize=8, label="Free transfer", linestyle="None"),
+                    Line2D([0], [0], marker="x", color="#e74c3c",
+                        markersize=8, label="Injury", linestyle="None",
+                        markeredgewidth=1.5),
+                ]
+
+                handles, labels = ax_mv.get_legend_handles_labels()
+                ax_mv.legend(
+                    handles + _mv_legend_extra,
+                    labels + [line.get_label() for line in _mv_legend_extra],
+                    facecolor="#1a1a2e", edgecolor="#444",
+                    labelcolor="white", fontsize=9,
+                    loc="upper left",
+                )
+
+                plt.tight_layout()
+                st.pyplot(fig_mv)
+                plt.close(fig_mv)
+
+                st.caption(t("mv_caption"))
+
+                if _mv_show_benchmark:
+                    st.markdown(t("mv_benchmark_explain"))
+
+     # ── Transfer History ─────────────────────────────────────
+
+    with t_transfer_history:
+        st.subheader(t("tab_transfer_history"))
+
+        # ── Player selector ──────────────────────────────────
+        # Load all players and filter by search input
+        _th_all_players = player_detail.get_all_players()
+
+        _th_search = st.text_input(
+            "Search player",
+            key="th_search",
+            placeholder="Type a name…"
+        )
+
+        # filter players by search input — if empty, show all players
+        if _th_search:
+            _th_filtered = _th_all_players[
+                _th_all_players["canonical_name"].str.contains(_th_search, case=False, na=False)
+            ]
+        else:
+            _th_filtered = _th_all_players
+
+        _th_names = _th_filtered["canonical_name"].tolist()
+
+        # selectbox showing the filtered player names
+        # if no players match the search, show "(no match)" and disable the selector
+        _th_selected = st.selectbox(
+            "Select player",
+            options=_th_names if _th_names else ["(no match)"],
+            key="th_select",
+            disabled=not _th_names,
+        )
+
+        # get the full row of the selected player from the filtered DataFrame
+        if _th_names:
+            _th_row = _th_filtered[_th_filtered["canonical_name"] == _th_selected]
+        else:
+            _th_row = pd.DataFrame()
+
+        if _th_row.empty:
+            st.info("No player selected.")
+        else:
+            _th_cid = int(_th_row.iloc[0]["canonical_id"])
+
+            # ── Load data from DB ─────────────────────────────
+            _th_transfers = player_detail.get_transfer_history(_th_cid)
+            _th_kpis      = player_detail.get_transfer_history_kpis(_th_cid)
+
+            if _th_transfers.empty:
+                st.info(t("transfer_no_data"))
+            else:
+                # ── KPI cards ─────────────────────────────────
+                # total fees paid across all permanent transfers
+                # most expensive single transfer with destination team and date
+                # current team and number of distinct teams the player has been at
+
+                # current team — exclude Retirado
+                _th_current = player_detail.get_player_team_history(_th_cid, all_time=True)
+                _th_current = _th_current[_th_current["team"] != "Retirado"]
+                _th_current_team = _th_current.iloc[0]["team"] if not _th_current.empty else "—"
+
+                # number of distinct teams the player has been at — exclude Retirado
+                _th_num_teams = _th_transfers["to_team_name"][
+                    _th_transfers["to_team_name"] != "Retirado"
+                ].nunique()
+
+                _max_fee_delta = None
+                if _th_kpis["max_fee_team"] and _th_kpis["max_fee_date"]:
+                    _max_date_str = pd.Timestamp(_th_kpis["max_fee_date"]).strftime("%b %Y")
+                    _max_fee_delta = f"{_th_kpis['max_fee_team']} · {_max_date_str}"
+
+                tk1, tk2, tk3, tk4 = st.columns(4)
+
+                tk1.metric(
+                    t("transfer_total_fees"),
+                    _fmt_eur(_th_kpis["total_fees"]) if _th_kpis["total_fees"] else "—",
+                )
+                tk2.metric(
+                    t("transfer_most_expensive"),
+                    _fmt_eur(_th_kpis["max_fee"]) if _th_kpis["max_fee"] else "—",
+                    delta=_max_fee_delta,
+                    delta_color="off",
+                )
+                tk3.metric(t("transfer_current_team"), _th_current_team)
+                tk4.metric(t("transfer_num_teams"), _th_num_teams)
+
+                st.divider()
+
+                # ── Transfer history table ────────────────────
+                # shows full transfer history with fee and type
+                # sorted by date descending — most recent first
+                _th_display = _th_transfers.copy()
+                _th_display = _th_display.sort_values("transfer_date", ascending=False)
+                _th_display["transfer_date"] = pd.to_datetime(
+                    _th_display["transfer_date"], errors="coerce"
+                ).dt.strftime("%d/%m/%Y")
+                _th_display["fee_euros"] = _th_display["fee_euros"].apply(_fmt_eur)
+
+                # translate transfer_type values to current language
+                _type_map = {
+                    "transfer":    t("transfer_type_transfer"),
+                    "loan":        t("transfer_type_loan"),
+                    "end_of_loan": t("transfer_type_end_of_loan"),
+                    "free":        t("transfer_type_free"),
+                    "unknown":     t("transfer_type_unknown"),
+                }
+                _th_display["transfer_type"] = _th_display["transfer_type"].map(_type_map).fillna(_th_display["transfer_type"])
+
+                _th_display = _th_display[[
+                    "season", "transfer_date", "from_team_name",
+                    "to_team_name", "fee_euros", "transfer_type"
+                ]]
+                _th_display.columns = [
+                    t("transfer_col_season"), t("transfer_col_date"),
+                    t("transfer_col_from"), t("transfer_col_to"),
+                    t("transfer_col_fee"), t("transfer_col_type")
+                ]
+                st.dataframe(_th_display, width="stretch", hide_index=True)
+
+                st.caption(t("transfer_caption"))
 
 
 # ════════════════════════════════════════════════════════════════════
