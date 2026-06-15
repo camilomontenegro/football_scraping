@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import pandas as pd
 import streamlit as st
+<<<<<<< HEAD
 # used to create custom legend entries for scatter markers in market value chart
 from matplotlib.lines import Line2D  # noqa: F401 — re-exported for players.py
  
@@ -50,6 +51,16 @@ def _fmt_team_history_date_to(row: pd.Series) -> str:
     if pd.isna(row["date_to"]):
         return "Retired" if row["team"] == "Retirado" else "Present"
     return pd.Timestamp(row["date_to"]).strftime("%d/%m/%Y")
+=======
+
+from dashboard import explore
+from dashboard.i18n import t
+
+
+def _fmt(n) -> str:
+    return f"{int(n):,}".replace(",", ".")
+
+>>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
 
 def _render_stadium_detail(row: pd.Series) -> None:
     """Detail panel: photo, metadata and external links for one stadium row."""

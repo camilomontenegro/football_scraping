@@ -8,12 +8,16 @@ Split out of app.py so st.navigation only executes the selected page
 """
 from __future__ import annotations
 
+<<<<<<< HEAD
 from datetime import date as _date_cls
 
+=======
+>>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as st
+<<<<<<< HEAD
 from dateutil.relativedelta import relativedelta
 from matplotlib.lines import Line2D
 
@@ -25,13 +29,25 @@ from dashboard.views.shared import (
     _fmt_team_history_date_to,
     _tab_selectors,
 )
+=======
+
+from dashboard import explore, player_detail
+from dashboard.i18n import t
+from dashboard.views.shared import _fmt, _tab_selectors
+
+>>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
 
 def render() -> None:
     st.header(t("tab_players"))
 
+<<<<<<< HEAD
     t_discipline, t_gk, t_detail, t_injuries, t_market_value, t_transfer_history = st.tabs(
         [t("tab_players"), t("tab_goalkeepers"), "Player Detail", t("tab_injuries"),t("tab_market_value"),
         t("tab_transfer_history")]
+=======
+    t_discipline, t_gk, t_detail, t_injuries = st.tabs(
+        [t("tab_players"), t("tab_goalkeepers"), "Player Detail", t("tab_injuries")]
+>>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
     )
 
     # ── Discipline ──────────────────────────────────────────
@@ -131,28 +147,48 @@ def render() -> None:
         except ImportError:
             st.error("Install mplsoccer: pip install mplsoccer")
             st.stop()
+<<<<<<< HEAD
  
+=======
+
+>>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
         _pd_all = player_detail.get_all_players()
         _pd_search = st.text_input("Search player", key="pd_search", placeholder="Type a name…")
         _pd_filtered = _pd_all[
             _pd_all["canonical_name"].str.contains(_pd_search, case=False, na=False)
         ] if _pd_search else _pd_all
         _pd_names = _pd_filtered["canonical_name"].tolist()
+<<<<<<< HEAD
  
+=======
+
+>>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
         _pd_selected_name = st.selectbox(
             "Select player", options=_pd_names if _pd_names else ["(no match)"],
             key="pd_select", disabled=not _pd_names,
         )
+<<<<<<< HEAD
  
+=======
+
+>>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
         _pd_row = (
             _pd_filtered[_pd_filtered["canonical_name"] == _pd_selected_name]
             if _pd_names else pd.DataFrame()
         )
+<<<<<<< HEAD
  
         if not _pd_row.empty:
             _pd = _pd_row.iloc[0]
             _pd_cid = int(_pd["canonical_id"])
  
+=======
+
+        if not _pd_row.empty:
+            _pd = _pd_row.iloc[0]
+            _pd_cid = int(_pd["canonical_id"])
+
+>>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
             # ═══════════════════════════════════════════════════════
             # SECTION 1 — PLAYER CARD (LaLiga-style header)
             # ═══════════════════════════════════════════════════════
@@ -161,9 +197,15 @@ def render() -> None:
                 "Season", _sm_seasons_all, key="pd_season_global",
             )
             _pd_season_val = None if _pd_season_sel == "All" else _pd_season_sel
+<<<<<<< HEAD
  
             _summary = player_detail.get_player_summary_stats(_pd_cid, _pd_season_sel)
  
+=======
+
+            _summary = player_detail.get_player_summary_stats(_pd_cid, _pd_season_sel)
+
+>>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
             # ── Header row: photo + ficha técnica ────────────────
             _photo_col, _info_col = st.columns([1, 3])
             with _photo_col:
@@ -175,6 +217,7 @@ def render() -> None:
                         '<div style="width:120px;height:120px;border-radius:50%;'
                         'background:#2c3e50;display:flex;align-items:center;'
                         'justify-content:center;font-size:2.5em;color:#7f8c8d">'
+<<<<<<< HEAD
                         "?</div>",
                         unsafe_allow_html=True,
                     )
@@ -197,15 +240,37 @@ def render() -> None:
                 _current_team_df = player_detail.get_player_team_history(_pd_cid, all_time=True)
                 _current_team_df = _current_team_df[_current_team_df["team"] != "Retirado"]
                 _team_name = _current_team_df.iloc[0]["team"] if not _current_team_df.empty else "—"
+=======
+                        '?</div>',
+                        unsafe_allow_html=True,
+                    )
+            with _info_col:
+                # Player name large
+                st.markdown(
+                    f'<h1 style="margin:0;padding:0;font-size:2em">'
+                    f'{_pd["canonical_name"]}</h1>',
+                    unsafe_allow_html=True,
+                )
+                # Team badge
+                _team_name = _summary.get("team") or "—"
+>>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
                 st.markdown(
                     f'<span style="font-size:1.1em;color:#aaa">{_team_name}</span>',
                     unsafe_allow_html=True,
                 )
+<<<<<<< HEAD
  
                 # Ficha técnica row — born, nationality, position
                 _ft_items = []
                 _bd = _pd["birth_date"]
                 if _bd:
+=======
+                # Ficha técnica row
+                _ft_items = []
+                _bd = _pd["birth_date"]
+                if _bd:
+                    from datetime import date as _date_cls
+>>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
                     _age = (_date_cls.today() - _bd).days // 365
                     _ft_items.append(f"**Born:** {_bd.strftime('%d/%m/%Y')} ({_age} yrs)")
                 if _pd["nationality"]:
@@ -213,7 +278,11 @@ def render() -> None:
                 if _pd["position"]:
                     _ft_items.append(f"**Position:** {_pd['position']}")
                 st.markdown(" · ".join(_ft_items) if _ft_items else "—")
+<<<<<<< HEAD
  
+=======
+
+>>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
                 # Source badges
                 _sources_map = {
                     "StatsBomb": _pd["id_statsbomb"], "Understat": _pd["id_understat"],
@@ -229,6 +298,7 @@ def render() -> None:
                         f'border-radius:4px;margin-right:4px;font-size:0.75em">{_src}</span>'
                     )
                 st.markdown(" ".join(_badge_parts), unsafe_allow_html=True)
+<<<<<<< HEAD
  
             st.divider()
  
@@ -257,6 +327,11 @@ def render() -> None:
                 st.dataframe(_team_history, width="stretch", hide_index=True)
  
             st.divider()
+=======
+
+            st.divider()
+
+>>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
             # ═══════════════════════════════════════════════════════
             # SECTION 2 — STATS GRID (LaLiga-style numbers)
             # ═══════════════════════════════════════════════════════
@@ -638,6 +713,7 @@ def render() -> None:
                 "Source: fact_injuries (Transfermarkt)\n"
                 "date_until = NULL means the player was still injured at time of data collection."
             )
+<<<<<<< HEAD
     # ── Market Value ─────────────────────────────────────────
     with t_market_value:
         st.subheader(t("mv_title"))
@@ -1043,3 +1119,5 @@ def render() -> None:
                 ]
                 st.dataframe(_th_display, width="stretch", hide_index=True)
                 st.caption(t("transfer_caption"))
+=======
+>>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
