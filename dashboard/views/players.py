@@ -817,11 +817,13 @@ def render() -> None:
                     _mv_benchmark = player_detail.get_market_value_benchmark(_mv_pos)
  
                 # ── Chart ─────────────────────────────────────
-                fig_mv, ax_mv = plt.subplots(figsize=(12, 5))
-                fig_mv.patch.set_facecolor("#0e1117")
-                ax_mv.set_facecolor("#0e1117")
- 
-                # layer 1 — benchmark band
+                # Plotly replaces matplotlib here to enable interactive hover
+                # on transfer triangles and injury markers.
+                fig_mv = go.Figure()
+
+                # layer 1 — benchmark band (P25-P75 shaded area + median dashed line)
+                # The benchmark is indexed by age, so we convert age → date using
+                # the player's birth_date to align it with the x-axis (dates)
                 if not _mv_benchmark.empty and _mv_bdate is not None:
                     _mv_bdate_ts = pd.Timestamp(_mv_bdate)
                     _mv_benchmark["date"] = _mv_bdate_ts + pd.to_timedelta(
@@ -833,60 +835,152 @@ def render() -> None:
                         (_mv_benchmark["date"] >= date_min) &
                         (_mv_benchmark["date"] <= date_max)
                     ]
-                    ax_mv.fill_between(
-                        _mv_benchmark["date"],
-                        _mv_benchmark["p25"], _mv_benchmark["p75"],
-                        alpha=0.15, color="#2ecc71",
-                        label=f"{_mv_pos} benchmark (P25–P75)",
-                    )
-                    ax_mv.plot(
-                        _mv_benchmark["date"], _mv_benchmark["median"],
-                        color="#2ecc71", linewidth=1.2, linestyle="--", alpha=0.6,
-                        label=f"{_mv_pos} median",
-                    )
- 
-                # layer 2 — main player step chart
-                ax_mv.step(
-                    _mv_history["value_date"], _mv_history["market_value"],
-                    where="post", color="#e74c3c", linewidth=2.2,
-                    label=_mv_selected, zorder=3,
-                )
- 
-                # layer 3 — comparison player step chart
+
+                    # P25 line (invisible — used as base for fill)
+                    fig_mv.add_trace(go.Scatter(
+                        x=_mv_benchmark["date"],
+                        y=_mv_benchmark["p25"],
+                        mode="lines",
+                        line=dict(width=0),
+                        showlegend=False,
+                        hoverinfo="skip",
+                    ))
+                    # P75 line with fill down to P25
+                    fig_mv.add_trace(go.Scatter(
+                        x=_mv_benchmark["date"],
+                        y=_mv_benchmark["p75"],
+                        mode="lines",
+                        line=dict(width=0),
+                        fill="tonexty",
+                        fillcolor="rgba(46,204,113,0.15)",
+                        name=f"{_mv_pos} benchmark (P25–P75)",
+                        hoverinfo="skip",
+                    ))
+                    # median dashed line
+                    fig_mv.add_trace(go.Scatter(
+                        x=_mv_benchmark["date"],
+                        y=_mv_benchmark["median"],
+                        mode="lines",
+                        line=dict(color="#2ecc71", width=1.5, dash="dash"),
+                        name=f"{_mv_pos} median",
+                        hoverinfo="skip",
+                    ))
+
+                    # layer 2 — main player step chart
+                    fig_mv.add_trace(go.Scatter(
+                        x=_mv_history["value_date"],
+                        y=_mv_history["market_value"],
+                        mode="lines",
+                        line=dict(color="#e74c3c", width=2.2, shape="hv"),
+                        name=_mv_selected,
+                        hovertemplate=(
+                            f"<b style='font-size:15px'>{_mv_selected}</b><br><br>"
+                            f"<span style='color:#aaa'>{t('transfer_hover_date')}</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;%{{x|%d/%m/%Y}}<br>"
+                            f"<span style='color:#aaa'>{t('mv_hover_value')}</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;%{{customdata[0]}}<br>"
+                            f"<span style='color:#aaa'>{t('mv_hover_club')}</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;%{{customdata[1]}}"
+                            "<extra></extra>"
+                        ),
+                        customdata=list(zip(
+                            _mv_history["market_value"].apply(_fmt_eur),
+                            _mv_history["club_name"].fillna("—"),
+                        )),
+                        
+                    ))
+
+                # layer 3 — comparison player step chart (no milestone markers)
                 if not _mv_cmp_history.empty and _mv_cmp_name:
-                    ax_mv.step(
-                        _mv_cmp_history["value_date"], _mv_cmp_history["market_value"],
-                        where="post", color="#3498db", linewidth=1.8,
-                        linestyle="-", alpha=0.8, label=_mv_cmp_name, zorder=2,
-                    )
- 
-                # layer 4 — transfer milestones (triangles)
+                    fig_mv.add_trace(go.Scatter(
+                        x=_mv_cmp_history["value_date"],
+                        y=_mv_cmp_history["market_value"],
+                        mode="lines",
+                        line=dict(color="#3498db", width=1.8, shape="hv"),
+                        name=_mv_cmp_name,
+                        hovertemplate=(
+                            f"<b style='font-size:15px'>{_mv_cmp_name}</b><br><br>"
+                            f"<span style='color:#aaa'>{t('transfer_hover_date')}</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;%{{x|%d/%m/%Y}}<br>"
+                            f"<span style='color:#aaa'>{t('mv_hover_value')}</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;%{{customdata[0]}}<br>"
+                            f"<span style='color:#aaa'>{t('mv_hover_club')}</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;%{{customdata[1]}}"
+                            "<extra></extra>"
+                        ),
+                        customdata=list(zip(
+                            _mv_cmp_history["market_value"].apply(_fmt_eur),
+                            _mv_cmp_history["club_name"].fillna("—"),
+                        )),
+                    ))
+
+                # layer 4 — transfer milestones (triangles with hover)
+                # purple = permanent transfer, orange = loan/end_of_loan, green = free
+                # unknown transfers are not shown — no economic information
                 TRANSFER_COLORS = {
                     "transfer":    "#9b59b6",
                     "loan":        "#f39c12",
                     "end_of_loan": "#f39c12",
                     "free":        "#2ecc71",
                 }
+                TRANSFER_LABELS = {
+                    "transfer":    t("mv_legend_transfer"),
+                    "loan":        t("mv_legend_loan"),
+                    "end_of_loan": t("mv_legend_end_of_loan"),
+                    "free":        t("mv_legend_free"),
+                }
+
                 if not _mv_transfers.empty:
-                    _mv_transfers["transfer_date"] = pd.to_datetime(_mv_transfers["transfer_date"])
-                    for _, tr in _mv_transfers.iterrows():
-                        td = tr["transfer_date"]
-                        if pd.isna(td):
+                    _mv_transfers["transfer_date"] = pd.to_datetime(
+                        _mv_transfers["transfer_date"], errors="coerce"
+                    )
+                    # group by transfer_type so each group gets one legend entry
+                    for _tr_type, _tr_color in TRANSFER_COLORS.items():
+                        _tr_group = _mv_transfers[_mv_transfers["transfer_type"] == _tr_type].copy()
+                        _tr_group = _tr_group.dropna(subset=["transfer_date"])
+
+                        _tr_x, _tr_y, _tr_custom = [], [], []
+                        for _, tr in _tr_group.iterrows():
+                            before = _mv_history[_mv_history["value_date"] <= tr["transfer_date"]]
+                            if before.empty:
+                                continue
+                            _tr_x.append(tr["transfer_date"])
+                            _tr_y.append(before.iloc[-1]["market_value"])
+                            _tr_custom.append({
+                                "from":   tr.get("from_team_name") or "—",
+                                "to":     tr.get("to_team_name")   or "—",
+                                "fee":    _fmt_eur(tr.get("fee_euros")),
+                                "season": tr.get("season") or "—",
+                            })
+
+                        if not _tr_x:
                             continue
-                        transfer_color = TRANSFER_COLORS.get(tr["transfer_type"])
-                        if transfer_color is None:
-                            continue
-                        before = _mv_history[_mv_history["value_date"] <= td]
-                        if before.empty:
-                            continue
-                        ax_mv.scatter(td, before.iloc[-1]["market_value"],
-                                      marker="^", s=80, color=transfer_color, zorder=4)
- 
-                # layer 5 — injury milestones (X markers)
+
+                        fig_mv.add_trace(go.Scatter(
+                            x=_tr_x,
+                            y=_tr_y,
+                            mode="markers",
+                            marker=dict(
+                                symbol="triangle-up",
+                                size=12,
+                                color=_tr_color,
+                                line=dict(width=1, color="white"),
+                            ),
+                            name=TRANSFER_LABELS[_tr_type],
+                            customdata=[
+                                [c["from"], c["to"], c["fee"], c["season"]]
+                                for c in _tr_custom
+                            ],
+                            hovertemplate=(
+                                f"<b style='font-size:15px'>{TRANSFER_LABELS[_tr_type]}</b><br><br>"
+                                f"<span style='color:#aaa'>{t('mv_hover_from_team')}</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;%{{customdata[0]}}<br>"
+                                f"<span style='color:#aaa'>{t('mv_hover_to_team')}</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;%{{customdata[1]}}<br>"
+                                f"<span style='color:#aaa'>{t('transfer_hover_fee')}</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;%{{customdata[2]}}<br>"
+                                f"<span style='color:#aaa'>{t('mv_hover_season')}</span>&nbsp;&nbsp;&nbsp;&nbsp;%{{customdata[3]}}"
+                                "<extra></extra>"
+                            ),
+                        ))
+
+                # layer 5 — injury milestones (X markers with hover)
                 if not _mv_injuries.empty:
                     _mv_injuries["date_from"] = pd.to_datetime(
                         _mv_injuries["date_from"], errors="coerce"
                     )
+                    _inj_x, _inj_y, _inj_custom = [], [], []
                     for _, inj in _mv_injuries.iterrows():
                         id_ = inj["date_from"]
                         if pd.isna(id_):
@@ -894,53 +988,77 @@ def render() -> None:
                         before = _mv_history[_mv_history["value_date"] <= id_]
                         if before.empty:
                             continue
-                        ax_mv.scatter(
-                            id_, before.iloc[-1]["market_value"],
-                            marker="x", s=60, color="#e74c3c", linewidths=1.5, zorder=4,
-                        )
- 
-                # ── Axis formatting ───────────────────────────
-                ax_mv.yaxis.set_major_formatter(
-                    plt.FuncFormatter(
-                        lambda x, _: f"€{x/1_000_000:.1f}M" if x >= 1_000_000
-                        else f"€{x/1_000:.0f}K"
-                    )
+                        _inj_x.append(id_)
+                        _inj_y.append(before.iloc[-1]["market_value"])
+                        _inj_custom.append([
+                            inj.get("injury_type") or "—",
+                            inj["date_from"].strftime("%d/%m/%Y"),
+                            str(int(inj["days_absent"])) + " days" if pd.notna(inj.get("days_absent")) else "—",
+                        ])
+
+                    if _inj_x:
+                        fig_mv.add_trace(go.Scatter(
+                            x=_inj_x,
+                            y=_inj_y,
+                            mode="markers",
+                            marker=dict(
+                                symbol="x",
+                                size=10,
+                                color="#e74c3c",
+                                line=dict(width=2, color="#e74c3c"),
+                            ),
+                            name=t("mv_legend_injury"),
+                            customdata=_inj_custom,
+                            hovertemplate=(
+                                f"<b style='font-size:15px'>{t('mv_hover_injury')}</b><br><br>"
+                                f"<span style='color:#aaa'>{t('transfer_hover_type')}</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;%{{customdata[0]}}<br>"
+                                f"<span style='color:#aaa'>{t('transfer_hover_date')}</span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;%{{customdata[1]}}<br>"
+                                f"<span style='color:#aaa'>{t('mv_hover_absent')}</span>&nbsp;&nbsp;&nbsp;&nbsp;%{{customdata[2]}}"
+                                "<extra></extra>"
+                            ),
+                        ))
+
+                # ── Axis and layout formatting ─────────────────
+                fig_mv.update_layout(
+                    xaxis=dict(
+                        color="white",
+                        gridcolor="#333",
+                        tickfont=dict(size=18),
+                        tickformat="%Y",
+                    ),
+                    yaxis=dict(
+                        color="white",
+                        gridcolor="#333",
+                        tickfont=dict(size=18),
+                        tickformat=".2s",
+                        tickprefix="€",
+                    ),
+                    plot_bgcolor="#0e1117",
+                    paper_bgcolor="#0e1117",
+                    font=dict(color="white"),
+                    legend=dict(
+                        bgcolor="#1a1a2e",
+                        bordercolor="#444",
+                        font=dict(size=16, color="white"),
+                    ),
+                    hoverlabel=dict(
+                        bgcolor="#1a1a2e",
+                        bordercolor="#444",
+                        font=dict(size=16, color="white"),
+                        align="left",
+                    ),
+                    margin=dict(l=60, r=20, t=30, b=40),
+                    height=450,
                 )
-                ax_mv.tick_params(colors="white")
-                ax_mv.xaxis.label.set_color("white")
-                ax_mv.yaxis.label.set_color("white")
-                for spine in ax_mv.spines.values():
-                    spine.set_color("#444")
-                ax_mv.grid(axis="y", color="#333", linewidth=0.5, linestyle="--")
- 
-                # ── Legend ────────────────────────────────────
-                _mv_legend_extra = [
-                    Line2D([0], [0], marker="^", color="w", markerfacecolor="#9b59b6",
-                           markersize=8, label="Transfer", linestyle="None"),
-                    Line2D([0], [0], marker="^", color="w", markerfacecolor="#f39c12",
-                           markersize=8, label="Loan / End of loan", linestyle="None"),
-                    Line2D([0], [0], marker="^", color="w", markerfacecolor="#2ecc71",
-                           markersize=8, label="Free transfer", linestyle="None"),
-                    Line2D([0], [0], marker="x", color="#e74c3c",
-                           markersize=8, label="Injury", linestyle="None", markeredgewidth=1.5),
-                ]
-                handles, labels = ax_mv.get_legend_handles_labels()
-                ax_mv.legend(
-                    handles + _mv_legend_extra,
-                    labels + [line.get_label() for line in _mv_legend_extra],
-                    facecolor="#1a1a2e", edgecolor="#444",
-                    labelcolor="white", fontsize=9, loc="upper left",
-                )
- 
-                plt.tight_layout()
-                st.pyplot(fig_mv)
-                plt.close(fig_mv)
- 
+
+                st.plotly_chart(fig_mv, width="stretch")
+
                 st.caption(t("mv_caption"))
                 if _mv_show_benchmark:
                     st.markdown(t("mv_benchmark_explain"))
  
     # ── Transfer History ─────────────────────────────────────
+
     with t_transfer_history:
         st.subheader(t("tab_transfer_history"))
  
@@ -1069,7 +1187,7 @@ def render() -> None:
                     _gantt_df = _gantt_df.dropna(subset=["date_from"])
 
                     # sort ascending — autorange reversed will show most recent at top
-                    _gantt_df = _gantt_df.sort_values("date_from", ascending=True)
+                    _gantt_df = _gantt_df.sort_values("date_from", ascending=False)
 
                     # compute human-readable duration for the hover tooltip
                     _gantt_df["duration_days"] = (_gantt_df["date_to"] - _gantt_df["date_from"]).dt.days

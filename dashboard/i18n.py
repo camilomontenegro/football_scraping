@@ -118,6 +118,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "red_cards":             {"es": "Tarjetas rojas",        "en": "Red cards"},
 
     # ── Market Value tab ────────────────────────────────────
+
     "mv_title":              {"es": "Historial de valor de mercado", "en": "Market Value History"},
     "mv_current_value":      {"es": "Valor actual",             "en": "Current Value"},
     "mv_peak_value":         {"es": "Valor pico",               "en": "Peak Value"},
@@ -126,11 +127,31 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "mv_transfers":          {"es": "Fichajes",                 "en": "Transfers"},
     "mv_compare_player":     {"es": "Comparar con otro jugador (opcional)", "en": "Compare with another player (optional)"},
     "mv_select_comparison":  {"es": "Seleccionar jugador de comparación", "en": "Select comparison player"},
+    
+    # Market value chart 
     "mv_show_benchmark":     {"es": "Mostrar banda de referencia por posición", "en": "Show position benchmark band"},
     "mv_no_data":            {"es": "No hay datos de valor de mercado para este jugador.", "en": "No market value data found for this player."},
     "mv_caption":            {"es": "Gráfico de escalones: el valor se mantiene fijo hasta la siguiente tasación", "en": "Step chart: value stays flat until next valuation"},
     "mv_benchmark_explain":  {"es": "**🟢 Línea discontinua:** valor típico para un jugador de la misma posición y edad *(la mitad de jugadores similares valen más, la mitad menos)*\n\n**🟩 Banda verde:** el rango normal para esa edad y posición\n- Por encima → excepcionalmente valioso\n- Por debajo → por debajo de la media para su perfil",
                             "en": "**🟢 Dashed line:** typical market value for a player of the same position and age *(half of similar players are worth more, half less)*\n\n**🟩 Green band:** the normal range for that age and position\n- Above the band → exceptionally valuable\n- Below the band → below average for their profile"},
+    # Legend 
+    "mv_legend_transfer":    {"es": "Traspaso",          "en": "Transfer"},
+    "mv_legend_loan":        {"es": "Cesión",             "en": "Loan"},
+    "mv_legend_end_of_loan": {"es": "Fin de cesión",      "en": "End of loan"},
+    "mv_legend_free":        {"es": "Libre",              "en": "Free transfer"},
+    "mv_legend_injury":      {"es": "Lesión",             "en": "Injury"},
+
+    # Hover information 
+    "mv_hover_title":    {"es": "Valor de mercado",  "en": "Market value"},
+    "mv_hover_club": {"es": "Club", "en": "Club"},
+    "mv_hover_value":    {"es": "Valor",             "en": "Value"},
+    "mv_hover_from_team":  {"es": "Equipo origen",  "en": "From"},
+    "mv_hover_to_team":    {"es": "Equipo destino", "en": "To"},     
+    "mv_hover_season":  {"es": "Temporada", "en": "Season"},
+    "mv_hover_absent":  {"es": "Días de baja", "en": "Absent"},
+    "mv_hover_injury":  {"es": "Lesión",    "en": "Injury"},
+
+
 
     # ── Career History ──────────────────────────────────────
     "tab_career_history":    {"es": "Historial de equipos",     "en": "Career History"},
