@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import pandas as pd
 import streamlit as st
-<<<<<<< HEAD
 # used to create custom legend entries for scatter markers in market value chart
 from matplotlib.lines import Line2D  # noqa: F401 — re-exported for players.py
+# used in tranfer history tab to generate a unique color for each team
+import colorsys
  
 from dashboard import explore
 from dashboard.i18n import t
@@ -17,6 +18,7 @@ from dashboard.i18n import t
 
 def _fmt(n) -> str:
     return f"{int(n):,}".replace(",", ".")
+
 def _fmt_eur(euros) -> str:
     """
     Formats a euro value as a human-readable string.
@@ -36,7 +38,30 @@ def _fmt_eur(euros) -> str:
     if abs(euros) >= 1_000:
         return f"€{euros/1_000:.0f}K"
     return f"€{euros:,}"
- 
+
+
+def _generate_team_colors(teams: list[str]) -> dict[str, str]:
+    """
+    Assigns a unique color to each unique team name using HSL color space.
+    Hue is restricted to the blue-green range (0.45-0.75) for a clean,
+    professional look that contrasts well against the dark background (#0e1117).
+
+    Parameters:
+        teams (list[str]): list of team names — may contain duplicates
+
+    Returns:
+        dict mapping original team name → hex color string
+    """
+    unique_teams = list(dict.fromkeys(teams))
+    n = len(unique_teams)
+    colors = {}
+    for i, team in enumerate(unique_teams):
+        # hue range 0.45 → 0.75 covers cyan → blue → indigo
+        # alternates between green-blue and blue to maximize distinction
+        hue = 0.45 + (i / max(n, 1)) * 0.30
+        r, g, b = colorsys.hls_to_rgb(hue, 0.55, 0.70)
+        colors[team] = f"#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}"
+    return colors
  
 def _fmt_team_history_date_to(row: pd.Series) -> str:
     """
@@ -51,16 +76,8 @@ def _fmt_team_history_date_to(row: pd.Series) -> str:
     if pd.isna(row["date_to"]):
         return "Retired" if row["team"] == "Retirado" else "Present"
     return pd.Timestamp(row["date_to"]).strftime("%d/%m/%Y")
-=======
-
-from dashboard import explore
-from dashboard.i18n import t
 
 
-def _fmt(n) -> str:
-    return f"{int(n):,}".replace(",", ".")
-
->>>>>>> f879e66061c859d3375dbc3b2a982db4093cf724
 
 def _render_stadium_detail(row: pd.Series) -> None:
     """Detail panel: photo, metadata and external links for one stadium row."""
