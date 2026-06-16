@@ -17,6 +17,7 @@ import pandas as pd
 import streamlit as st
 from dateutil.relativedelta import relativedelta
 from matplotlib.lines import Line2D
+import plotly.graph_objects as go
  
 from dashboard import explore, player_detail
 from dashboard.i18n import t
@@ -24,6 +25,7 @@ from dashboard.views.shared import (
     _fmt,
     _fmt_eur,
     _fmt_team_history_date_to,
+    _generate_team_colors,
     _tab_selectors,
 )
  
@@ -801,10 +803,15 @@ def render() -> None:
                             ck6.metric(t("position"), _mv_cmp_row.iloc[0].get("position") or "—")
  
                 # ── Benchmark band toggle ─────────────────────
+                # initialize session state before creating the widget to avoid conflicts
+                if "mv_benchmark_toggle" not in st.session_state:
+                    st.session_state["mv_benchmark_toggle"] = True
+
                 _mv_show_benchmark = st.checkbox(
-                    t("mv_show_benchmark"), value=True, key="mv_benchmark"
+                    t("mv_show_benchmark"),
+                    key="mv_benchmark_toggle",
                 ) if _mv_pos else False
- 
+                
                 _mv_benchmark = pd.DataFrame()
                 if _mv_show_benchmark and _mv_pos:
                     _mv_benchmark = player_detail.get_market_value_benchmark(_mv_pos)
@@ -1034,4 +1041,220 @@ def render() -> None:
                 ]
                 st.dataframe(_th_display, width="stretch", hide_index=True)
                 st.caption(t("transfer_caption"))
- 
+
+                st.divider()
+
+                # ══════════════════════════════════════════════════════════
+                # VISUALIZATION 1 — GANTT CHART: full career timeline
+                # Each horizontal bar represents a spell at a club.
+                # Bar starts at date_from (arrival) and ends at date_to (departure).
+                # If date_to is NULL the player is still at that club — filled with today.
+                # Hover shows club name, arrival/departure dates and total duration..
+                # ══════════════════════════════════════════════════════════
+                st.subheader(t("transfer_career_timeline"))
+
+                _gantt_df = player_detail.get_player_team_history(_th_cid, all_time=True)
+                # exclude retirement entries — handled separately via the Active/Retired badge
+                _gantt_df = _gantt_df[_gantt_df["team"] != "Retirado"].copy()
+
+                if not _gantt_df.empty:
+                    # normalize dates — can arrive as str, date or datetime from the DB
+                    _gantt_df["date_from"] = pd.to_datetime(_gantt_df["date_from"], errors="coerce")
+                    _gantt_df["date_to"]   = pd.to_datetime(_gantt_df["date_to"],   errors="coerce")
+
+                    # fill NULL date_to with today — player is still at that club
+                    _gantt_df["date_to"] = _gantt_df["date_to"].fillna(pd.Timestamp.today())
+
+                    # drop rows where date_from could not be parsed — nothing to draw
+                    _gantt_df = _gantt_df.dropna(subset=["date_from"])
+
+                    # sort ascending — autorange reversed will show most recent at top
+                    _gantt_df = _gantt_df.sort_values("date_from", ascending=True)
+
+                    # compute human-readable duration for the hover tooltip
+                    _gantt_df["duration_days"] = (_gantt_df["date_to"] - _gantt_df["date_from"]).dt.days
+                    _gantt_df["duration_str"] = _gantt_df["duration_days"].apply(
+                        lambda d: f"{d // 365} years {(d % 365) // 30} months" if d >= 365
+                        else f"{d // 30} months"
+                    )
+
+                    # make team labels unique to avoid plotly grouping repeated clubs
+                    # on the same Y axis position (e.g. Lukaku returning to Chelsea or Inter)
+                    _team_counts = {}
+                    _unique_teams = []
+                    for team in _gantt_df["team"].tolist():
+                        if team not in _team_counts:
+                            _team_counts[team] = 1
+                            _unique_teams.append(team)
+                        else:
+                            _team_counts[team] += 1
+                            _unique_teams.append(f"{team} ({_team_counts[team]})")
+                    _gantt_df["team_label"] = _unique_teams
+
+                    fig_gantt = go.Figure()
+
+                    # generate one color per unique team — same team always gets same color across spells
+                    _team_colors = _generate_team_colors(_gantt_df["team"].tolist())
+
+                    # build single trace with all bars — avoids Y axis ordering issues
+                    fig_gantt.add_trace(go.Bar(
+                        x=[(row["date_to"] - row["date_from"]).total_seconds() * 1000
+                        for _, row in _gantt_df.iterrows()],
+                        y=_gantt_df["team_label"].tolist(),
+                        base=[row["date_from"].strftime("%Y-%m-%d")
+                            for _, row in _gantt_df.iterrows()],
+                        orientation="h",
+                        marker_color=[_team_colors[team] for team in _gantt_df["team"].tolist()],
+                        customdata=list(zip(
+                            _gantt_df["date_from"].dt.strftime("%d/%m/%Y"),
+                            _gantt_df.apply(
+                                lambda r: t("transfer_present")
+                                if r["date_to"].date() >= pd.Timestamp.today().date()
+                                else r["date_to"].strftime("%d/%m/%Y"),
+                                axis=1,
+                            ),
+                            _gantt_df["duration_str"],
+                            _gantt_df["team"],  # original name without suffix for hover
+                        )),
+                        hovertemplate=(
+                            "<b style='font-size:14px'>%{customdata[3]}</b><br><br>"
+                            f"<span style='color:#aaa'>{t('transfer_hover_from')}</span>"
+                            "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;%{customdata[0]}<br>"
+                            f"<span style='color:#aaa'>{t('transfer_hover_to')}</span>"
+                            "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;%{customdata[1]}<br>"
+                            f"<span style='color:#aaa'>{t('transfer_hover_duration')}</span>"
+                            "&nbsp;&nbsp;%{customdata[2]}"
+                            "<extra></extra>"
+                        ),
+                        showlegend=False,
+                    ))
+
+                    fig_gantt.update_layout(
+                        barmode="overlay",
+                        xaxis=dict(
+                            type="date",
+                            tickformat="%Y",
+                            gridcolor="#333",
+                            color="white",
+                            tickfont=dict(size=18),
+                        ),
+                        yaxis=dict(
+                            color="white",
+                            autorange="reversed",
+                            tickvals=_gantt_df["team_label"].tolist(),  # valores únicos internos
+                            ticktext=_gantt_df["team"].tolist(), 
+                            tickfont=dict(size=18),         
+                        ),
+                        plot_bgcolor="#0e1117",
+                        paper_bgcolor="#0e1117",
+                        font=dict(color="white"),
+                        margin=dict(l=120, r=20, t=30, b=40),
+                        height=max(200, len(_gantt_df) * 40),
+                        hoverlabel=dict(
+                            bgcolor="#1a1a2e",
+                            bordercolor="#444",
+                            font=dict(size=16, color="white"),
+                            align="left",
+                        ),
+                    )
+
+                    st.plotly_chart(fig_gantt, width="stretch")
+
+               
+                st.divider()
+
+                # ══════════════════════════════════════════════════════════
+                # VISUALIZATION 2 — BAR CHART: transfer fees over time
+                # Only permanent transfers with a known fee (fee_euros > 0) are shown.
+                # Loans, free transfers and unknown fees are excluded.
+                # Each bar represents one transfer — height = fee in euros.
+                # Hover shows origin club, destination club, fee and transfer date.
+                # ══════════════════════════════════════════════════════════
+                st.subheader(t("transfer_fees_chart"))
+
+                # filter to permanent transfers with a known, non-zero fee
+                # filter to transfers with a known, non-zero fee — includes loans with fee and end of loan with fee
+                _fee_df = _th_transfers[
+                    (_th_transfers["fee_euros"].notna()) &
+                    (_th_transfers["fee_euros"] > 0)
+                ].copy()
+
+                if _fee_df.empty:
+                        st.caption(t("transfer_no_fee_data"))
+                else:
+                    _fee_df["transfer_date"] = pd.to_datetime(_fee_df["transfer_date"], errors="coerce")
+                    # drop rows where transfer_date could not be parsed
+                    _fee_df = _fee_df.dropna(subset=["transfer_date"])
+                    # sort chronologically so bars read left to right in time order
+                    _fee_df = _fee_df.sort_values("transfer_date", ascending=True)
+
+                    # x-axis label: destination club + season for context
+                    _fee_df["label"] = _fee_df.apply(
+                        lambda r: f"{r['to_team_name']} ({r['season']})" if pd.notna(r["season"])
+                        else r["to_team_name"],
+                        axis=1,
+                    )
+
+                    fig_fees = go.Figure()
+                    fig_fees.add_trace(go.Bar(
+                        x=_fee_df["label"],
+                        y=_fee_df["fee_euros"],
+                        marker_color=[
+                            _team_colors.get(team, "#666666")
+                            for team in _fee_df["to_team_name"].fillna("—")
+                        ],
+                        hovertemplate=(
+                            "<b>%{customdata[3]}</b><br><br>"
+                            f"<span style='color:#aaa'>{t('transfer_hover_from')}</span>"
+                            "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;%{customdata[0]}<br>"
+                            f"<span style='color:#aaa'>{t('transfer_hover_fee')}</span>"
+                            "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;%{customdata[1]}<br>"
+                            f"<span style='color:#aaa'>{t('transfer_hover_date')}</span>"
+                            "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;%{customdata[2]}<br>"
+                            f"<span style='color:#aaa'>{t('transfer_hover_type')}</span>"
+                            "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;%{customdata[4]}"
+                            "<extra></extra>"
+                        ),
+                        # customdata passes extra fields to the hover template
+                        customdata=list(zip(
+                            _fee_df["from_team_name"].fillna("—"),
+                            _fee_df["fee_euros"].apply(_fmt_eur),
+                            _fee_df["transfer_date"].dt.strftime("%d/%m/%Y"),
+                            _fee_df["to_team_name"].fillna("—"),   # nombre del equipo para el título del hover
+                            _fee_df["transfer_type"].map({
+                                "transfer":    "Transfer",
+                                "loan":        "Loan",
+                                "end_of_loan": "End of loan",
+                                "free":        "Free",
+                            }).fillna("Unknown"),
+                        )),
+                        showlegend=False,
+                    ))
+
+                    fig_fees.update_layout(
+                        xaxis=dict(
+                            color="white",
+                            gridcolor="#333",
+                            tickfont=dict(size=18),
+                        ),
+                        yaxis=dict(
+                            color="white",
+                            gridcolor="#333",
+                            tickformat=".2s",
+                            tickprefix="€",
+                            tickfont=dict(size=18),
+                        ),
+                        plot_bgcolor="#0e1117",
+                        paper_bgcolor="#0e1117",
+                        font=dict(color="white"),
+                        margin=dict(l=60, r=20, t=30, b=80),
+                        height=350,
+                        hoverlabel=dict(
+                            bgcolor="#1a1a2e",
+                            bordercolor="#444",
+                            font=dict(size=16, color="white"),
+                            align="left",
+                        ),
+                    )
+
+                    st.plotly_chart(fig_fees, width="stretch")

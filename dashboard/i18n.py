@@ -170,7 +170,24 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "transfer_type_end_of_loan":{"es": "Fin de cesión", "en": "End of loan"},
     "transfer_type_free":      {"es": "Libre",          "en": "Free"},
     "transfer_type_unknown":   {"es": "Desconocido",    "en": "Unknown"},
-    
+
+    # transfer history charts 
+    "transfer_career_timeline":     {"es": "Línea temporal de equipos",     "en": "Career Timeline"},
+    "transfer_fees_chart":          {"es": "Costes de fichajes",             "en": "Transfer & Loan Fees"},
+    "transfer_no_career_data":      {"es": "No hay datos de carrera para este jugador.",
+                                    "en": "No career data found for this player."},
+    "transfer_no_fee_data":         {"es": "No hay fichajes con coste conocido para este jugador.",
+                                    "en": "No transfers with known fee for this player."},
+    "transfer_hover_from":          {"es": "Desde",        "en": "From"},
+    "transfer_hover_to":            {"es": "Hasta",        "en": "To"},
+    "transfer_hover_duration":      {"es": "Duración",     "en": "Duration"},
+    "transfer_hover_fee":           {"es": "Coste",        "en": "Fee"},
+    "transfer_hover_date":          {"es": "Fecha",        "en": "Date"},
+    "transfer_hover_type":          {"es": "Tipo",         "en": "Type"},
+    "transfer_present":             {"es": "Presente",     "en": "Present"},
+        
+
+
     # ── Shot Intelligence tab ───────────────────────────────
     "shot_intelligence":     {"es": "Inteligencia de tiro",  "en": "Shot Intelligence"},
     "metric":                {"es": "Métrica",               "en": "Metric"},
