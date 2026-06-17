@@ -1441,6 +1441,9 @@ def scrape_whoscored(
 def main():
     import argparse
 
+    from utils.scraper_lock import acquire_scraper_lock
+
+    acquire_scraper_lock("whoscored_scraper")
     parser = argparse.ArgumentParser(description="WhoScored scraper genérico")
     parser.add_argument(
         "--competition", "-c", default="La Liga",

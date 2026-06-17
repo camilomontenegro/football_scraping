@@ -35,6 +35,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 from sqlalchemy import text
 
 from loaders.common import engine
+from utils.scraper_lock import acquire_scraper_lock
 from scrapers.whoscored_scraper import (
     DRIVER_RESTART_EVERY,
     FAIL_STREAK_LIMIT,
@@ -73,22 +74,32 @@ def _competition_id(competition: str) -> int | None:
         ).scalar()
 
 
-def _ids_from_db(competition: str, season_ws: str, limit: int | None) -> list[str]:
+def _ids_from_db(
+    competition: str,
+    season_ws: str,
+    limit: int | None,
+    only_gaps: bool = False,
+) -> list[str]:
     """Lee id_whoscored de dim_match para la competición/temporada."""
-    from utils.data_paths import normalize_season
+    from utils.data_paths import season_db_format
 
     comp_id = _competition_id(competition)
     if comp_id is None:
         log.error("No se encontró competition_id en dim_competition para %s", competition)
         return []
 
-    season_db = normalize_season(season_ws)
-    sql = """
+    season_db = season_db_format(season_ws)
+    gap_filter = """
+          AND (m.referee_id IS NULL OR m.manager_home IS NULL OR m.manager_away IS NULL
+               OR m.attendance IS NULL OR m.attendance = 0)
+    """ if only_gaps else ""
+    sql = f"""
         SELECT m.id_whoscored
         FROM dim_match m
         WHERE m.id_whoscored IS NOT NULL
           AND m.competition_id = :comp_id
           AND m.season = :season
+          {gap_filter}
         ORDER BY m.match_id
     """
     with engine.connect() as conn:
@@ -112,6 +123,7 @@ def _already_scraped(competition: str, season_ws: str, ws_id: str) -> bool:
 
 
 def main() -> None:
+    acquire_scraper_lock("scrape_whoscored_by_ids")
     parser = argparse.ArgumentParser(
         description="Scrape WhoScored /live para IDs concretos (matchCentreData)",
     )
@@ -136,6 +148,10 @@ def main() -> None:
         "--skip-existing", action="store_true",
         help="No volver a descargar si match_centre.json ya existe",
     )
+    parser.add_argument(
+        "--only-gaps", action="store_true",
+        help="Con --from-db, solo partidos sin árbitro/managers/asistencia",
+    )
     args = parser.parse_args()
 
     season_format = "range"
@@ -158,7 +174,9 @@ def main() -> None:
         )
 
     if args.from_db:
-        match_ids = _ids_from_db(args.competition, args.season, args.limit)
+        match_ids = _ids_from_db(
+            args.competition, args.season, args.limit, only_gaps=args.only_gaps,
+        )
     elif args.match_ids:
         match_ids = [str(i) for i in args.match_ids]
         if args.limit:

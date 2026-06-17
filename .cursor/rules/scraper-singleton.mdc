@@ -1,0 +1,28 @@
+---
+description: Nunca lanzar scrapers externos en paralelo (riesgo de bloqueo)
+alwaysApply: true
+---
+
+# Scraper singleton — sin ejecuciones paralelas
+
+**Nunca** lances el mismo scraper (ni varios scrapers contra el mismo sitio) en paralelo.
+
+## Reglas para el agente
+
+1. **Un solo proceso de scraping** a la vez en esta máquina (WhoScored, SofaScore, Transfermarkt, etc.).
+2. **Antes de lanzar un scraper**, comprobar si ya hay uno en ejecución:
+   - `Get-Process python` y filtrar por `scrape_whoscored`, `whoscored_scraper`, `run_match_centre`, `sofascore`, `transfermarkt`, `chromedriver`.
+   - Si hay alguno activo, **no lanzar otro**. Informar al usuario y esperar o preguntar si quiere parar el existente.
+3. **No relanzar** un scraper que ya está corriendo "por si acaso" ni abrir una segunda terminal con el mismo comando.
+4. **No encadenar** varios `run_match_centre_scrape` ni mezclar `run_match_centre_scrape` + `scrape_whoscored_by_ids` a la vez.
+5. Los scripts de **backfill / loaders / extractores** (sin Selenium) sí pueden ejecutarse en paralelo con un scraper, salvo que compitan por la misma BD de forma destructiva.
+
+## Comando correcto (una sola instancia)
+
+```powershell
+python -m scripts.scrape_whoscored_by_ids -c "Serie A" -s "2024/25" --from-db --skip-existing
+```
+
+## Si el usuario pide scrapear varias competiciones
+
+Ejecutarlas **en serie**, no en paralelo. Esperar a que termine una antes de iniciar la siguiente.

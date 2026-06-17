@@ -151,15 +151,9 @@ CREATE TABLE dim_stadium (
     valid_to_season       VARCHAR(20) NOT NULL,
     stadium_name          VARCHAR(200),
     capacity              INTEGER,
-    capacity_intl         INTEGER,
     seats_total           INTEGER,
-    seats_covered         INTEGER,
-    seats_vip             INTEGER,
     vip_boxes             SMALLINT,
-    seats_standing        INTEGER,
-    inaugurated_year      SMALLINT,
     built_year            SMALLINT,
-    refurbished_year      SMALLINT,
     construction_cost     VARCHAR(120),
     owner                 VARCHAR(200),
     operator              VARCHAR(200),
@@ -168,18 +162,12 @@ CREATE TABLE dim_stadium (
     country               VARCHAR(80),
     surface               VARCHAR(80),
     architect             VARCHAR(200),
-    naming_rights         VARCHAR(200),
-    previous_names_raw    TEXT,
-    pitch_length_m        SMALLINT,
-    pitch_width_m         SMALLINT,
-    has_pitch_heating     BOOLEAN,
     tm_url                VARCHAR(400),
     wikidata_qid          VARCHAR(20),
     latitude              DECIMAL(9,6),
     longitude             DECIMAL(9,6),
     altitude_m            INTEGER,
     timezone              VARCHAR(64),
-    roof_type             VARCHAR(20),
     wikipedia_url         VARCHAR(500),
     image_url             TEXT,
     is_current            BOOLEAN DEFAULT TRUE,
@@ -364,6 +352,29 @@ def step_create_views(conn, log: MigrationLog):
 
 
 # ═══════════════════════════════════════════════════════════════════
+# PASO 2b: COLUMNAS ELIMINADAS DEL SCHEMA
+# ═══════════════════════════════════════════════════════════════════
+
+_DROP_STADIUM_COLUMNS_SQL = Path(__file__).resolve().parent / "migrations" / "drop_stadium_sparse_columns.sql"
+
+
+def step_drop_removed_columns(conn, log: MigrationLog):
+    """Elimina columnas sparse de dim_stadium retiradas del schema definitivo."""
+    if not _DROP_STADIUM_COLUMNS_SQL.is_file() or not table_exists(conn, "dim_stadium"):
+        return
+    for line in _DROP_STADIUM_COLUMNS_SQL.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line.startswith("ALTER TABLE"):
+            continue
+        col = line.split("EXISTS")[-1].strip().rstrip(";")
+        if column_exists(conn, "dim_stadium", col):
+            conn.execute(text(line))
+            log.added(f"dim_stadium.{col} eliminada")
+        else:
+            log.skip(f"dim_stadium.{col} ya ausente")
+
+
+# ═══════════════════════════════════════════════════════════════════
 # PASO 5: SEED dim_competition
 # ═══════════════════════════════════════════════════════════════════
 
@@ -429,6 +440,18 @@ def run(dry_run: bool = False):
                 else:
                     log.added(f"{table}.{col} SE AÑADIRÍA ({definition})")
 
+            print("\n[2b/5] Columnas eliminadas del schema...")
+            if _DROP_STADIUM_COLUMNS_SQL.is_file() and table_exists(conn, "dim_stadium"):
+                for line in _DROP_STADIUM_COLUMNS_SQL.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line.startswith("ALTER TABLE"):
+                        continue
+                    col = line.split("EXISTS")[-1].strip().rstrip(";")
+                    if column_exists(conn, "dim_stadium", col):
+                        log.added(f"dim_stadium.{col} SE ELIMINARÍA")
+                    else:
+                        log.skip(f"dim_stadium.{col} ya ausente")
+
             print("\n[3/5] Índices...")
             for name, _ in NEW_INDEXES:
                 if index_exists(conn, name):
@@ -458,6 +481,9 @@ def run(dry_run: bool = False):
 
         print("\n[2/5] Columnas nuevas...")
         step_add_columns(conn, log)
+
+        print("\n[2b/5] Columnas eliminadas del schema...")
+        step_drop_removed_columns(conn, log)
 
         print("\n[3/5] Índices...")
         step_add_indexes(conn, log)

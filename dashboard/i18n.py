@@ -248,14 +248,29 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "search_stadium":        {"es": "Buscar (estadio / equipo / ciudad)",
                               "en": "Search (stadium / team / city)"},
     "top_15_capacity":       {"es": "Top 15 por aforo",      "en": "Top 15 by capacity"},
-    "stadium_select_hint":   {"es": "Haz clic en una fila de la tabla para ver la ficha del estadio.",
-                              "en": "Click a table row to open the stadium detail panel."},
+    "stadium_select_hint":   {"es": "Haz clic en una fila de la tabla o elige un estadio abajo para ver su ficha.",
+                              "en": "Click a table row or pick a stadium below to open the detail panel."},
+    "stadium_view_select":   {"es": "Estadio a visualizar",  "en": "Stadium to view"},
     "stadium_detail":        {"es": "Ficha del estadio",     "en": "Stadium detail"},
-    "stadium_no_photo":      {"es": "Sin foto en Wikidata. Ejecuta el enricher de estadios para intentar obtenerla.",
-                              "en": "No Wikidata photo yet. Run the stadium enricher to fetch one."},
+    "stadium_no_photo":      {"es": "Sin foto disponible (ni Cloudinary ni Wikidata).",
+                              "en": "No photo available (neither Cloudinary nor Wikidata)."},
     "stadium_wikipedia":     {"es": "Wikipedia",             "en": "Wikipedia"},
     "stadium_wikidata":      {"es": "Wikidata",              "en": "Wikidata"},
     "stadium_map_fallback":  {"es": "Ubicación (sin foto disponible)", "en": "Location (no photo available)"},
+    "stadium_name_history":  {"es": "Historial de nombres", "en": "Name history"},
+    "stadium_name_current":  {"es": "actual",                "en": "current"},
+    "stadium_name_from":     {"es": "desde",                 "en": "from"},
+    "stadium_name_until":    {"es": "hasta",                 "en": "until"},
+    "stadium_name_history_none": {
+        "es": "Sin cambios de nombre documentados.",
+        "en": "No documented name changes.",
+    },
+    "stadium_location":      {"es": "Ubicación",             "en": "Location"},
+    "stadium_no_coords":     {
+        "es": "Sin coordenadas geográficas en la base de datos.",
+        "en": "No geographic coordinates in the database.",
+    },
+    "stadium_open_maps":     {"es": "Abrir en Google Maps",  "en": "Open in Google Maps"},
 
     # ── Pipeline monitoring tab ─────────────────────────────
     "pipeline_monitoring":   {"es": "Monitorización del pipeline", "en": "Pipeline monitoring"},
@@ -322,12 +337,381 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "attendance_by_team":    {"es": "Asistencia media por equipo (local)", "en": "Avg home attendance by team"},
     "no_weather_data":       {"es": "No hay datos meteorológicos para esta selección.", "en": "No weather data for this selection."},
     "no_attendance_data":    {"es": "No hay datos de asistencia para esta selección.", "en": "No attendance data for this selection."},
+    "stadium_fill_viz":      {"es": "Llenado del estadio",   "en": "Stadium fill"},
+    "stadium_fill_select":   {"es": "Partido / vista",       "en": "Match / view"},
+    "stadium_fill_avg":      {"es": "Media de la temporada", "en": "Season average"},
+    "stadium_fill_caption":  {
+        "es": "Las gradas se rellenan de abajo arriba; el color (rojo → verde) indica el % de aforo.",
+        "en": "Stands fill bottom-up; color (red → green) reflects occupancy %.",
+    },
+    "stadium_fill_no_cap":   {
+        "es": "Sin capacidad en dim_stadium para calcular el llenado visual.",
+        "en": "No dim_stadium capacity — visual fill unavailable.",
+    },
     "no_referee_data":       {"es": "No hay datos de árbitros. Ejecuta la migración add_dim_referee.sql y carga datos.", "en": "No referee data. Run add_dim_referee.sql migration and load data."},
     "no_manager_data":       {"es": "No hay datos de managers. Ejecuta add_whoscored_stats.sql y el extractor.", "en": "No manager data. Run add_whoscored_stats.sql and the extractor."},
+    "players_tracked":       {"es": "Jugadores registrados", "en": "Players tracked"},
+
+    # ── Match (per-match context) ───────────────────────────
+    "match_detail_section":  {"es": "Partido",               "en": "Match"},
+    "match_select":          {"es": "Selecciona un partido", "en": "Select a match"},
+    "no_matches_found":      {"es": "No hay partidos para esta selección.", "en": "No matches for this selection."},
+    "match_officials":       {"es": "Arbitraje",             "en": "Officials"},
+    "referee":               {"es": "Árbitro",               "en": "Referee"},
+    "humidity":              {"es": "Humedad",               "en": "Humidity"},
+    "precipitation":         {"es": "Precipitación",         "en": "Precipitation"},
+    "wind":                  {"es": "Viento",                "en": "Wind"},
+    "home_label":            {"es": "Local",                 "en": "Home"},
+    "away_label":            {"es": "Visitante",             "en": "Away"},
+
+    # ── Cards & fouls / chalkboard / diagnostics ────────────
+    "cards_fouls_section":   {"es": "Tarjetas y faltas",     "en": "Cards & fouls"},
+    "chalkboard_section":    {"es": "Pizarra",               "en": "Chalkboard"},
+    "event_diagnostics":     {"es": "Diagnóstico de eventos", "en": "Event diagnostics"},
+    "action_heatmap":        {"es": "Mapa de calor de acciones", "en": "Action heatmap"},
+    "fouls":                 {"es": "Faltas",                "en": "Fouls"},
+    "total_cards":           {"es": "Tarjetas totales",      "en": "Total cards"},
+    "cards_per_match":       {"es": "Tarjetas/partido",      "en": "Cards/match"},
+    "fouls_per_match":       {"es": "Faltas/partido",        "en": "Fouls/match"},
+    "min_matches":           {"es": "Mínimo de partidos",    "en": "Min. matches"},
+    "action_type":           {"es": "Tipo de acción",        "en": "Action type"},
+    "passes":                {"es": "Pases",                 "en": "Passes"},
+    "tackles":               {"es": "Entradas",              "en": "Tackles"},
+    "shots":                 {"es": "Tiros",                 "en": "Shots"},
+    "no_event_data":         {"es": "No hay eventos WhoScored para esta selección.",
+                              "en": "No WhoScored events for this selection."},
 
     # ── DB connection error ─────────────────────────────────
     "db_error":              {"es": "No se puede conectar a la base de datos. Revisa tu archivo .env.",
                               "en": "Cannot connect to the database. Check your .env file."},
+
+    # ── Page / sidebar ──────────────────────────────────────
+    "page_title":            {"es": "Dashboard de fútbol",     "en": "Football Scraping Dashboard"},
+    "lang_label":            {"es": "🌐 Idioma",               "en": "🌐 Language / Idioma"},
+    "filter_all":            {"es": "Todos",                   "en": "All"},
+    "no_seasons_in_db":      {"es": "(sin temporadas en BD)",  "en": "(no seasons in DB)"},
+    "no_seasons_paren":      {"es": "(sin temporadas)",        "en": "(no seasons)"},
+    "none_option":           {"es": "(ninguna)",               "en": "(none)"},
+    "count":                 {"es": "Recuento",                "en": "Count"},
+    "source":                {"es": "Fuente",                  "en": "Source"},
+    "metric_label":          {"es": "Métrica",                 "en": "Metric"},
+    "overall":               {"es": "Global",                  "en": "Overall"},
+    "ongoing":               {"es": "En curso",                "en": "Ongoing"},
+    "unknown_date":          {"es": "Fecha desconocida",       "en": "Unknown date"},
+    "shots_xg_metric":       {"es": "Tiros (xG)",              "en": "Shots (xG)"},
+    "scanning_spinner":      {"es": "Escaneando todas las fuentes…", "en": "Scanning all sources..."},
+    "scanner_errors":        {"es": "Errores del escáner",     "en": "Scanner errors"},
+    "load_missing_cli":      {
+        "es": "Para cargar temporadas faltantes, ejecuta:\n\n    python pipeline_runner.py --sources <fuente>\n\nLa carga es solo por CLI en este dashboard.",
+        "en": "To load missing seasons, run:\n\n    python pipeline_runner.py --sources <source>\n\nLoading is intentionally CLI-only in this dashboard.",
+    },
+    "all_sources_up_to_date": {
+        "es": "Todas las fuentes escaneadas están al día — no hay temporadas pendientes.",
+        "en": "All scanned sources are up-to-date — no missing seasons.",
+    },
+    "resolve_player_cli":    {
+        "es": "Para resolver un caso, ejecuta:\n\n    python -m scripts.review_players --unresolved",
+        "en": "To resolve a case, run:\n\n    python -m scripts.review_players --unresolved",
+    },
+    "no_unresolved_review":  {
+        "es": "No hay entradas sin resolver en `player_review`.",
+        "en": "No unresolved entries in `player_review`.",
+    },
+    "no_matches_dim":        {
+        "es": "No hay partidos en `dim_match` todavía.",
+        "en": "No matches in `dim_match` yet.",
+    },
+    "sofascore_incident_caption": {
+        "es": "Los eventos SofaScore son solo incidencias. Las coordenadas son NULL por diseño.",
+        "en": "SofaScore events are incident-only. Coordinates are NULL by design.",
+    },
+    "whoscored_events_season": {"es": "Eventos WhoScored por temporada", "en": "WhoScored events by season"},
+    "event_types_xy":        {"es": "event_type disponibles (con coordenadas)", "en": "event_type available (with coordinates)"},
+    "events_col":            {"es": "Eventos",                 "en": "Events"},
+    "with_xy":               {"es": "Con x/y",                 "en": "With x/y"},
+    "event_diag_caption":    {
+        "es": "Úsalo para confirmar qué temporadas tienen eventos y los nombres exactos de event_type (pases, entradas, faltas, tarjetas…).",
+        "en": "Use this to confirm which seasons have events and the exact event_type names (passes, tackles, fouls, cards…).",
+    },
+
+    # ── Exploration captions / messages ─────────────────────
+    "no_shot_data_pipeline": {
+        "es": "No hay tiros para esta selección. Revisa la cobertura del pipeline en la pestaña de monitorización.",
+        "en": "No shot data found for this selection. Check pipeline coverage in the monitoring tab.",
+    },
+    "no_event_data_selection": {
+        "es": "No hay eventos para esta selección.",
+        "en": "No event data found for this selection.",
+    },
+    "no_match_data_pipeline": {
+        "es": "No hay datos de partidos. Ejecuta pipeline_runner.py para poblar dim_match.",
+        "en": "No match data found. Run pipeline_runner.py to populate dim_match.",
+    },
+    "caption_player_stats":  {
+        "es": "Fuente: fact_shots (todas las fuentes — StatsBomb, Understat, SofaScore).",
+        "en": "Source: fact_shots (all sources combined — StatsBomb, Understat, SofaScore).",
+    },
+    "caption_shots_by_source": {
+        "es": "Cada fuente cubre distintos tipos de evento. Understat y StatsBomb incluyen xG. Los tiros SofaScore pueden tener coordenadas NULL.",
+        "en": "Each source covers different event types. Understat and StatsBomb include xG. SofaScore shots may have NULL coordinates.",
+    },
+    "caption_events_summary": {
+        "es": "Los eventos SofaScore son solo incidencias (tarjetas, sustituciones, VAR) — coordenadas NULL por diseño. WhoScored y StatsBomb incluyen coordenadas x/y.",
+        "en": "SofaScore events are incident-only (cards, substitutions, VAR) — coordinates are NULL by design. WhoScored and StatsBomb events include x/y coordinates.",
+    },
+    "caption_standings":     {
+        "es": "Fuente: dim_match (todas las fuentes) · xG y tiros: fact_shots · xG a favor/en contra = total de temporada (suma de partidos, no por tiro)",
+        "en": "Source: dim_match (all sources combined) · xG and shots: fact_shots · xG For/Against = season-total expected goals (sum across all matches, not per-shot)",
+    },
+
+    # ── Standings columns ───────────────────────────────────
+    "col_played":            {"es": "Jugados",                 "en": "Played"},
+    "col_won":               {"es": "Ganados",                 "en": "Won"},
+    "col_drawn":             {"es": "Empatados",               "en": "Drawn"},
+    "col_lost":              {"es": "Perdidos",                "en": "Lost"},
+    "col_gf":                {"es": "Goles a favor",           "en": "Goals For"},
+    "col_ga":                {"es": "Goles en contra",         "en": "Goals Against"},
+    "col_gd":                {"es": "Dif. goles",              "en": "Goal Diff"},
+    "col_xg_for":            {"es": "xG a favor (temporada)",  "en": "xG For (season total)"},
+    "col_xg_against":        {"es": "xG en contra (temporada)", "en": "xG Against (season total)"},
+    "col_shots_for":         {"es": "Tiros a favor",           "en": "Shots For"},
+    "col_shots_against":     {"es": "Tiros en contra",         "en": "Shots Against"},
+
+    # ── Players / discipline ──────────────────────────────────
+    "no_player_data":        {"es": "No hay datos de jugadores para esta selección.", "en": "No player data found for this selection."},
+    "caption_discipline":    {
+        "es": "Goles y xG: fact_shots (todas las fuentes) · Tarjetas: fact_events (incidencias SofaScore + StatsBomb)",
+        "en": "Goals and xG: fact_shots (all sources) · Cards: fact_events (SofaScore incidents + StatsBomb)",
+    },
+    "col_player":            {"es": "Jugador",                 "en": "Player"},
+    "col_matches":           {"es": "Partidos",                "en": "Matches"},
+    "top_scorers":           {"es": "Máximos goleadores",      "en": "Top scorers"},
+
+    # ── Goalkeepers ─────────────────────────────────────────
+    "no_gk_data":            {"es": "No hay datos de porteros para esta selección.", "en": "No goalkeeper data found for this selection."},
+    "col_goals_allowed":     {"es": "Goles encajados",         "en": "Goals Allowed"},
+    "col_saves":             {"es": "Paradas",                 "en": "Saves"},
+    "col_save_pct":          {"es": "% paradas",               "en": "Save %"},
+    "col_clean_sheets":      {"es": "Porterías a cero",        "en": "Clean Sheets"},
+    "col_gsae":              {"es": "Goles salvados sobre lo esperado", "en": "Goals Saved Above Expected"},
+    "caption_gsae":          {
+        "es": "Goles salvados sobre lo esperado = paradas − xG encajado (positivo = por encima de lo esperado)",
+        "en": "Goals Saved Above Expected = saves − xG conceded (positive = outperforming)",
+    },
+
+    # ── Player detail extras ──────────────────────────────────
+    "search_rival":          {"es": "Buscar rival",            "en": "Search rival"},
+    "select_player_compare": {"es": "Jugador a comparar",      "en": "Select player to compare"},
+    "compare_mode_player":   {"es": "Otro jugador",            "en": "Another player"},
+    "caption_radar_player":  {"es": "Medias por partido. El % de conversión es por tiro.", "en": "Per-match averages. Conversion % is per-shot."},
+    "caption_radar_league":  {
+        "es": "Medias por partido vs liga (excluyendo este jugador). El % de conversión es por tiro.",
+        "en": "Per-match averages vs league (excluding this player). Conversion % is per-shot.",
+    },
+    "no_shot_cmp_player":    {
+        "es": "No hay tiros de este jugador en la misma competición/temporada.",
+        "en": "No shot data for this player in the same competition/season.",
+    },
+    "not_enough_league":     {"es": "No hay suficientes datos de liga para calcular la media.", "en": "Not enough league data to compute average."},
+    "col_season_short":      {"es": "Temporada",               "en": "Season"},
+    "col_shots":             {"es": "Tiros",                   "en": "Shots"},
+    "col_xg":                {"es": "xG",                      "en": "xG"},
+    "goals_per_match":       {"es": "Goles/partido",           "en": "Goals/Match"},
+    "caption_action_heatmap": {
+        "es": "{n} acciones localizadas · fact_events (WhoScored) · ataque hacia la derecha.",
+        "en": "{n} located actions · fact_events (WhoScored) · attack towards the right.",
+    },
+    "mdm_expander":          {"es": "Identidad en fuentes (MDM)", "en": "Source Identity (MDM)"},
+    "no_injury_data":        {"es": "No hay datos de lesiones para esta selección.", "en": "No injury data found for this selection."},
+    "caption_injuries":      {
+        "es": "Fuente: fact_injuries (Transfermarkt)\ndate_until = NULL significa que el jugador seguía lesionado al recoger los datos.",
+        "en": "Source: fact_injuries (Transfermarkt)\ndate_until = NULL means the player was still injured at time of data collection.",
+    },
+
+    # ── Shot intelligence ─────────────────────────────────────
+    "si_caption_coords":     {
+        "es": "Todas las fuentes · Coordenadas del campo: 105 m × 68 m · Normalizadas a metros",
+        "en": "All sources · Pitch coordinates: 105 m × 68 m · Coordinates normalised to metres",
+    },
+    "si_metric_avg_xg":      {"es": "xG medio por tiro",       "en": "Average xG per shot"},
+    "si_metric_conversion":  {"es": "Tasa de conversión",      "en": "Conversion rate"},
+    "si_avg_xg_label":       {"es": "xG medio",                "en": "Avg xG"},
+    "si_conversion_label":   {"es": "Tasa de conversión",      "en": "Conversion Rate"},
+    "no_shots_coords":       {
+        "es": "No hay tiros con coordenadas para esta selección.",
+        "en": "No shot data with coordinates for this selection.",
+    },
+    "hm_title":              {"es": "{metric} por zona — {season} · {scope}", "en": "{metric} by zone — {season} · {scope}"},
+    "si_finishing_caption":  {
+        "es": "Mín. 20 tiros para clasificar · Goles − xG: positivo = por encima de lo esperado",
+        "en": "Min. 20 shots to qualify · Goals − xG: positive = overperforming",
+    },
+    "no_players_20_shots":   {
+        "es": "No hay jugadores con 20+ tiros para esta selección.",
+        "en": "No players with 20+ shots for this selection.",
+    },
+    "no_setpiece_data":      {"es": "No hay goles a balón parado para esta selección.", "en": "No set-piece goal data for this selection."},
+    "col_penalty_goals":     {"es": "Goles de penalti",        "en": "Penalty Goals"},
+    "col_freekick_goals":    {"es": "Goles de falta",          "en": "Free Kick Goals"},
+    "col_openplay_goals":    {"es": "Goles en juego abierto",  "en": "Open Play Goals"},
+    "col_setpiece_other":    {"es": "Balón parado / Otros",    "en": "Set Piece / Other"},
+    "col_total_goals":       {"es": "Goles totales",           "en": "Total Goals"},
+    "si_setpiece_caption":   {
+        "es": "Fuente: fact_shots (todas las fuentes) · Penalti = situación 'penalty' · Falta = 'direct freekick' / 'free-kick'",
+        "en": "Source: fact_shots (all sources) · Penalty = situation 'penalty' · Free Kick = 'direct freekick' / 'free-kick'",
+    },
+    "zone_data_expander":    {"es": "Tabla de datos por zona", "en": "Zone data table"},
+
+    # ── Pass network ──────────────────────────────────────────
+    "pn_caption":            {
+        "es": "Fuente: fact_events (WhoScored) · Solo pases completados cuyo siguiente evento es del mismo equipo · Grosor/opacidad ∝ pases entre la pareja · Tamaño del nodo ∝ pases realizados",
+        "en": "Source: fact_events (WhoScored) · Only successful passes where the next event belongs to the same team · Edge width/opacity ∝ passes between the pair (both directions combined) · Node size ∝ passes made",
+    },
+
+    # ── Match context ─────────────────────────────────────────
+    "col_stadium":           {"es": "Estadio",                 "en": "Stadium"},
+    "col_home_team":         {"es": "Equipo local",            "en": "Home Team"},
+    "col_away_team":         {"es": "Equipo visitante",        "en": "Away Team"},
+    "stadium_venue_select":  {"es": "Estadio / sede",          "en": "Stadium / Venue"},
+    "fill_pct":              {"es": "% ocupación",             "en": "Fill %"},
+    "empty_seats":           {"es": "Asientos vacíos",         "en": "Empty seats"},
+    "col_home_matches":      {"es": "Partidos en casa",        "en": "Home Matches"},
+    "col_stadium_capacity":  {"es": "Aforo del estadio",       "en": "Stadium Capacity"},
+    "col_raw_venue":         {"es": "Sede bruta",              "en": "Raw Venue"},
+    "col_capacity":          {"es": "Aforo",                   "en": "Capacity"},
+    "select_stadium_team":   {
+        "es": "Selecciona un estadio o equipo para ver la evolución por temporada.",
+        "en": "Select a stadium or team to see the season trend.",
+    },
+
+    # ── Stadiums tab ────────────────────────────────────────
+    "stadium_caption":       {
+        "es": "Estadios por equipo — fuentes: Transfermarkt + enriquecimiento Wikidata. Modelo SCD2: una fila por estado del estadio. Los partidos usan match_stadium_id (sedes neutrales incluidas).",
+        "en": "Stadiums per team — sources: Transfermarkt + Wikidata enrichment. SCD2 model: one row per stadium state. Matches use match_stadium_id (neutral venues included).",
+    },
+    "stadium_table_missing": {
+        "es": "La tabla `dim_stadium` no existe todavía. Aplica la migración:\n\n    psql -U postgres -d football_db -f db/add_dim_stadium.sql\n\nY luego carga datos desde el wizard (\"Descargar estadios por temporada\").",
+        "en": "Table `dim_stadium` does not exist yet. Apply migration:\n\n    psql -U postgres -d football_db -f db/add_dim_stadium.sql\n\nThen load data from the wizard (\"Download stadiums by season\").",
+    },
+    "stadium_include_venues": {
+        "es": "Incluir sedes solo de partido (match-venue)",
+        "en": "Include match-only venues (match-venue)",
+    },
+    "stadium_no_results":    {
+        "es": "No hay estadios para esta combinación de filtros. Si acabas de migrar la tabla, lanza desde el wizard \"Descargar estadios por temporada\" para poblarla.",
+        "en": "No stadiums for this filter combination. If you just migrated the table, run \"Download stadiums by season\" from the wizard to populate it.",
+    },
+    "col_seats":             {"es": "Asientos",                "en": "Seats"},
+    "col_built":             {"es": "Inauguración",            "en": "Built"},
+    "col_owner":             {"es": "Propietario",             "en": "Owner"},
+    "col_city":              {"es": "Ciudad",                  "en": "City"},
+    "col_surface":           {"es": "Superficie",              "en": "Surface"},
+    "col_architect":         {"es": "Arquitecto",              "en": "Architect"},
+    "col_lat":               {"es": "Lat",                     "en": "Lat"},
+    "col_lon":               {"es": "Lon",                     "en": "Lon"},
+    "col_altitude":          {"es": "Altitud m",               "en": "Altitude m"},
+    "col_timezone":          {"es": "Zona horaria",            "en": "Timezone"},
+    "col_tm_url":            {"es": "URL Transfermarkt",       "en": "Transfermarkt URL"},
+    "tm_link_label":         {"es": "Transfermarkt",           "en": "Transfermarkt"},
+    "tm_open":               {"es": "abrir",                   "en": "open"},
+    "stadium_footer_caption": {
+        "es": "Fuente: dim_stadium (Transfermarkt + Wikidata, SCD2). Partidos enlazan vía match_stadium_id; el % de asistencia usa la capacidad del estadio real del partido.",
+        "en": "Source: dim_stadium (Transfermarkt + Wikidata, SCD2). Matches link via match_stadium_id; attendance fill % uses the actual match stadium capacity.",
+    },
+
+    # ── Player detail header / stats ──────────────────────────
+    "born_fmt":              {"es": "**Nacimiento:** {date} ({age} años)", "en": "**Born:** {date} ({age} yrs)"},
+    "years_old":             {"es": "años",                  "en": "yrs"},
+    "statistics_title":      {"es": "Estadísticas — {season}", "en": "Statistics — {season}"},
+    "penalties":             {"es": "Penaltis",                "en": "Penalties"},
+    "penalty_goals":         {"es": "Goles de penalti",        "en": "Penalty Goals"},
+    "conversion_pct":        {"es": "% conversión",            "en": "Conversion %"},
+    "xg_per_shot":           {"es": "xG/tiro",                 "en": "xG/Shot"},
+    "compare_with":          {"es": "Comparar con",            "en": "Compare with"},
+    "compare_mode_league":   {"es": "Media de {comp}",         "en": "{comp} average"},
+    "col_goalkeeper":        {"es": "Portero",                 "en": "Goalkeeper"},
+    "col_shots_faced":       {"es": "Tiros a puerta recibidos", "en": "Shots On Target Faced"},
+    "col_xg_conceded":       {"es": "xG encajado",             "en": "xG Conceded"},
+    "col_save_pct_formula":  {"es": "% paradas (paradas/tiros×100)", "en": "Save % (saves/shots×100)"},
+    "caption_gk_stats":      {
+        "es": "Estadísticas limitadas a partidos donde el portero aparece en eventos (sustituciones, tarjetas…) — proxy de partidos jugados. Tiros a puerta = goles + paradas · % paradas = paradas ÷ tiros a puerta × 100 · xG encajado = xG total de tiros recibidos · Goles salvados sobre lo esperado = paradas − xG encajado (positivo = por encima)",
+        "en": "Stats are scoped to matches where each GK appeared in event data (substitutions, cards, etc.) — used as a proxy for matches played. Shots On Target Faced = goals + saves (blocked/missed excluded) · Save % = saves ÷ shots on target × 100 · xG Conceded = total expected-goal value of shots faced · Goals Saved Above Expected = saves − xG conceded (positive = outperforming)",
+    },
+    "caption_discipline_rows": {
+        "es": "Goles y xG: fact_shots (todas las fuentes) · Tarjetas: fact_events (SofaScore + StatsBomb)\nFilas acumuladas por temporada cuando se elige Todas las temporadas.",
+        "en": "Goals and xG: fact_shots (all sources) · Cards: fact_events (SofaScore incidents + StatsBomb)\nRows show per-season accumulation when All seasons is selected.",
+    },
+    "caption_cards_fouls":   {
+        "es": "Tarjetas: fact_events (todas las fuentes). Faltas: fact_events (WhoScored, heurística por event_type). No se muestran 'faltas recibidas' porque WhoScored atribuye la falta al infractor. Partidos = partidos con eventos del jugador (proxy).",
+        "en": "Cards: fact_events (all sources). Fouls: fact_events (WhoScored, event_type heuristic). 'Fouls suffered' not shown because WhoScored attributes fouls to the offender. Matches = matches with player events (proxy).",
+    },
+    "col_metric":            {"es": "Métrica",                 "en": "Metric"},
+
+    # ── Match context extras ──────────────────────────────────
+    "venue_weather_caption": {
+        "es": "Sedes desde match_stadium_id (dim_stadium), no solo venue_name. Color: rojo > 25°C · naranja 10–25°C · azul < 10°C. Barras de error = rango mín–máx entre partidos en esa sede.",
+        "en": "Venues from match_stadium_id (dim_stadium), not only venue_name. Color: red > 25°C · orange 10–25°C · blue < 10°C. Error bars show min–max range across matches at that venue.",
+    },
+    "weather_trend_caption": {
+        "es": "Barras de error = rango mín–máx por temporada.",
+        "en": "Error bars show min–max range per season.",
+    },
+    "attendance_fill_caption": {
+        "es": "% naranja = ocupación media (asistencia / aforo × 100). Fuente: aforo en dim_stadium.",
+        "en": "Orange % = avg fill rate (avg attendance / stadium capacity × 100). Source: dim_stadium capacity.",
+    },
+    "col_home_matches_short": {"es": "PJ local",               "en": "Home Matches"},
+    "col_avg_short":         {"es": "Media",                   "en": "Avg"},
+    "col_max_short":         {"es": "Máx",                     "en": "Max"},
+    "col_min_short":         {"es": "Mín",                     "en": "Min"},
+    "col_total_short":       {"es": "Total",                   "en": "Total"},
+    "col_date":              {"es": "Fecha",                   "en": "Date"},
+    "col_hg":                {"es": "GL",                      "en": "HG"},
+    "col_ag":                {"es": "GV",                      "en": "AG"},
+    "avg_cards_match":       {"es": "Media tarjetas/partido",  "en": "Avg Cards/Match"},
+    "cards_match_vs_team":   {"es": "Tarjetas/partido vs {team}", "en": "Cards/Match vs {team}"},
+    "cards_match_all":       {"es": "Tarjetas/partido (todos)", "en": "Cards/Match (all teams)"},
+    "yellows_per_match":     {"es": "Amarillas/partido",       "en": "Yellows/Match"},
+    "reds_per_match":        {"es": "Rojas/partido",           "en": "Reds/Match"},
+    "cards_per_match_label": {"es": "Tarjetas/partido",        "en": "Cards per match"},
+    "referee_caption":       {
+        "es": "Fuente: dim_referee + dim_match + fact_events. {scope}Mín. {min_m} partidos para el gráfico. Tarjetas/partido = (amarillas + rojas) / partidos.",
+        "en": "Source: dim_referee + dim_match + fact_events. {scope}Min. {min_m} matches for chart. Cards/Match = (yellows + reds) / matches.",
+    },
+    "ref_scope_team":        {"es": "Tarjetas limitadas a {team}. ", "en": "Cards scoped to {team}. "},
+    "pn_caption_header":     {
+        "es": "WhoScored · Campo: 105 m × 68 m · Local ataca →, visitante ← · Nodo = origen medio del pase (partido completo) · Receptor = siguiente evento del mismo equipo",
+        "en": "WhoScored · Pitch: 105 m × 68 m · Home attacks →, away attacks ← · Node = avg pass-origin location (full match, subs included) · Receiver = next same-team event",
+    },
+    "no_matches_paren":      {"es": "(sin partidos)",            "en": "(no matches)"},
+    "both_teams":            {"es": "Ambos",                     "en": "Both"},
+    "chalkboard_caption":    {
+        "es": "Fuente: fact_events (WhoScored). Pases: verde = completado, rojo = fallido · entradas (azul) · tiros (estrella) · coordenadas 0-1 escaladas a 105×68.",
+        "en": "Source: fact_events (WhoScored). Passes: green = completed, red = failed · tackles (blue) · shots (star) · 0-1 coords scaled to 105×68.",
+    },
+    "col_referee":           {"es": "Árbitro",                   "en": "Referee"},
+    "col_yellows_scope":     {"es": "Amarillas{scope}",          "en": "Yellows{scope}"},
+    "col_reds_scope":        {"es": "Rojas{scope}",              "en": "Reds{scope}"},
+    "col_total_cards_scope": {"es": "Tarjetas totales{scope}",   "en": "Total Cards{scope}"},
+    "col_avg_temp":          {"es": "Media °C",                "en": "Avg °C"},
+    "col_min_temp_c":        {"es": "Mín °C",                  "en": "Min °C"},
+    "col_max_temp_c":        {"es": "Máx °C",                  "en": "Max °C"},
+    "col_avg_humidity":      {"es": "Humedad media %",         "en": "Avg Humidity %"},
+    "col_rainy_matches":     {"es": "Partidos con lluvia",     "en": "Rainy Matches"},
+    "weather_trend_color_caption": {
+        "es": "Color: rojo > 25°C · naranja 10–25°C · azul < 10°C. Barras de error = rango mín–máx por temporada.",
+        "en": "Color: red > 25°C · orange 10–25°C · blue < 10°C. Error bars show min–max range per season.",
+    },
+    "manager_caption":       {
+        "es": "Fuente: dim_match (manager_home / manager_away, WhoScored). % puntos = puntos obtenidos / máximo posible × 100.",
+        "en": "Source: dim_match (manager_home / manager_away, WhoScored). Points % = points won / max possible × 100.",
+    },
+    "col_manager":           {"es": "Entrenador",              "en": "Manager"},
+    "col_draws_short":       {"es": "E",                       "en": "D"},
+    "col_wins_short":        {"es": "V",                       "en": "W"},
+    "col_losses_short":      {"es": "D",                       "en": "L"},
+    "col_cards_match_scope": {"es": "Tarjetas/partido{scope}",   "en": "Cards/Match{scope}"},
+    "temp_axis_label":       {"es": "°C (media, rango mín–máx)", "en": "°C (avg, min–max range)"},
 }
 
 LANGUAGES = {"Español": "es", "English": "en"}

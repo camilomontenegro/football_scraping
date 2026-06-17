@@ -67,14 +67,14 @@ MATCHES_QUERY = """
     JOIN LATERAL (
         SELECT latitude, longitude
         FROM dim_stadium
-        WHERE canonical_team_id = m.home_team_id
+        WHERE stadium_id = m.match_stadium_id
           AND latitude IS NOT NULL
           AND longitude IS NOT NULL
-        ORDER BY valid_to_season DESC
         LIMIT 1
     ) s ON TRUE
     WHERE m.match_date IS NOT NULL
       AND m.temperature_c IS NULL
+      AND m.match_stadium_id IS NOT NULL
 """
 
 UPDATE_SQL = text("""

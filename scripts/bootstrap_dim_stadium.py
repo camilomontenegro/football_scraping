@@ -91,10 +91,7 @@ def step_verify_table() -> bool:
     required = {
         "valid_from_season", "valid_to_season", "data_hash",
         "id_transfermarkt_team", "stadium_name", "is_current",
-        "id_transfermarkt_stadium", "previous_names_raw",
-        "pitch_length_m", "pitch_width_m", "naming_rights",
-        "has_pitch_heating", "has_athletics_track",
-        "valid_from_date", "valid_to_date",
+        "latitude", "longitude", "wikidata_qid",
     }
     missing = required - col_names
     if missing:

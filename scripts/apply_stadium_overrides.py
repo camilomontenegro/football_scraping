@@ -21,6 +21,7 @@ from sqlalchemy import text
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from loaders.common import engine
+from loaders.stadium_loader import resolve_canonical_team_id_by_slug
 from scrapers.wikidata_stadium_enricher import (
     STADIUM_OVERRIDES_PATH,
     _derive_timezone,
@@ -30,22 +31,31 @@ from scrapers.wikidata_stadium_enricher import (
 
 log = logging.getLogger(__name__)
 
+_STADIUM_SLUG_SQL = """
+    team_slug = :slug
+    OR team_slug LIKE :slug || '-%'
+    OR :slug LIKE team_slug || '-%'
+"""
+
 
 def _resolve_team_id(conn, entry: dict) -> int | None:
-    match_slug = entry.get("match")
+    match_slug = entry.get("match") or entry.get("team_slug")
     if match_slug:
         row = conn.execute(
-            text("""
-                SELECT t.canonical_id
+            text(f"""
+                SELECT canonical_team_id
                 FROM dim_stadium s
-                JOIN dim_team t ON t.canonical_id = s.canonical_team_id
-                WHERE s.team_slug = :v
+                WHERE ({_STADIUM_SLUG_SQL}) AND canonical_team_id IS NOT NULL
                 LIMIT 1
             """),
-            {"v": match_slug},
+            {"slug": match_slug},
         ).fetchone()
-        if row:
+        if row and row[0]:
             return int(row[0])
+
+        cid = resolve_canonical_team_id_by_slug(conn, match_slug)
+        if cid:
+            return cid
 
     name = entry.get("team")
     if name:
@@ -66,6 +76,10 @@ def _resolve_team_id(conn, entry: dict) -> int | None:
         if row:
             return int(row[0])
     return None
+
+
+def _resolve_stadium_slug(entry: dict) -> str | None:
+    return entry.get("team_slug") or entry.get("match")
 
 
 def main() -> int:
@@ -113,8 +127,9 @@ def main() -> int:
                 continue
 
             team_id = _resolve_team_id(conn, entry)
-            if not team_id:
-                log.warning("Sin dim_team para %r", entry.get("team") or entry.get("match"))
+            stadium_slug = _resolve_stadium_slug(entry)
+            if not team_id and not stadium_slug:
+                log.warning("Sin dim_team ni slug para %r", entry.get("team") or entry.get("match"))
                 skipped += 1
                 continue
 
@@ -129,17 +144,65 @@ def main() -> int:
                 data["image_url"] = image_url
             if wiki:
                 data["wikipedia_url"] = wiki
+            if entry.get("city"):
+                data["city"] = entry["city"]
+            if entry.get("address"):
+                data["address"] = entry["address"]
 
             cols = [k for k in data if data[k] not in (None, "")]
             if args.dry_run:
-                log.info("dry-run team_id=%s %s cols=%s", team_id, entry.get("team"), cols)
+                log.info(
+                    "dry-run team_id=%s slug=%s %s cols=%s",
+                    team_id, stadium_slug, entry.get("team"), cols,
+                )
                 updated += 1
                 continue
 
             with engine.begin() as tx:
-                n = _propagate_coords_to_team(tx, team_id, data, cols)
+                if team_id:
+                    n = _propagate_coords_to_team(tx, team_id, data, cols)
+                else:
+                    n = 0
+
                 stadium_name = entry.get("stadium_name")
-                if image_url or qid or wiki or stadium_name:
+                if stadium_slug and (
+                    image_url or qid or wiki or stadium_name
+                    or entry.get("city") or entry.get("address") or cols
+                ):
+                    params = {
+                        "slug": stadium_slug,
+                        "stadium_name": stadium_name,
+                        "image_url": image_url,
+                        "wikidata_qid": qid,
+                        "wikipedia_url": wiki,
+                        "country": entry.get("country"),
+                        "city": entry.get("city"),
+                        "address": entry.get("address"),
+                        "latitude": data.get("latitude"),
+                        "longitude": data.get("longitude"),
+                        "timezone": data.get("timezone"),
+                    }
+                    result = tx.execute(
+                        text(f"""
+                            UPDATE dim_stadium
+                            SET latitude = COALESCE(:latitude, latitude),
+                                longitude = COALESCE(:longitude, longitude),
+                                timezone = COALESCE(:timezone, timezone),
+                                stadium_name = COALESCE(:stadium_name, stadium_name),
+                                image_url = COALESCE(:image_url, image_url),
+                                wikidata_qid = COALESCE(:wikidata_qid, wikidata_qid),
+                                wikipedia_url = COALESCE(:wikipedia_url, wikipedia_url),
+                                country = COALESCE(:country, country),
+                                city = COALESCE(:city, city),
+                                address = COALESCE(:address, address),
+                                canonical_team_id = COALESCE(canonical_team_id, :team_id),
+                                updated_at = NOW()
+                            WHERE {_STADIUM_SLUG_SQL}
+                        """),
+                        {**params, "team_id": team_id},
+                    )
+                    n = max(n, result.rowcount or 0)
+                elif team_id and (image_url or qid or wiki or stadium_name or entry.get("city") or entry.get("address")):
                     tx.execute(
                         text("""
                             UPDATE dim_stadium
@@ -148,6 +211,8 @@ def main() -> int:
                                 wikidata_qid = COALESCE(:wikidata_qid, wikidata_qid),
                                 wikipedia_url = COALESCE(:wikipedia_url, wikipedia_url),
                                 country = COALESCE(:country, country),
+                                city = COALESCE(:city, city),
+                                address = COALESCE(:address, address),
                                 updated_at = NOW()
                             WHERE canonical_team_id = :tid
                         """),
@@ -158,6 +223,8 @@ def main() -> int:
                             "wikidata_qid": qid,
                             "wikipedia_url": wiki,
                             "country": entry.get("country"),
+                            "city": entry.get("city"),
+                            "address": entry.get("address"),
                         },
                     )
             log.info("OK %s (%s rows)", entry.get("team"), n)

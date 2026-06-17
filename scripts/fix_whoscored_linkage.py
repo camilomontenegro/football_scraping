@@ -34,30 +34,39 @@ from utils.data_paths import RAW_ROOT
 
 log = logging.getLogger(__name__)
 
+RAW_ROOTS = [
+    RAW_ROOT,
+    Path(r"C:\Users\Ivan\Desktop\football_scraping_data\raw"),
+    Path(r"C:\Users\Ivan\Desktop\football_scraping_backup\data\raw"),
+]
+
 
 def _discover_match_centres() -> dict[int, dict]:
     """Lee todos los match_centre.json y devuelve {ws_match_id: {home_ws, away_ws, venue, ...}}."""
     result = {}
-    for mc_path in RAW_ROOT.rglob("whoscored/matches/*/match_centre.json"):
-        ws_mid = mc_path.parent.name
-        try:
-            data = json.loads(mc_path.read_text(encoding="utf-8"))
-        except Exception:
+    for raw_root in RAW_ROOTS:
+        if not raw_root.is_dir():
             continue
-        home = data.get("home", {})
-        away = data.get("away", {})
-        h_id = home.get("teamId")
-        a_id = away.get("teamId")
-        if h_id and a_id:
-            result[int(ws_mid)] = {
-                "home_ws_id": int(h_id),
-                "away_ws_id": int(a_id),
-                "venue_name": data.get("venueName"),
-                "manager_home": home.get("managerName"),
-                "manager_away": away.get("managerName"),
-                "ht_score": data.get("htScore"),
-                "ft_score": data.get("ftScore") or data.get("score"),
-            }
+        for mc_path in raw_root.rglob("whoscored/matches/*/match_centre.json"):
+            ws_mid = mc_path.parent.name
+            try:
+                data = json.loads(mc_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            home = data.get("home", {})
+            away = data.get("away", {})
+            h_id = home.get("teamId")
+            a_id = away.get("teamId")
+            if h_id and a_id:
+                result[int(ws_mid)] = {
+                    "home_ws_id": int(h_id),
+                    "away_ws_id": int(a_id),
+                    "venue_name": data.get("venueName"),
+                    "manager_home": home.get("managerName"),
+                    "manager_away": away.get("managerName"),
+                    "ht_score": data.get("htScore"),
+                    "ft_score": data.get("ftScore") or data.get("score"),
+                }
     return result
 
 

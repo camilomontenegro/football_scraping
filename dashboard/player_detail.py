@@ -195,6 +195,30 @@ def get_player_shot_sources(canonical_id: int) -> list[str]:
     return [r[0] for r in rows]
 
 
+@st.cache_data(ttl=300)
+def get_player_event_locations(
+    canonical_id: int, season: str | None = None,
+) -> pd.DataFrame:
+    """WhoScored located events for a player (action heatmap).
+
+    fact_events coordinates are normalised 0-1, scaled here to the 105x68 pitch.
+    """
+    params: dict = {"cid": canonical_id}
+    season_filter = ""
+    if season and season != "All":
+        season_filter = "AND m.season = :season"
+        params["season"] = season
+    return query_df(f"""
+        SELECT fe.x * 105.0 AS x, fe.y * 68.0 AS y, fe.event_type
+        FROM fact_events fe
+        JOIN dim_match m ON m.match_id = fe.match_id
+        WHERE fe.player_id = :cid
+          AND fe.data_source = 'whoscored'
+          AND fe.x IS NOT NULL AND fe.y IS NOT NULL
+          {season_filter}
+    """, params)
+
+
 # ════════════════════════════════════════════════════════════════════
 # SUMMARY STATS  (for the LaLiga-style stats grid)
 # ════════════════════════════════════════════════════════════════════
