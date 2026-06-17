@@ -864,7 +864,7 @@ def get_attendance_by_match(
         params["competition"] = competition
 
     stadium_join = _match_stadium_join()
-    capacity_col = "NULL::integer AS capacity"
+    capacity_col = "NULL::integer"
     stadium_name_col = "m.venue_name AS stadium"
     if stadium_join:
         capacity_col = "ds.capacity"
@@ -1671,8 +1671,12 @@ def _match_stadium_join(
     match_alias: str = "m",
     stadium_alias: str = "ds",
 ) -> str:
-    """LEFT JOIN dim_stadium por estadio real del partido (o vacio)."""
-    if not _stadium_table_exists():
+    """LEFT JOIN dim_stadium por estadio real del partido (o vacio).
+
+    Vacio tambien si la columna match_stadium_id aun no existe (dump previo
+    a la migracion add_match_stadium_id.sql), para no romper la consulta.
+    """
+    if not _stadium_table_exists() or not _match_stadium_column_exists():
         return ""
     sid = _match_stadium_id_expr(match_alias)
     return (

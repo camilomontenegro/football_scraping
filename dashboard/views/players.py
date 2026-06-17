@@ -205,8 +205,11 @@ def render() -> None:
  
                 # current team from fact_transfers — shown below the name
                 _current_team_df = player_detail.get_player_team_history(_pd_cid, all_time=True)
-                _current_team_df = _current_team_df[_current_team_df["team"] != "Retirado"]
-                _team_name = _current_team_df.iloc[0]["team"] if not _current_team_df.empty else "—"
+                if not _current_team_df.empty and "team" in _current_team_df.columns:
+                    _current_team_df = _current_team_df[_current_team_df["team"] != "Retirado"]
+                    _team_name = _current_team_df.iloc[0]["team"] if not _current_team_df.empty else "—"
+                else:
+                    _team_name = "—"
                 st.markdown(
                     f'<span style="font-size:1.1em;color:#aaa">{_team_name}</span>',
                     unsafe_allow_html=True,
