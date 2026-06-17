@@ -62,6 +62,7 @@ _TEAM_ALIASES: dict[str, str] = {
     "real betis":                   "Real Betis",
     "real betis sevilla":           "Real Betis",
     "betis":                        "Real Betis",
+    "real betis balompie":          "Real Betis",
  
     # Real Sociedad
     "real sociedad":                "Real Sociedad",

@@ -20,6 +20,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "tab_goalkeepers":       {"es": "Porteros",              "en": "Goalkeepers"},
     "tab_players":           {"es": "Jugadores",             "en": "Players"},
     "tab_player_detail":     {"es": "Ficha del jugador",     "en": "Player Detail"},
+    "tab_market_value":      {"es": "Valor de mercado",      "en": "Market Value"},
+    "tab_transfer_history":  {"es": "Historial de fichajes", "en": "Transfer History"},
     "tab_injuries":          {"es": "Lesiones",              "en": "Injuries"},
     "tab_shot_intelligence": {"es": "Inteligencia de tiro",  "en": "Shot Intelligence"},
     "tab_pass_network":      {"es": "Red de pases",          "en": "Pass Network"},
@@ -115,6 +117,51 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "yellow_cards":          {"es": "Tarjetas amarillas",    "en": "Yellow cards"},
     "red_cards":             {"es": "Tarjetas rojas",        "en": "Red cards"},
 
+    # ── Market Value tab ────────────────────────────────────
+
+    "mv_title":              {"es": "Historial de valor de mercado", "en": "Market Value History"},
+    "mv_current_value":      {"es": "Valor actual",             "en": "Current Value"},
+    "mv_peak_value":         {"es": "Valor pico",               "en": "Peak Value"},
+    "mv_from_peak":          {"es": "Desde el pico",            "en": "From Peak"},
+    "mv_last_year_change":   {"es": "Cambio último año",        "en": "Last Year Change"},
+    "mv_transfers":          {"es": "Fichajes",                 "en": "Transfers"},
+    "mv_compare_player":     {"es": "Comparar con otro jugador (opcional)", "en": "Compare with another player (optional)"},
+    "mv_select_comparison":  {"es": "Seleccionar jugador de comparación", "en": "Select comparison player"},
+    
+    # Market value chart 
+    "mv_show_benchmark":     {"es": "Mostrar banda de referencia por posición", "en": "Show position benchmark band"},
+    "mv_no_data":            {"es": "No hay datos de valor de mercado para este jugador.", "en": "No market value data found for this player."},
+    "mv_caption":            {"es": "Gráfico de escalones: el valor se mantiene fijo hasta la siguiente tasación", "en": "Step chart: value stays flat until next valuation"},
+    "mv_benchmark_explain":  {"es": "**🟢 Línea discontinua:** valor típico para un jugador de la misma posición y edad *(la mitad de jugadores similares valen más, la mitad menos)*\n\n**🟩 Banda verde:** el rango normal para esa edad y posición\n- Por encima → excepcionalmente valioso\n- Por debajo → por debajo de la media para su perfil",
+                            "en": "**🟢 Dashed line:** typical market value for a player of the same position and age *(half of similar players are worth more, half less)*\n\n**🟩 Green band:** the normal range for that age and position\n- Above the band → exceptionally valuable\n- Below the band → below average for their profile"},
+    # Legend 
+    "mv_legend_transfer":    {"es": "Traspaso",          "en": "Transfer"},
+    "mv_legend_loan":        {"es": "Cesión",             "en": "Loan"},
+    "mv_legend_end_of_loan": {"es": "Fin de cesión",      "en": "End of loan"},
+    "mv_legend_free":        {"es": "Libre",              "en": "Free transfer"},
+    "mv_legend_injury":      {"es": "Lesión",             "en": "Injury"},
+
+    # Hover information 
+    "mv_hover_title":    {"es": "Valor de mercado",  "en": "Market value"},
+    "mv_hover_club": {"es": "Club", "en": "Club"},
+    "mv_hover_value":    {"es": "Valor",             "en": "Value"},
+    "mv_hover_from_team":  {"es": "Equipo origen",  "en": "From"},
+    "mv_hover_to_team":    {"es": "Equipo destino", "en": "To"},     
+    "mv_hover_season":  {"es": "Temporada", "en": "Season"},
+    "mv_hover_absent":  {"es": "Días de baja", "en": "Absent"},
+    "mv_hover_injury":  {"es": "Lesión",    "en": "Injury"},
+
+
+
+    # ── Career History ──────────────────────────────────────
+    "tab_career_history":    {"es": "Historial de equipos",     "en": "Career History"},
+    "career_date_from":      {"es": "Fecha llegada",            "en": "Date From"},
+    "career_date_to":        {"es": "Fecha salida",             "en": "Date To"},
+    "career_team":           {"es": "Equipo",                   "en": "Team"},
+    "career_no_data":        {"es": "No hay datos de fichajes para este jugador.",
+                              "en": "No transfer data found for this player."},
+
+
     # ── Injuries tab ────────────────────────────────────────
     "total_injuries":        {"es": "Total lesiones",        "en": "Total injuries"},
     "total_days_absent":     {"es": "Días de baja totales",  "en": "Total days absent"},
@@ -123,12 +170,57 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "top_injury_types":      {"es": "Tipos de lesión más frecuentes", "en": "Top injury types"},
     "season_trend":          {"es": "Tendencia por temporada", "en": "Season trend"},
 
+    # ── Transfer History tab ────────────────────────────────
+    "transfer_total_fees":    {"es": "Coste total de fichajes",  "en": "Total transfer fees"},
+    "transfer_most_expensive":{"es": "Fichaje más caro",         "en": "Most expensive transfer"},
+    "transfer_current_team":  {"es": "Último equipo conocido",   "en": "Last known team"},
+    "transfer_num_teams":     {"es": "Equipos distintos",        "en": "Teams"},
+
+    "transfer_no_data":       {"es": "No hay datos de fichajes para este jugador.",
+                            "en": "No transfer data found for this player."},
+    "transfer_col_season":    {"es": "Temporada",                "en": "Season"},
+    "transfer_col_date":      {"es": "Fecha",                    "en": "Date"},
+    "transfer_col_from":      {"es": "Equipo origen",            "en": "From"},
+    "transfer_col_to":        {"es": "Equipo destino",           "en": "To"},
+    "transfer_col_fee":       {"es": "Coste",                    "en": "Fee"},
+    "transfer_col_type":      {"es": "Tipo",                     "en": "Type"},
+    "transfer_caption":       {"es": "Fuente: fact_transfers (Transfermarkt) · Coste solo para traspasos permanentes · Cesiones y libres excluidos del total",
+                            "en": "Source: fact_transfers (Transfermarkt) · Fee shown for permanent transfers only · Loans and free transfers excluded from total fees"},
+    "transfer_type_transfer":  {"es": "Traspaso",      "en": "Transfer"},
+    "transfer_type_loan":      {"es": "Cesión",         "en": "Loan"},
+    "transfer_type_end_of_loan":{"es": "Fin de cesión", "en": "End of loan"},
+    "transfer_type_free":      {"es": "Libre",          "en": "Free"},
+    "transfer_type_unknown":   {"es": "Desconocido",    "en": "Unknown"},
+
+    # transfer history charts 
+    "transfer_career_timeline":     {"es": "Línea temporal de equipos",     "en": "Career Timeline"},
+    "transfer_fees_chart":          {"es": "Costes de fichajes",             "en": "Transfer & Loan Fees"},
+    "transfer_no_career_data":      {"es": "No hay datos de carrera para este jugador.",
+                                    "en": "No career data found for this player."},
+    "transfer_no_fee_data":         {"es": "No hay fichajes con coste conocido para este jugador.",
+                                    "en": "No transfers with known fee for this player."},
+    "transfer_hover_from":          {"es": "Desde",        "en": "From"},
+    "transfer_hover_to":            {"es": "Hasta",        "en": "To"},
+    "transfer_hover_duration":      {"es": "Duración",     "en": "Duration"},
+    "transfer_hover_fee":           {"es": "Coste",        "en": "Fee"},
+    "transfer_hover_date":          {"es": "Fecha",        "en": "Date"},
+    "transfer_hover_type":          {"es": "Tipo",         "en": "Type"},
+    "transfer_present":             {"es": "Presente",     "en": "Present"},
+        
+
+
     # ── Shot Intelligence tab ───────────────────────────────
     "shot_intelligence":     {"es": "Inteligencia de tiro",  "en": "Shot Intelligence"},
     "metric":                {"es": "Métrica",               "en": "Metric"},
     "avg_xg_per_shot":       {"es": "xG medio por tiro",     "en": "Average xG per shot"},
     "conversion_rate":       {"es": "Tasa de conversión",    "en": "Conversion rate"},
     "pitch_danger_heatmap":  {"es": "Mapa de peligro",       "en": "Pitch Danger Heatmap"},
+    "pitch_view":            {"es": "Visualización",         "en": "Visualization"},
+    "goal_mouth":            {"es": "Vista de portería",     "en": "Goal Mouth"},
+    "no_shot_data":          {"es": "No hay tiros (WhoScored) para este equipo en este partido.",
+                              "en": "No shots (WhoScored) for this team in this match."},
+    "no_goalmouth_data":     {"es": "No hay coordenadas de portería (goalMouthY/goalMouthZ) para los tiros de este equipo en este partido.",
+                              "en": "No goal-mouth coordinates (goalMouthY/goalMouthZ) for this team's shots in this match."},
     "player_finishing":      {"es": "Calidad de definición", "en": "Player Finishing Quality"},
     "setpiece_specialists":  {"es": "Especialistas a balón parado", "en": "Set-piece Specialists"},
     "player_drilldown":      {"es": "Detalle por jugador",   "en": "Player drill-down"},

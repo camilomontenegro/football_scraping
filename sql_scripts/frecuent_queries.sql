@@ -321,6 +321,24 @@ ORDER BY fe.data_source, total DESC
 LIMIT 20;
 
 
+---------------------------------------- INJURIES ----------------------------------------------------
+-- Conteo de lesiones de jugadores de una competicion concreta 
+-- Muestra el númeto total de lesiones de los jugadores  que han jugado partidos en una competicion concreta
+SELECT 
+    COUNT(fi.injury_id) AS total_lesiones
+FROM fact_injuries fi
+WHERE fi.player_id IN (
+    SELECT fe.player_id 
+    FROM fact_events fe
+    JOIN dim_match dm ON fe.match_id = dm.match_id
+    WHERE dm.competition_id = :competition_id
+    UNION
+    SELECT fs.player_id 
+    FROM fact_shots fs
+    JOIN dim_match dm ON fs.match_id = dm.match_id
+    WHERE dm.competition_id = :competition_id
+);
+
 
 
 ---------------------------------------- PLAYER REVIEW ----------------------------------------------------

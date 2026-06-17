@@ -6,7 +6,9 @@ Read-only DB queries for the Shot Intelligence tab.
 Coordinate normalisation (all sources converted to 0-105 m × 0-68 m):
   - Understat raw (0-1):   x * 105,  y * 68   (detected when x <= 1.1)
   - Understat meters:      as-is
-  - SofaScore (0-100 %):  x * 1.05, y * 0.68
+  - SofaScore (0-1):       (1 - x) * 105,  y * 68
+                           (0-1 scale like Understat, but attacking
+                           direction is flipped — shots cluster near x=0)
   - StatsBomb (120×80 yd): x * 0.875, y * 0.85
   - WhoScored (0-100):     x * 1.05,  y * 0.68
 Normalisation is applied inline in SQL so it works regardless of whether
@@ -38,6 +40,48 @@ def _resolve_team_id(team: str | None) -> int | None:
     return int(row[0]) if row else None
 
 
+def get_match_shots(match_id: int, team_id: int) -> pd.DataFrame:
+    """Shot events of one team in one match (WhoScored).
+
+    Returns: player, event_type, minute, x, y, end_x, end_y, end_z —
+    coordinates normalised 0-1. event_type ∈ Goal / MissedShots /
+    SavedShot / ShotOnPost.
+
+    end_x/end_y/end_z (goal-line crossing point + height) are DERIVED here
+    from WhoScored's goal_mouth_y / goal_mouth_z columns, which is where the
+    shot-end data actually lives — the raw end_x/end_y columns are only
+    populated for movement events (passes, clearances), never for shots:
+      - end_x = 1.0          (shots attack the x=1 goal line)
+      - end_y = goal_mouth_y / 100   (lateral crossing point, 0.5 = centre)
+      - end_z = goal_mouth_z / 100   (height; ~0.38 ≈ crossbar at 2.44 m)
+    Rows without goal_mouth data get NULLs, so the UI draws trajectories and
+    the goal-mouth view only for shots that have them.
+    Penalty-shootout attempts (minute > 120) are excluded — they all sit
+    on the penalty spot and would distort the map and the shot counts.
+    """
+    df = query_df("""
+        SELECT p.canonical_name AS player, e.event_type, e.minute,
+               e.x, e.y,
+               CASE WHEN e.goal_mouth_y IS NOT NULL THEN 1.0 END AS end_x,
+               e.goal_mouth_y / 100.0 AS end_y,
+               e.goal_mouth_z / 100.0 AS end_z
+        FROM fact_events e
+        JOIN dim_player p ON p.canonical_id = e.player_id
+        WHERE e.match_id = :mid
+          AND e.team_id = :tid
+          AND e.data_source = 'whoscored'
+          AND e.event_type IN ('Goal', 'MissedShots', 'SavedShot', 'ShotOnPost')
+          AND e.minute <= 120
+          AND e.x IS NOT NULL AND e.y IS NOT NULL
+        ORDER BY e.minute, e.second
+    """, {"mid": match_id, "tid": team_id})
+    if df.empty:
+        return df
+    for col in ("x", "y", "end_x", "end_y", "end_z"):
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
+
+
 def get_heatmap_data(
     season_label: str,
     team_id: int | None,
@@ -65,7 +109,7 @@ def get_heatmap_data(
                 CASE fs.data_source
                     WHEN 'understat' THEN
                         CASE WHEN fs.x <= 1.1 THEN fs.x * 105 ELSE fs.x END
-                    WHEN 'sofascore' THEN (100 - fs.x) * 1.05
+                    WHEN 'sofascore' THEN (1 - fs.x) * 105
                     WHEN 'statsbomb' THEN fs.x * 0.875
                     WHEN 'whoscored' THEN fs.x * 1.05
                     ELSE fs.x
@@ -73,7 +117,7 @@ def get_heatmap_data(
                 CASE fs.data_source
                     WHEN 'understat' THEN
                         CASE WHEN fs.y <= 1.1 THEN fs.y * 68 ELSE fs.y END
-                    WHEN 'sofascore' THEN fs.y * 0.68
+                    WHEN 'sofascore' THEN fs.y * 68
                     WHEN 'statsbomb' THEN fs.y * 0.85
                     WHEN 'whoscored' THEN fs.y * 0.68
                     ELSE fs.y

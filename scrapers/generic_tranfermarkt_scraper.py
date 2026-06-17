@@ -408,6 +408,7 @@ def get_squad(team_slug: str, team_id: int, season: int) -> list[dict]:
             - nationality (str|None):   nacionalidad
             - birth_date  (date|None):   fecha de nacimiento dd/mm/yyyy
             - team        (str):        team_slug del equipo
+             - team_id_tm  (int):        ID del equipo en Transfermarkt  
             - season      (int):        año de inicio de la temporada
         [] si hay error en la petición o no se encuentra la tabla
     """
@@ -469,6 +470,7 @@ def get_squad(team_slug: str, team_id: int, season: int) -> list[dict]:
                 "nationality": nationality,
                 "birth_date":  birth_date,
                 "team":        team_slug,
+                "team_id_tm":     team_id,
                 "season":      season,
             })
  
