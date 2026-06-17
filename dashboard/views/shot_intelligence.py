@@ -96,6 +96,12 @@ def render() -> None:
                 _sm_row = _sm_matches[_sm_matches["label"] == sm_match_label].iloc[0]
                 _sm_mid = int(_sm_row["match_id"])
 
+                # Flag shootout ties (WhoScored kicks at minute > 120). The
+                # exact shootout score is unreliable (source occasionally
+                # drops kicks), so show only the badge, not a number.
+                if analytics.get_shootout_result(_sm_mid) is not None:
+                    st.info(f"⚽ {t('decided_on_penalties')}")
+
                 _SM_COLORS = {
                     "Goal":        "#2ecc71",
                     "MissedShots": "#e74c3c",

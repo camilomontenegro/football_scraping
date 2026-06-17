@@ -221,6 +221,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
                               "en": "No shots (WhoScored) for this team in this match."},
     "no_goalmouth_data":     {"es": "No hay coordenadas de portería (goalMouthY/goalMouthZ) para los tiros de este equipo en este partido.",
                               "en": "No goal-mouth coordinates (goalMouthY/goalMouthZ) for this team's shots in this match."},
+    "decided_on_penalties":  {"es": "Decidido en la tanda de penaltis",
+                              "en": "Decided on penalties"},
     "player_finishing":      {"es": "Calidad de definición", "en": "Player Finishing Quality"},
     "setpiece_specialists":  {"es": "Especialistas a balón parado", "en": "Set-piece Specialists"},
     "player_drilldown":      {"es": "Detalle por jugador",   "en": "Player drill-down"},

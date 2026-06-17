@@ -82,6 +82,34 @@ def get_match_shots(match_id: int, team_id: int) -> pd.DataFrame:
     return df
 
 
+def get_shootout_result(match_id: int) -> dict[int, int] | None:
+    """Detect a penalty shootout and return the shootout score, or None.
+
+    WhoScored records shootout kicks as events at minute > 120 (a few carry a
+    sentinel minute of 32767). A match is treated as decided on penalties when
+    it has at least two such penalty kicks (Goal / MissedShots / SavedShot).
+
+    Returns {team_id: penalties_scored} for the two teams, or None if the match
+    did not go to a shootout. ft_score still holds the pre-shootout draw.
+    Only WhoScored event data carries shootout kicks, so this is None for
+    matches without it.
+    """
+    df = query_df("""
+        SELECT e.team_id,
+               COUNT(*) FILTER (WHERE e.event_type = 'Goal') AS scored,
+               COUNT(*)                                       AS kicks
+        FROM fact_events e
+        WHERE e.match_id = :mid
+          AND e.data_source = 'whoscored'
+          AND e.minute > 120
+          AND e.event_type IN ('Goal', 'MissedShots', 'SavedShot')
+        GROUP BY e.team_id
+    """, {"mid": match_id})
+    if df.empty or int(df["kicks"].sum()) < 2:
+        return None
+    return {int(r.team_id): int(r.scored) for r in df.itertuples()}
+
+
 def get_heatmap_data(
     season_label: str,
     team_id: int | None,
