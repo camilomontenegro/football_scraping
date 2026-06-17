@@ -195,6 +195,30 @@ def get_player_shot_sources(canonical_id: int) -> list[str]:
     return [r[0] for r in rows]
 
 
+@st.cache_data(ttl=300)
+def get_player_event_locations(
+    canonical_id: int, season: str | None = None,
+) -> pd.DataFrame:
+    """WhoScored located events for a player (action heatmap).
+
+    fact_events coordinates are normalised 0-1, scaled here to the 105x68 pitch.
+    """
+    params: dict = {"cid": canonical_id}
+    season_filter = ""
+    if season and season != "All":
+        season_filter = "AND m.season = :season"
+        params["season"] = season
+    return query_df(f"""
+        SELECT fe.x * 105.0 AS x, fe.y * 68.0 AS y, fe.event_type
+        FROM fact_events fe
+        JOIN dim_match m ON m.match_id = fe.match_id
+        WHERE fe.player_id = :cid
+          AND fe.data_source = 'whoscored'
+          AND fe.x IS NOT NULL AND fe.y IS NOT NULL
+          {season_filter}
+    """, params)
+
+
 # ════════════════════════════════════════════════════════════════════
 # SUMMARY STATS  (for the LaLiga-style stats grid)
 # ════════════════════════════════════════════════════════════════════
@@ -411,3 +435,265 @@ def get_league_avg_radar(
         _safe(r["conversion"]) * 100,
         _safe(r["penalties_pm"]),
     ]
+
+
+# ════════════════════════════════════════════════════════════════════
+# MARKET VALUE  (market value tab)
+# ════════════════════════════════════════════════════════════════════
+
+def get_market_value_history(canonical_id: int) -> pd.DataFrame:
+    
+    """Full market value history for a player, ordered by date."""
+
+    return query_df("""
+        SELECT value_date, market_value, club_name, id_tm_club
+        FROM fact_market_value
+        WHERE player_id = :cid
+        ORDER BY value_date
+    """, {"cid": canonical_id})
+
+
+def get_transfer_history(canonical_id: int) -> pd.DataFrame:
+    
+    """Transfer history for a player — used as milestone markers on the chart."""
+
+    return query_df("""
+        SELECT transfer_date, season, from_team_name, to_team_name,
+               fee_euros, transfer_type, is_loan
+        FROM fact_transfers
+        WHERE player_id = :cid
+          AND transfer_date IS NOT NULL
+        ORDER BY transfer_date
+    """, {"cid": canonical_id})
+
+
+def get_market_value_benchmark(position: str) -> pd.DataFrame:
+    """
+    Computes market value percentiles (P25, P50, P75) by age
+    for all players at the given position in the database.
+
+    Used to draw the benchmark band on the market value chart —
+    the green shaded area shows where 50% of players at that position
+    and age fall, and the dashed line shows the median (typical) value.
+
+    Age is computed at the time of each valuation by subtracting
+    birth_date from value_date, so the same player contributes one
+    data point per valuation at the age they had at that moment.
+
+    Example output (one row per age):
+        age | p25     | median   | p75
+        25  | 425000  | 1000000  | 4000000
+        26  | 475000  | 1200000  | 4212500
+        ...
+
+    Parameters:
+        position (str): player position as stored in dim_player
+                        e.g. 'Defensa central', 'Delantero centro'
+
+    Returns:
+        DataFrame with columns: age, p25, median, p75
+    """
+    return query_df("""
+        SELECT
+            EXTRACT(YEAR FROM AGE(fmv.value_date, dp.birth_date))::int AS age,
+            percentile_cont(0.25) WITHIN GROUP (ORDER BY fmv.market_value) AS p25,
+            percentile_cont(0.50) WITHIN GROUP (ORDER BY fmv.market_value) AS median,
+            percentile_cont(0.75) WITHIN GROUP (ORDER BY fmv.market_value) AS p75
+        FROM fact_market_value fmv
+        JOIN dim_player dp ON fmv.player_id = dp.canonical_id
+        WHERE dp.position = :position
+          AND dp.birth_date IS NOT NULL
+          AND fmv.market_value > 0
+        GROUP BY age
+        ORDER BY age
+    """, {"position": position})
+
+
+def get_market_value_kpis(canonical_id: int) -> dict:
+    """
+    Computes KPI panel values:
+        - Current value (latest valuation)
+        - Peak value and date
+        - % change from peak
+        - Change over last year
+        - Number of transfers
+    """
+    mv_df       = get_market_value_history(canonical_id)
+    transfer_df = get_transfer_history(canonical_id)
+
+    if mv_df.empty:
+        return {
+            "current_value":      None,
+            "peak_value":         None,
+            "peak_date":          None,
+            "pct_from_peak":      None,
+            "change_last_year":   None,
+            "num_transfers":      0,
+        }
+
+    mv_df["value_date"] = pd.to_datetime(mv_df["value_date"])
+    mv_df = mv_df.sort_values("value_date")
+
+    # current value — latest valuation
+    latest_row    = mv_df.iloc[-1]
+    current_value = int(latest_row["market_value"])
+
+    # peak value and date
+    peak_idx   = mv_df["market_value"].idxmax()
+    peak_row   = mv_df.loc[peak_idx]
+    peak_value = int(peak_row["market_value"])
+    peak_date  = peak_row["value_date"]
+
+    # % change from peak
+    pct_from_peak = ((current_value - peak_value) / peak_value * 100) if peak_value else None
+
+    # change over last year
+    one_year_ago     = latest_row["value_date"] - pd.DateOffset(years=1)
+    mv_one_year_ago  = mv_df[mv_df["value_date"] <= one_year_ago]
+    change_last_year = (
+        current_value - int(mv_one_year_ago.iloc[-1]["market_value"])
+        if not mv_one_year_ago.empty else None
+    )
+
+    # count transfers with economic information — excludes unknown
+    num_transfers = len(transfer_df[
+        transfer_df["transfer_type"].isin(["transfer", "loan", "end_of_loan", "free"])
+    ]) if not transfer_df.empty else 0
+
+    return {
+        "current_value":    current_value,
+        "peak_value":       peak_value,
+        "peak_date":        peak_date,
+        "pct_from_peak":    round(pct_from_peak, 1) if pct_from_peak is not None else None,
+        "change_last_year": change_last_year,
+        "num_transfers":    num_transfers,
+    }
+
+# ════════════════════════════════════════════════════════════════════
+# PLAYER_DETAIL  - TEAM RECORD
+# ════════════════════════════════════════════════════════════════════
+def get_player_team_history(
+    canonical_id: int,
+    season: str | None = None,
+    all_time: bool = False
+) -> pd.DataFrame:
+    """
+    Returns the team history for a player using LEAD() to compute
+    the period spent at each club.
+
+    Each row represents a spell at a club:
+        - date_from: arrival date (transfer_date to that club)
+        - date_to:   departure date (next transfer_date) — NULL means still there
+        - team:      club name
+
+    LEAD() is computed over the full transfer history first, then filtered
+    by season date range if provided — this ensures players who stayed at a
+    club across multiple seasons appear correctly when filtering by season.
+
+    Season date range: e.g. '2022/2023' → start=2022-07-01, end=2023-06-30
+    This follows the football season convention: starts July 1st, ends June 30th.
+
+    Excludes 'Retirado' entries — handled separately via is_player_retired().
+
+    Parameters:
+        canonical_id (int): player canonical_id from dim_player
+        season       (str): season in format '2024/2025', or None for all
+        all_time    (bool): if True, ignore season filter entirely
+
+    Returns:
+        DataFrame with columns: season, date_from, date_to, team
+    """
+    params: dict = {"cid": canonical_id, "season_start": None, "season_end": None}
+
+    if season and season != "All" and not all_time:
+        # convert season string to date range
+        # e.g. '2022/2023' → start=2022-07-01, end=2023-06-30
+        start_year = int(season.split("/")[0])
+        end_year   = int(season.split("/")[1])
+        params["season_start"] = f"{start_year}-07-01"
+        params["season_end"]   = f"{end_year}-06-30"
+
+    return query_df("""
+    WITH career AS (
+        SELECT
+            ft.season,
+            ft.transfer_date                                AS date_from,
+            LEAD(ft.transfer_date) OVER (
+                PARTITION BY ft.player_id
+                ORDER BY ft.transfer_date
+            )                                               AS date_to,
+            ft.to_team_name                                 AS team
+        FROM fact_transfers ft
+        WHERE ft.player_id = :cid
+          AND ft.to_team_name IS NOT NULL
+    )
+    SELECT * FROM career
+    WHERE (
+        :season_start IS NULL
+        OR (date_from <= :season_end AND (date_to >= :season_start OR date_to IS NULL))
+    )
+    ORDER BY date_from DESC NULLS LAST
+""", params)
+
+def is_player_retired(canonical_id: int) -> bool:
+    """
+    Returns True if the player has a 'Retirado' entry in fact_transfers,
+    indicating they have retired from professional football.
+    """
+    df = query_df("""
+        SELECT 1 FROM fact_transfers
+        WHERE player_id = :cid
+          AND to_team_name = 'Retirado'
+        LIMIT 1
+    """, {"cid": canonical_id})
+    return not df.empty
+
+
+# ════════════════════════════════════════════════════════════════════
+# TRANSFER HISTORY
+# ════════════════════════════════════════════════════════════════════
+def get_transfer_history_kpis(canonical_id: int) -> dict:
+    """
+    Computes KPI values for the Transfer History tab:
+        - total_fees: sum of fee_euros for all transfers with known fee
+        - max_fee: highest single transfer fee
+        - max_fee_team: destination team of the most expensive transfer
+        - max_fee_date: date of the most expensive transfer
+
+    Only counts transfer_type = 'transfer' for fees — excludes loans and free transfers.
+
+    Returns:
+        dict with keys: total_fees, max_fee, max_fee_team, max_fee_date
+    """
+    df = query_df("""
+        SELECT
+            SUM(fee_euros)                          AS total_fees,
+            MAX(fee_euros)                          AS max_fee
+        FROM fact_transfers
+        WHERE player_id = :cid
+          AND transfer_type = 'transfer'
+          AND fee_euros IS NOT NULL
+          AND fee_euros > 0
+    """, {"cid": canonical_id})
+
+    # get the most expensive transfer details
+    max_df = query_df("""
+        SELECT to_team_name, transfer_date, fee_euros
+        FROM fact_transfers
+        WHERE player_id = :cid
+          AND transfer_type = 'transfer'
+          AND fee_euros IS NOT NULL
+          AND fee_euros > 0
+        ORDER BY fee_euros DESC
+        LIMIT 1
+    """, {"cid": canonical_id})
+
+    row = df.iloc[0] if not df.empty else {}
+    max_row = max_df.iloc[0] if not max_df.empty else {}
+
+    return {
+        "total_fees":   int(row.get("total_fees") or 0),
+        "max_fee":      int(max_row.get("fee_euros") or 0),
+        "max_fee_team": max_row.get("to_team_name"),
+        "max_fee_date": max_row.get("transfer_date"),
+    }

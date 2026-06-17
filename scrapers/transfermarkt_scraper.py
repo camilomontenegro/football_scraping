@@ -275,7 +275,13 @@ def get_squad(team_slug: str, team_id: int, season: int) -> list[dict]:
         return []
 
     flag = soup.find("img", class_="flaggenrahmen")
-    team_country = flag.get("title") if flag else None
+    from utils.team_countries import resolve_team_country
+
+    team_country = resolve_team_country(
+        "",
+        tm_country=flag.get("title") if flag else None,
+        tm_id=team_id,
+    )
 
     players: list[dict] = []
     for row in table.find_all("tr", class_=["odd", "even"]):

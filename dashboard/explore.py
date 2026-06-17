@@ -11,6 +11,7 @@ Column names match the live schema (create_tables.sql):
 from __future__ import annotations
 
 import pandas as pd
+import streamlit as st
 from sqlalchemy import text
 
 from dashboard.db import get_engine, query_df
@@ -22,7 +23,7 @@ except Exception:  # pragma: no cover - fallback si el modulo no esta disponible
 
 
 def _short_season(label: str) -> str:
-    """Convert '2020/2021' → '20/21' to match fact_injuries season format."""
+    """Convert '2020/2021' -> '20/21' to match fact_injuries season format."""
     parts = label.split("/")
     if len(parts) == 2 and len(parts[0]) == 4 and len(parts[1]) == 4:
         return f"{parts[0][2:]}/{parts[1][2:]}"
@@ -45,6 +46,7 @@ def _comp_clause(competition: str | None, match_alias: str = "m") -> tuple[str, 
     return join, where
 
 
+@st.cache_data(ttl=300)
 def get_competitions() -> list[str]:
     """Lista las competiciones del dashboard.
 
@@ -65,6 +67,7 @@ def get_competitions() -> list[str]:
     return names or ["La Liga"]
 
 
+@st.cache_data(ttl=300)
 def get_seasons_for_competition(competition: str) -> list[str]:
     eng = get_engine()
     with eng.connect() as conn:
@@ -78,6 +81,7 @@ def get_seasons_for_competition(competition: str) -> list[str]:
     return [r[0] for r in rows]
 
 
+@st.cache_data(ttl=300)
 def get_teams_for_season(season_label: str, competition: str | None = None) -> list[str]:
     eng = get_engine()
     params: dict = {"season": season_label}
@@ -200,6 +204,18 @@ def get_results(
     params: dict = {"season": season_label}
     if competition:
         params["competition"] = competition
+    stadium_join = _match_stadium_join()
+    stadium_cols = ""
+    if stadium_join:
+        venue_src = (
+            "m.match_venue_source"
+            if _match_stadium_column_exists()
+            else "NULL::varchar AS match_venue_source"
+        )
+        stadium_cols = (
+            f", {_match_stadium_name_expr()} AS stadium,"
+            f" m.venue_name, {venue_src}"
+        )
     sql = f"""
         SELECT m.match_date, m.season,
                ht.canonical_name AS home_team,
@@ -209,10 +225,12 @@ def get_results(
                m.attendance,
                m.temperature_c, m.humidity_pct,
                m.precipitation_mm, m.wind_speed_kmh, m.weather_code
+               {stadium_cols}
         FROM dim_match m
         {comp_join}
         LEFT JOIN dim_team ht ON m.home_team_id = ht.canonical_id
         LEFT JOIN dim_team at ON m.away_team_id = at.canonical_id
+        {stadium_join}
         WHERE m.season = :season {comp_filter}
     """
     if tid is not None:
@@ -302,7 +320,7 @@ def get_shots_by_source(
 
 
 def get_injuries(season_label: str, team: str | None) -> pd.DataFrame:
-    # fact_injuries has no competition link — season short-format filter only
+    # fact_injuries has no competition link -- season short-format filter only
     eng = get_engine()
     with eng.connect() as conn:
         tid = _team_id(conn, team)
@@ -596,11 +614,11 @@ def get_player_discipline(
             SELECT fe.player_id,
                    m.season,
                    SUM(CASE WHEN
-                            (fe.event_type ILIKE '%yellow%' AND fe.event_type NOT ILIKE '%red%')
+                            (fe.event_type ILIKE '%%yellow%%' AND fe.event_type NOT ILIKE '%%red%%')
                             OR (LOWER(fe.event_type) = 'card' AND LOWER(fe.outcome) = 'yellow')
                             THEN 1 ELSE 0 END) AS yellow_cards,
                    SUM(CASE WHEN
-                            (fe.event_type ILIKE '%red%')
+                            (fe.event_type ILIKE '%%red%%')
                             OR (LOWER(fe.event_type) = 'card' AND LOWER(fe.outcome) IN ('red', 'yellowred'))
                             THEN 1 ELSE 0 END) AS red_cards
             FROM fact_events fe
@@ -756,6 +774,15 @@ def get_weather_by_match(
     params: dict = {"season": season_label}
     if competition:
         params["competition"] = competition
+    stadium_join = _match_stadium_join()
+    stadium_cols = ""
+    if stadium_join:
+        stadium_cols = (
+            f"{_match_stadium_name_expr()} AS stadium,"
+            f" ds.city AS stadium_city, m.venue_name"
+        )
+    else:
+        stadium_cols = "m.venue_name"
     sql = f"""
         SELECT m.match_date,
                ht.canonical_name AS home_team,
@@ -764,11 +791,12 @@ def get_weather_by_match(
                m.temperature_c, m.humidity_pct,
                m.precipitation_mm, m.wind_speed_kmh,
                m.weather_code,
-               m.venue_name
+               {stadium_cols}
         FROM dim_match m
         {comp_join}
         LEFT JOIN dim_team ht ON m.home_team_id = ht.canonical_id
         LEFT JOIN dim_team at ON m.away_team_id = at.canonical_id
+        {stadium_join}
         WHERE m.season = :season {comp_filter}
           AND m.temperature_c IS NOT NULL
           AND m.temperature_c BETWEEN -60 AND 60
@@ -826,7 +854,7 @@ def get_attendance_by_match(
     team: str | None,
     competition: str | None = None,
 ) -> pd.DataFrame:
-    """Return match-level attendance data."""
+    """Return match-level attendance data with stadium capacity and fill %."""
     eng = get_engine()
     with eng.connect() as conn:
         tid = _team_id(conn, team)
@@ -834,17 +862,28 @@ def get_attendance_by_match(
     params: dict = {"season": season_label}
     if competition:
         params["competition"] = competition
+
+    stadium_join = _match_stadium_join()
+    capacity_col = "NULL::integer"
+    stadium_name_col = "m.venue_name AS stadium"
+    if stadium_join:
+        capacity_col = "ds.capacity"
+        stadium_name_col = f"{_match_stadium_name_expr()} AS stadium"
+
     sql = f"""
         SELECT m.match_date,
                ht.canonical_name AS home_team,
                at.canonical_name AS away_team,
                m.home_score, m.away_score,
                m.attendance,
-               m.venue_name
+               m.venue_name,
+               {stadium_name_col},
+               {capacity_col} AS capacity
         FROM dim_match m
         {comp_join}
         LEFT JOIN dim_team ht ON m.home_team_id = ht.canonical_id
         LEFT JOIN dim_team at ON m.away_team_id = at.canonical_id
+        {stadium_join}
         WHERE m.season = :season {comp_filter}
           AND m.attendance IS NOT NULL AND m.attendance > 0
     """
@@ -852,32 +891,91 @@ def get_attendance_by_match(
         sql += " AND (m.home_team_id = :tid OR m.away_team_id = :tid)"
         params["tid"] = tid
     sql += " ORDER BY m.attendance DESC"
-    return query_df(sql, params)
+    df = query_df(sql, params)
+    if not df.empty and "capacity" in df.columns:
+        att = pd.to_numeric(df["attendance"], errors="coerce")
+        cap = pd.to_numeric(df["capacity"], errors="coerce")
+        df["fill_pct"] = (att / cap * 100).round(1)
+    return df
 
 
 def get_attendance_by_team(
     season_label: str,
     competition: str | None = None,
 ) -> pd.DataFrame:
-    """Average home attendance per team."""
+    """Average home attendance per team with optional capacity utilization."""
     comp_join, comp_filter = _comp_clause(competition)
     params: dict = {"season": season_label}
     if competition:
         params["competition"] = competition
+
+    stadium_join = _match_stadium_join()
+    capacity_col = "NULL::integer AS capacity"
+    if stadium_join:
+        capacity_col = "MAX(ds.capacity) AS capacity"
+
     sql = f"""
         SELECT ht.canonical_name AS team,
                COUNT(*) AS home_matches,
                ROUND(AVG(m.attendance)) AS avg_attendance,
                MAX(m.attendance) AS max_attendance,
                MIN(m.attendance) AS min_attendance,
-               SUM(m.attendance) AS total_attendance
+               SUM(m.attendance) AS total_attendance,
+               {capacity_col}
         FROM dim_match m
         {comp_join}
         LEFT JOIN dim_team ht ON m.home_team_id = ht.canonical_id
+        {stadium_join}
         WHERE m.season = :season {comp_filter}
           AND m.attendance IS NOT NULL AND m.attendance > 0
         GROUP BY ht.canonical_name
         ORDER BY avg_attendance DESC
+    """
+    df = query_df(sql, params)
+    if not df.empty and "capacity" in df.columns:
+        cap = pd.to_numeric(df["capacity"], errors="coerce")
+        avg = pd.to_numeric(df["avg_attendance"], errors="coerce")
+        df["fill_pct"] = (avg / cap * 100).round(1)
+    return df
+
+
+def get_attendance_trend(
+    season_label: str,
+    team: str | None = None,
+    competition: str | None = None,
+) -> pd.DataFrame:
+    """Attendance per match date (for trend line chart)."""
+    eng = get_engine()
+    with eng.connect() as conn:
+        tid = _team_id(conn, team)
+    comp_join, comp_filter = _comp_clause(competition)
+    params: dict = {"season": season_label}
+    if competition:
+        params["competition"] = competition
+    team_filter = ""
+    if tid is not None:
+        team_filter = "AND (m.home_team_id = :tid OR m.away_team_id = :tid)"
+        params["tid"] = tid
+    stadium_join = _match_stadium_join()
+    stadium_name_col = "m.venue_name AS stadium"
+    if stadium_join:
+        stadium_name_col = f"{_match_stadium_name_expr()} AS stadium"
+    sql = f"""
+        SELECT m.match_date,
+               m.attendance,
+               m.venue_name,
+               {stadium_name_col},
+               ht.canonical_name AS home_team,
+               at.canonical_name AS away_team
+        FROM dim_match m
+        {comp_join}
+        LEFT JOIN dim_team ht ON m.home_team_id = ht.canonical_id
+        LEFT JOIN dim_team at ON m.away_team_id = at.canonical_id
+        {stadium_join}
+        WHERE m.season = :season {comp_filter}
+          AND m.attendance IS NOT NULL AND m.attendance > 0
+          {team_filter}
+        ORDER BY m.match_date
     """
     return query_df(sql, params)
 
@@ -885,16 +983,35 @@ def get_attendance_by_team(
 def get_referee_stats(
     season_label: str | None,
     competition: str | None = None,
+    team: str | None = None,
 ) -> pd.DataFrame:
-    """Referee match counts, goals, and card/discipline stats for a season."""
+    """Referee match counts and card stats for a season.
+
+    When *team* is provided the card counts are restricted to cards
+    received **by that team only**, so you can see which referees book
+    a specific team the most.  Match counts still reflect all matches
+    the referee officiated (with the team filter applied to the match
+    selection).
+    """
+    eng = get_engine()
+    with eng.connect() as conn:
+        tid = _team_id(conn, team)
+
     comp_join, comp_filter = _comp_clause(competition)
     params: dict = {}
     season_filter = ""
+    team_match_filter = ""
+    card_team_filter = ""
+
     if season_label is not None:
         season_filter = "AND m.season = :season"
         params["season"] = season_label
     if competition:
         params["competition"] = competition
+    if tid is not None:
+        team_match_filter = "AND (m.home_team_id = :tid OR m.away_team_id = :tid)"
+        card_team_filter = "AND fe.team_id = :tid"
+        params["tid"] = tid
 
     sql = f"""
         WITH ref_matches AS (
@@ -907,20 +1024,22 @@ def get_referee_stats(
             {comp_join}
             WHERE m.referee_id IS NOT NULL
               {season_filter} {comp_filter}
+              {team_match_filter}
         ),
         ref_cards AS (
             SELECT rm.referee,
                    SUM(CASE WHEN
-                       (fe.event_type ILIKE '%yellow%' AND fe.event_type NOT ILIKE '%red%')
+                       (fe.event_type ILIKE '%%yellow%%' AND fe.event_type NOT ILIKE '%%red%%')
                        OR (LOWER(fe.event_type) = 'card' AND LOWER(fe.outcome) = 'yellow')
                        THEN 1 ELSE 0 END) AS yellow_cards,
                    SUM(CASE WHEN
-                       (fe.event_type ILIKE '%red%')
+                       (fe.event_type ILIKE '%%red%%')
                        OR (LOWER(fe.event_type) = 'card' AND LOWER(fe.outcome) IN ('red', 'yellowred'))
                        THEN 1 ELSE 0 END) AS red_cards
             FROM ref_matches rm
             JOIN fact_events fe ON fe.match_id = rm.match_id
             WHERE fe.event_type IS NOT NULL
+              {card_team_filter}
             GROUP BY rm.referee
         )
         SELECT rm.referee,
@@ -947,8 +1066,17 @@ def get_referee_stats(
 def get_manager_stats(
     season_label: str | None,
     competition: str | None = None,
+    team: str | None = None,
 ) -> pd.DataFrame:
-    """Manager win/draw/loss record from dim_match text columns."""
+    """Manager win/draw/loss record from dim_match text columns.
+
+    When *team* is provided, only rows where the manager coached that
+    specific team are included, so you see a per-team breakdown.
+    """
+    eng = get_engine()
+    with eng.connect() as conn:
+        tid = _team_id(conn, team)
+
     comp_join, comp_filter = _comp_clause(competition)
     params: dict = {}
     season_filter = ""
@@ -957,6 +1085,14 @@ def get_manager_stats(
         params["season"] = season_label
     if competition:
         params["competition"] = competition
+
+    # Team filter: restrict to matches where the manager coached *this* team
+    home_team_filter = ""
+    away_team_filter = ""
+    if tid is not None:
+        home_team_filter = "AND m.home_team_id = :tid"
+        away_team_filter = "AND m.away_team_id = :tid"
+        params["tid"] = tid
 
     sql = f"""
         WITH manager_matches AS (
@@ -971,6 +1107,7 @@ def get_manager_stats(
             WHERE m.manager_home IS NOT NULL
               AND m.home_score IS NOT NULL
               {season_filter} {comp_filter}
+              {home_team_filter}
 
             UNION ALL
 
@@ -985,6 +1122,7 @@ def get_manager_stats(
             WHERE m.manager_away IS NOT NULL
               AND m.away_score IS NOT NULL
               {season_filter} {comp_filter}
+              {away_team_filter}
         )
         SELECT manager,
                MAX(team) AS team,
@@ -995,6 +1133,7 @@ def get_manager_stats(
                SUM(scored) AS goals_for,
                SUM(conceded) AS goals_against,
                ROUND(SUM(scored)::numeric / NULLIF(COUNT(*), 0), 2) AS avg_gf,
+               ROUND(SUM(conceded)::numeric / NULLIF(COUNT(*), 0), 2) AS avg_ga,
                ROUND(
                    (SUM(CASE WHEN scored > conceded THEN 3
                              WHEN scored = conceded THEN 1
@@ -1004,8 +1143,406 @@ def get_manager_stats(
                ) AS points_pct
         FROM manager_matches
         GROUP BY manager
-        HAVING COUNT(*) >= 3
+        HAVING COUNT(*) >= 1
         ORDER BY points_pct DESC, matches DESC
+    """
+    return query_df(sql, params)
+
+
+@st.cache_data(ttl=300)
+def get_matches_for_context(
+    season_label: str,
+    team: str | None = None,
+    competition: str | None = None,
+) -> pd.DataFrame:
+    """Match list for the per-match context view (most recent first)."""
+    eng = get_engine()
+    with eng.connect() as conn:
+        tid = _team_id(conn, team)
+    comp_join, comp_filter = _comp_clause(competition)
+    params: dict = {"season": season_label}
+    if competition:
+        params["competition"] = competition
+    sql = f"""
+        SELECT m.match_id, m.match_date,
+               ht.canonical_name AS home_team,
+               at.canonical_name AS away_team,
+               m.home_score, m.away_score
+        FROM dim_match m
+        {comp_join}
+        LEFT JOIN dim_team ht ON m.home_team_id = ht.canonical_id
+        LEFT JOIN dim_team at ON m.away_team_id = at.canonical_id
+        WHERE m.season = :season {comp_filter}
+    """
+    if tid is not None:
+        sql += " AND (m.home_team_id = :tid OR m.away_team_id = :tid)"
+        params["tid"] = tid
+    sql += " ORDER BY m.match_date DESC NULLS LAST, m.match_id DESC"
+    return query_df(sql, params)
+
+
+@st.cache_data(ttl=300)
+def get_match_context(match_id: int) -> dict:
+    """Full context for a single match: teams, score, weather, attendance,
+    stadium + capacity, managers and (best-effort) referee.
+
+    Returns a flat dict; ``fill_pct`` is added when attendance and capacity
+    are both available. ``referee`` is resolved in a guarded query because the
+    dim_referee migration may not be present in every database.
+    """
+    stadium_join = _match_stadium_join()
+    stadium_name = _match_stadium_name_expr() if stadium_join else "m.venue_name"
+    cap_col = "ds.capacity" if stadium_join else "NULL::integer"
+    sql = f"""
+        SELECT m.match_id, m.match_date, m.season,
+               ht.canonical_name AS home_team,
+               at.canonical_name AS away_team,
+               m.home_score, m.away_score, m.attendance,
+               m.temperature_c, m.humidity_pct,
+               m.precipitation_mm, m.wind_speed_kmh, m.weather_code,
+               m.manager_home, m.manager_away, m.data_source,
+               m.venue_name,
+               {stadium_name} AS stadium,
+               {cap_col} AS capacity
+        FROM dim_match m
+        LEFT JOIN dim_team ht ON m.home_team_id = ht.canonical_id
+        LEFT JOIN dim_team at ON m.away_team_id = at.canonical_id
+        {stadium_join}
+        WHERE m.match_id = :mid
+    """
+    df = query_df(sql, {"mid": match_id})
+    if df.empty:
+        return {}
+    ctx = df.iloc[0].to_dict()
+    att, cap = ctx.get("attendance"), ctx.get("capacity")
+    ctx["fill_pct"] = None
+    if att is not None and cap not in (None, 0):
+        try:
+            ctx["fill_pct"] = round(float(att) / float(cap) * 100, 1)
+        except (TypeError, ValueError, ZeroDivisionError):
+            ctx["fill_pct"] = None
+    try:
+        rdf = query_df("""
+            SELECT r.canonical_name AS referee
+            FROM dim_match m
+            JOIN dim_referee r ON r.referee_id = m.referee_id
+            WHERE m.match_id = :mid
+        """, {"mid": match_id})
+        ctx["referee"] = rdf.iloc[0]["referee"] if not rdf.empty else None
+    except Exception:
+        ctx["referee"] = None
+    return ctx
+
+
+@st.cache_data(ttl=300)
+def get_match_cards(match_id: int) -> pd.DataFrame:
+    """Yellow/red cards per team in one match (best-effort heuristic).
+
+    Mirrors the detection used in get_referee_stats; ``%%`` is required because
+    query_df runs through psycopg2 where a literal percent must be escaped.
+    """
+    sql = """
+        SELECT t.canonical_name AS team,
+               SUM(CASE WHEN
+                   (fe.event_type ILIKE '%%yellow%%' AND fe.event_type NOT ILIKE '%%red%%')
+                   OR (LOWER(fe.event_type) = 'card' AND LOWER(fe.outcome) = 'yellow')
+                   THEN 1 ELSE 0 END) AS yellow_cards,
+               SUM(CASE WHEN
+                   (fe.event_type ILIKE '%%red%%')
+                   OR (LOWER(fe.event_type) = 'card' AND LOWER(fe.outcome) IN ('red', 'yellowred'))
+                   THEN 1 ELSE 0 END) AS red_cards
+        FROM fact_events fe
+        JOIN dim_team t ON t.canonical_id = fe.team_id
+        WHERE fe.match_id = :mid AND fe.event_type IS NOT NULL
+        GROUP BY t.canonical_name
+        ORDER BY t.canonical_name
+    """
+    try:
+        return query_df(sql, {"mid": match_id})
+    except Exception:
+        return pd.DataFrame()
+
+
+@st.cache_data(ttl=300)
+def get_whoscored_event_coverage() -> pd.DataFrame:
+    """Per-season count of WhoScored events / matches (event diagnostics)."""
+    return query_df("""
+        SELECT m.season,
+               COUNT(DISTINCT fe.match_id) AS matches,
+               COUNT(*) AS events
+        FROM fact_events fe
+        JOIN dim_match m ON m.match_id = fe.match_id
+        WHERE fe.data_source = 'whoscored'
+        GROUP BY m.season
+        ORDER BY m.season DESC
+    """)
+
+
+@st.cache_data(ttl=300)
+def get_whoscored_event_types(limit: int = 60) -> pd.DataFrame:
+    """Distinct WhoScored event_type values with counts (event diagnostics)."""
+    return query_df("""
+        SELECT fe.event_type,
+               COUNT(*) AS events,
+               COUNT(*) FILTER (WHERE fe.x IS NOT NULL AND fe.y IS NOT NULL) AS with_xy
+        FROM fact_events fe
+        WHERE fe.data_source = 'whoscored' AND fe.event_type IS NOT NULL
+        GROUP BY fe.event_type
+        ORDER BY events DESC
+        LIMIT :lim
+    """, {"lim": limit})
+
+
+@st.cache_data(ttl=300)
+def get_player_cards_fouls(
+    season_label: str,
+    team: str | None = None,
+    competition: str | None = None,
+    min_matches: int = 1,
+) -> pd.DataFrame:
+    """Per-player discipline: yellow/red cards and fouls, with per-match rates.
+
+    Detection is heuristic on event_type/outcome (same family as the referee
+    query) so it is robust to the exact WhoScored strings. ``%%`` is required
+    because query_df runs through psycopg2.
+    """
+    eng = get_engine()
+    with eng.connect() as conn:
+        tid = _team_id(conn, team)
+    comp_join, comp_filter = _comp_clause(competition)
+    params: dict = {"season": season_label, "minm": int(min_matches)}
+    if competition:
+        params["competition"] = competition
+    team_filter = ""
+    if tid is not None:
+        team_filter = "AND fe.team_id = :tid"
+        params["tid"] = tid
+    sql = f"""
+        SELECT p.canonical_name AS player,
+               MAX(t.canonical_name) AS team,
+               COUNT(DISTINCT fe.match_id) AS matches,
+               SUM(CASE WHEN
+                   (fe.event_type ILIKE '%%yellow%%' AND fe.event_type NOT ILIKE '%%red%%')
+                   OR (LOWER(fe.event_type) = 'card' AND LOWER(fe.outcome) = 'yellow')
+                   THEN 1 ELSE 0 END) AS yellow_cards,
+               SUM(CASE WHEN
+                   (fe.event_type ILIKE '%%red%%')
+                   OR (LOWER(fe.event_type) = 'card' AND LOWER(fe.outcome) IN ('red', 'yellowred'))
+                   THEN 1 ELSE 0 END) AS red_cards,
+               SUM(CASE WHEN fe.event_type ILIKE '%%foul%%' THEN 1 ELSE 0 END) AS fouls
+        FROM fact_events fe
+        JOIN dim_match m ON m.match_id = fe.match_id
+        {comp_join}
+        JOIN dim_player p ON p.canonical_id = fe.player_id
+        JOIN dim_team t ON t.canonical_id = fe.team_id
+        WHERE m.season = :season {comp_filter}
+          {team_filter}
+        GROUP BY p.canonical_id, p.canonical_name
+        HAVING COUNT(DISTINCT fe.match_id) >= :minm
+    """
+    df = query_df(sql, params)
+    if df.empty:
+        return df
+    for c in ("matches", "yellow_cards", "red_cards", "fouls"):
+        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
+    df["total_cards"] = df["yellow_cards"] + df["red_cards"]
+    _m = df["matches"].replace(0, pd.NA)
+    df["cards_per_match"] = (df["total_cards"] / _m).astype(float).round(2)
+    df["fouls_per_match"] = (df["fouls"] / _m).astype(float).round(2)
+    return df.sort_values(["total_cards", "cards_per_match"], ascending=False)
+
+
+@st.cache_data(ttl=300)
+def get_match_events_xy(match_id: int) -> pd.DataFrame:
+    """WhoScored located events for one match (for the chalkboard).
+
+    Coordinates are stored normalised 0-1; callers scale to the 105x68 pitch.
+    """
+    return query_df("""
+        SELECT p.canonical_name AS player,
+               t.canonical_name AS team,
+               fe.team_id,
+               fe.event_type, fe.outcome,
+               fe.x, fe.y, fe.end_x, fe.end_y
+        FROM fact_events fe
+        JOIN dim_player p ON p.canonical_id = fe.player_id
+        JOIN dim_team t ON t.canonical_id = fe.team_id
+        WHERE fe.match_id = :mid
+          AND fe.data_source = 'whoscored'
+          AND fe.x IS NOT NULL AND fe.y IS NOT NULL
+        ORDER BY fe.minute, fe.second, fe.event_id
+    """, {"mid": match_id})
+
+
+def get_weather_by_venue(
+    season_label: str,
+    team: str | None = None,
+    competition: str | None = None,
+) -> pd.DataFrame:
+    """Avg/min/max temperature grouped by venue (stadium).
+
+    Useful for comparing climate conditions across stadiums.
+    """
+    eng = get_engine()
+    with eng.connect() as conn:
+        tid = _team_id(conn, team)
+    comp_join, comp_filter = _comp_clause(competition)
+    params: dict = {"season": season_label}
+    if competition:
+        params["competition"] = competition
+    team_filter = ""
+    if tid is not None:
+        team_filter = "AND (m.home_team_id = :tid OR m.away_team_id = :tid)"
+        params["tid"] = tid
+    stadium_join = _match_stadium_join()
+    venue_expr = (
+        _match_stadium_name_expr()
+        if stadium_join
+        else "COALESCE(m.venue_name, 'Unknown')"
+    )
+    group_key = (
+        f"COALESCE(ds.stadium_id::text, m.venue_name, 'unknown')"
+        if stadium_join
+        else "COALESCE(m.venue_name, 'unknown')"
+    )
+    sql = f"""
+        SELECT MAX({venue_expr}) AS venue,
+               MODE() WITHIN GROUP (ORDER BY ht.canonical_name) AS home_team,
+               COUNT(*) AS matches,
+               ROUND(AVG(m.temperature_c)::numeric, 1) AS avg_temp,
+               ROUND(MIN(m.temperature_c)::numeric, 1) AS min_temp,
+               ROUND(MAX(m.temperature_c)::numeric, 1) AS max_temp,
+               ROUND(AVG(m.humidity_pct)::numeric, 0) AS avg_humidity,
+               SUM(CASE WHEN m.precipitation_mm > 0 THEN 1 ELSE 0 END) AS rainy
+        FROM dim_match m
+        {comp_join}
+        LEFT JOIN dim_team ht ON m.home_team_id = ht.canonical_id
+        {stadium_join}
+        WHERE m.season = :season {comp_filter}
+          AND m.temperature_c IS NOT NULL
+          AND m.temperature_c BETWEEN -60 AND 60
+          {team_filter}
+        GROUP BY {group_key}
+        HAVING COUNT(*) >= 1
+        ORDER BY avg_temp DESC
+    """
+    return query_df(sql, params)
+
+
+def get_venues_list(team: str | None = None) -> list[str]:
+    """Return distinct match-stadium names, optionally filtered by team."""
+    eng = get_engine()
+    with eng.connect() as conn:
+        tid = _team_id(conn, team)
+    team_filter = ""
+    params: dict = {}
+    if tid is not None:
+        team_filter = "AND (m.home_team_id = :tid OR m.away_team_id = :tid)"
+        params["tid"] = tid
+    stadium_join = _match_stadium_join()
+    venue_expr = (
+        _match_stadium_name_expr()
+        if stadium_join
+        else "m.venue_name"
+    )
+    sql = f"""
+        SELECT DISTINCT {venue_expr} AS venue
+        FROM dim_match m
+        {stadium_join}
+        WHERE m.temperature_c IS NOT NULL
+          AND {venue_expr} IS NOT NULL
+          AND {venue_expr} <> 'Unknown'
+          {team_filter}
+        ORDER BY venue
+    """
+    df = query_df(sql, params)
+    return df["venue"].tolist() if not df.empty else []
+
+
+def get_weather_venue_across_seasons(
+    venue: str | None = None,
+    team: str | None = None,
+) -> pd.DataFrame:
+    """Temperature stats per season for a specific venue and/or team.
+
+    Returns one row per season with avg/min/max temp, matches, humidity.
+    """
+    eng = get_engine()
+    with eng.connect() as conn:
+        tid = _team_id(conn, team)
+    filters = []
+    params: dict = {}
+    stadium_join = _match_stadium_join()
+    venue_expr = (
+        _match_stadium_name_expr()
+        if stadium_join
+        else "m.venue_name"
+    )
+    if venue:
+        filters.append(f"AND {venue_expr} = :venue")
+        params["venue"] = venue
+    if tid is not None:
+        filters.append("AND (m.home_team_id = :tid OR m.away_team_id = :tid)")
+        params["tid"] = tid
+    where_extra = " ".join(filters)
+    sql = f"""
+        SELECT m.season,
+               COUNT(*) AS matches,
+               ROUND(AVG(m.temperature_c)::numeric, 1) AS avg_temp,
+               ROUND(MIN(m.temperature_c)::numeric, 1) AS min_temp,
+               ROUND(MAX(m.temperature_c)::numeric, 1) AS max_temp,
+               ROUND(AVG(m.humidity_pct)::numeric, 0) AS avg_humidity,
+               SUM(CASE WHEN m.precipitation_mm > 0 THEN 1 ELSE 0 END) AS rainy
+        FROM dim_match m
+        {stadium_join}
+        WHERE m.temperature_c IS NOT NULL
+          AND m.temperature_c BETWEEN -60 AND 60
+          {where_extra}
+        GROUP BY m.season
+        ORDER BY m.season
+    """
+    return query_df(sql, params)
+
+
+def get_weather_matches_for_venue(
+    venue: str | None = None,
+    team: str | None = None,
+) -> pd.DataFrame:
+    """Match-level temperature data across all seasons for a venue/team."""
+    eng = get_engine()
+    with eng.connect() as conn:
+        tid = _team_id(conn, team)
+    filters = []
+    params: dict = {}
+    stadium_join = _match_stadium_join()
+    venue_expr = (
+        _match_stadium_name_expr()
+        if stadium_join
+        else "m.venue_name"
+    )
+    stadium_cols = f"{venue_expr} AS stadium, m.venue_name"
+    if venue:
+        filters.append(f"AND {venue_expr} = :venue")
+        params["venue"] = venue
+    if tid is not None:
+        filters.append("AND (m.home_team_id = :tid OR m.away_team_id = :tid)")
+        params["tid"] = tid
+    where_extra = " ".join(filters)
+    sql = f"""
+        SELECT m.match_date, m.season,
+               ht.canonical_name AS home_team,
+               at.canonical_name AS away_team,
+               m.home_score, m.away_score,
+               m.temperature_c, m.humidity_pct,
+               {stadium_cols}
+        FROM dim_match m
+        LEFT JOIN dim_team ht ON m.home_team_id = ht.canonical_id
+        LEFT JOIN dim_team at ON m.away_team_id = at.canonical_id
+        {stadium_join}
+        WHERE m.temperature_c IS NOT NULL
+          AND m.temperature_c BETWEEN -60 AND 60
+          {where_extra}
+        ORDER BY m.match_date
     """
     return query_df(sql, params)
 
@@ -1024,9 +1561,9 @@ def get_injury_season_trend(team: str | None) -> pd.DataFrame:
     return query_df(sql, {})
 
 
-# ════════════════════════════════════════════════════════════════════
-# STADIUMS — dim_stadium (Transfermarkt, modelo SCD2)
-# ════════════════════════════════════════════════════════════════════
+# ================================================================
+# STADIUMS -- dim_stadium (Transfermarkt, modelo SCD2)
+# ================================================================
 # Granularidad: una fila por estado del estadio, con rango
 # [valid_from_season, valid_to_season]. Si la informacion no cambia
 # entre temporadas, hay una sola fila que cubre el rango entero.
@@ -1042,6 +1579,120 @@ def _stadium_table_exists() -> bool:
         return row is not None and row[0] is not None
     except Exception:
         return False
+
+
+_stadium_master_table: bool | None = None
+
+
+def _stadium_master_table_exists() -> bool:
+    """True si dim_stadium_master existe (imágenes Cloudinary / sede canónica)."""
+    global _stadium_master_table
+    if _stadium_master_table is not None:
+        return _stadium_master_table
+    eng = get_engine()
+    try:
+        with eng.connect() as conn:
+            row = conn.execute(text(
+                "SELECT to_regclass('public.dim_stadium_master')"
+            )).fetchone()
+        _stadium_master_table = row is not None and row[0] is not None
+    except Exception:
+        _stadium_master_table = False
+    return _stadium_master_table
+
+
+def _stadium_image_select_sql() -> tuple[str, str, str, str, str]:
+    """JOIN + expresiones COALESCE (imagen, master_id, coordenadas)."""
+    if not _stadium_master_table_exists():
+        return "", "s.image_url", "NULL::integer", "s.latitude", "s.longitude"
+    join = """
+        LEFT JOIN dim_stadium_master sm_q
+            ON s.wikidata_qid IS NOT NULL
+           AND s.wikidata_qid <> ''
+           AND sm_q.wikidata_qid = s.wikidata_qid
+        LEFT JOIN dim_stadium_master sm_home
+            ON sm_home.stadium_id = t.home_stadium_master_id
+    """
+    image_expr = "COALESCE(sm_q.image_url, sm_home.image_url, s.image_url)"
+    master_expr = "COALESCE(sm_q.stadium_id, sm_home.stadium_id)"
+    lat_expr = "COALESCE(sm_q.latitude, sm_home.latitude, s.latitude)"
+    lon_expr = "COALESCE(sm_q.longitude, sm_home.longitude, s.longitude)"
+    return join, image_expr, master_expr, lat_expr, lon_expr
+
+
+_names_history_table: bool | None = None
+
+
+def _stadium_names_history_exists() -> bool:
+    global _names_history_table
+    if _names_history_table is not None:
+        return _names_history_table
+    eng = get_engine()
+    try:
+        with eng.connect() as conn:
+            row = conn.execute(text(
+                "SELECT to_regclass('public.dim_stadium_names_history')"
+            )).fetchone()
+        _names_history_table = row is not None and row[0] is not None
+    except Exception:
+        _names_history_table = False
+    return _names_history_table
+
+
+_match_stadium_col: bool | None = None
+
+
+def _match_stadium_column_exists() -> bool:
+    """True si dim_match tiene match_stadium_id (migracion aplicada)."""
+    global _match_stadium_col
+    if _match_stadium_col is not None:
+        return _match_stadium_col
+    eng = get_engine()
+    try:
+        with eng.connect() as conn:
+            row = conn.execute(text("""
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'dim_match'
+                  AND column_name = 'match_stadium_id'
+                LIMIT 1
+            """)).fetchone()
+        _match_stadium_col = row is not None
+    except Exception:
+        _match_stadium_col = False
+    return _match_stadium_col
+
+
+def _match_stadium_id_expr(match_alias: str = "m") -> str:
+    return f"{match_alias}.match_stadium_id"
+
+
+def _match_stadium_join(
+    match_alias: str = "m",
+    stadium_alias: str = "ds",
+) -> str:
+    """LEFT JOIN dim_stadium por estadio real del partido (o vacio).
+
+    Vacio tambien si la columna match_stadium_id aun no existe (dump previo
+    a la migracion add_match_stadium_id.sql), para no romper la consulta.
+    """
+    if not _stadium_table_exists() or not _match_stadium_column_exists():
+        return ""
+    sid = _match_stadium_id_expr(match_alias)
+    return (
+        f"LEFT JOIN dim_stadium {stadium_alias} "
+        f"ON {stadium_alias}.stadium_id = {sid}"
+    )
+
+
+def _match_stadium_name_expr(
+    stadium_alias: str = "ds",
+    match_alias: str = "m",
+) -> str:
+    return (
+        f"COALESCE({stadium_alias}.stadium_name, "
+        f"{match_alias}.venue_name, 'Unknown')"
+    )
 
 
 def get_stadium_seasons() -> list[str]:
@@ -1088,17 +1739,25 @@ def get_stadiums(
     competition: str | None = None,
     country: str | None = None,
     search: str | None = None,
+    include_match_venues: bool = False,
 ) -> pd.DataFrame:
     """Estadios filtrados por temporada / competicion / pais / busqueda.
 
     Si se filtra por temporada, se aplica filtro de rango SCD2:
     `:season BETWEEN valid_from_season AND valid_to_season`.
+
+    Por defecto excluye filas `data_source='match-venue'` (sedes neutrales
+    creadas solo para resolver el estadio del partido).
     """
     if not _stadium_table_exists():
         return pd.DataFrame()
 
     params: dict = {}
     where_clauses: list[str] = []
+    if not include_match_venues:
+        where_clauses.append(
+            "(s.data_source IS NULL OR s.data_source <> 'match-venue')"
+        )
 
     # Si filtramos por season concreta, la mostramos en la columna 'season'.
     # Si no, mostramos el rango "vfrom -> vto" o solo vfrom si son iguales.
@@ -1112,6 +1771,8 @@ def get_stadiums(
             "END AS season"
         )
 
+    master_join, image_expr, master_expr, lat_expr, lon_expr = _stadium_image_select_sql()
+
     base_sql = f"""
         SELECT
             s.stadium_id,
@@ -1119,20 +1780,26 @@ def get_stadiums(
             {season_expr},
             s.stadium_name,
             s.capacity,
+            s.seats_total,
             s.built_year,
             s.owner,
             s.city,
             s.country,
             s.surface,
             s.architect,
-            s.latitude,
-            s.longitude,
+            {lat_expr} AS latitude,
+            {lon_expr} AS longitude,
+            s.altitude_m,
+            s.timezone,
+            s.data_source,
             s.tm_url,
-            s.image_url,
+            {master_expr} AS master_stadium_id,
+            {image_expr} AS image_url,
             s.wikipedia_url,
             s.wikidata_qid
         FROM dim_stadium s
         LEFT JOIN dim_team t ON t.canonical_id = s.canonical_team_id
+        {master_join}
     """
 
     if competition:
@@ -1145,7 +1812,7 @@ def get_stadiums(
                     UNION
                     SELECT m.away_team_id AS team_id FROM dim_match m
                       JOIN dim_competition dc ON dc.canonical_id = m.competition_id
-                      WHERE dc.canonical_name = :competition
+                      Where dc.canonical_name = :competition
                 ) x WHERE team_id IS NOT NULL
             ) ct ON ct.team_id = s.canonical_team_id
         """
@@ -1173,13 +1840,37 @@ def get_stadiums(
     return query_df(base_sql, params)
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def get_stadium_name_history(master_stadium_id: int | None) -> pd.DataFrame:
+    """Nombres históricos del edificio (dim_stadium_names_history)."""
+    if not master_stadium_id or not _stadium_names_history_exists():
+        return pd.DataFrame()
+    sql = """
+        SELECT stadium_name, valid_from_year, valid_to_year, is_current
+        FROM dim_stadium_names_history
+        WHERE stadium_id = :sid
+        ORDER BY
+            is_current DESC,
+            valid_from_year NULLS FIRST,
+            valid_to_year NULLS LAST,
+            stadium_name
+    """
+    return query_df(sql, {"sid": int(master_stadium_id)})
+
+
 def get_stadium_summary(
     season: str | None = None,
     competition: str | None = None,
     country: str | None = None,
+    include_match_venues: bool = False,
 ) -> dict:
     """Tarjetas resumen: n estadios, aforo total, media, equipo+aforo top."""
-    df = get_stadiums(season=season, competition=competition, country=country)
+    df = get_stadiums(
+        season=season,
+        competition=competition,
+        country=country,
+        include_match_venues=include_match_venues,
+    )
     if df.empty:
         return {
             "n_stadiums": 0, "total_capacity": 0, "avg_capacity": 0,

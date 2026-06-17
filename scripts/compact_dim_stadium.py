@@ -32,8 +32,7 @@ log = logging.getLogger(__name__)
 
 _DATA_FIELDS = [
     "stadium_name", "capacity",
-    "seats_total", "seats_covered", "seats_vip", "vip_boxes", "seats_standing",
-    "inaugurated_year", "built_year", "refurbished_year",
+    "seats_total", "vip_boxes", "built_year",
     "owner", "operator", "address", "city", "country",
     "construction_cost", "surface", "architect",
 ]
@@ -199,11 +198,13 @@ def main():
 
     with engine.begin() as conn:
         n_hash = backfill_hashes(conn, dry_run=args.dry_run)
+        n_overlap = merge_overlapping_duplicates(conn, dry_run=args.dry_run)
         n_merge = merge_adjacent(conn, dry_run=args.dry_run)
 
     verb = "(dry-run) " if args.dry_run else ""
     print(f"\n{verb}data_hash calculado: {n_hash}")
-    print(f"{verb}filas fusionadas:    {n_merge}")
+    print(f"{verb}grupos duplicados fusionados: {n_overlap}")
+    print(f"{verb}filas adyacentes fusionadas: {n_merge}")
 
 
 if __name__ == "__main__":

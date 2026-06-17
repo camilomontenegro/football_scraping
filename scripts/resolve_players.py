@@ -25,7 +25,10 @@ sys.path.insert(0, str(Path(__file__).parent))
 from loaders.common import engine
 
 def auto_resolve_high_similarity(threshold=75):
-    """Resolver automáticamente jugadores con similitud alta."""
+    """
+    Resolver automáticamente jugadores con similitud alta.
+    """
+
     print(f"\n[AUTO-RESOLVE] Resolviendo con similitud >= {threshold}%...")
     
     with engine.begin() as conn:
@@ -58,7 +61,9 @@ def auto_resolve_high_similarity(threshold=75):
 
 
 def interactive_resolve():
-    """Modo interactivo para resolver casos."""
+    """
+    Modo interactivo para resolver casos.
+    """
     print("\n[INTERACTIVE] Modo interactivo de resolución")
     print("Comandos: (A)ceptar | (R)echazar | (S)altar | (Q)uit | (L)ist\n")
     
@@ -151,15 +156,15 @@ def interactive_resolve():
             elif choice == "L":
                 # Listar sugerencias alternativas
                 print("\n      [Alternativas]")
+        
                 alt_result = conn.execute(text("""
-                    SELECT TOP 5
-                        canonical_name,
-                        position,
-                        nationality,
-                        similarity_score
+                                               
+                    SELECT canonical_id, canonical_name, position, nationality
                     FROM dim_player
-                    WHERE lower(canonical_name) LIKE lower(:pattern)
-                    ORDER BY similarity_score DESC
+                    WHERE LOWER(canonical_name) LIKE LOWER(:pattern)
+                    ORDER BY canonical_name
+                    LIMIT 5
+
                 """), {"pattern": f"%{source_name}%"})
                 
                 for i, (name, pos, nat, sim) in enumerate(alt_result, 1):

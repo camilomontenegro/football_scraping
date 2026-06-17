@@ -15,14 +15,8 @@ from pathlib import Path
 from sqlalchemy import text
 
 # Importar loaders
-from loaders.team_loader import _upsert_team, _load_from_sofascore
-from loaders.match_loader import _safe_int
-from loaders.stadium_loader import (
-    _date_to_season,
-    _derive_city_country,
-    _next_season,
-    _previous_season,
-)
+from loaders.team_loader_generico import _upsert_team, _load_from_sofascore
+from loaders.match_loader_generico import _safe_int
 from loaders.common import engine
 from scrapers.transfermarkt_stadiums_scraper import (
     _parse_pitch_dimensions,
@@ -119,17 +113,19 @@ class TestStadiumV3Helpers:
         assert _parse_pitch_dimensions("105 x 70") == (105, 70)
         assert _parse_pitch_dimensions("unknown") == (None, None)
 
+    @pytest.mark.skip(
+        reason="_previous_season/_next_season/_date_to_season ya no existen en "
+               "stadium_loader (refactor SCD2). Reescribir o eliminar este test."
+    )
     def test_season_helpers(self):
-        assert _previous_season("2024/2025") == "2023/2024"
-        assert _next_season("2024/2025") == "2025/2026"
-        assert _date_to_season("25/06/2021") == "2020/2021"
-        assert _date_to_season("03/09/1955") == "1955/1956"
+        pass
 
+    @pytest.mark.skip(
+        reason="_derive_city_country ya no existe en stadium_loader. "
+               "Reescribir o eliminar este test."
+    )
     def test_derive_city_country(self):
-        assert _derive_city_country("Calle X, 08028 Barcelona, Spain") == (
-            "Barcelona",
-            "Spain",
-        )
+        pass
 
 
 # ═════════════════════════════════════════════════════════════════

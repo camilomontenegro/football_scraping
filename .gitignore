@@ -2,15 +2,23 @@
 .venv/
 venv/
 
-# Datos descargados (son muy pesados y no van al repo)
+# Datos descargados (respaldar en Desktop; no van al repo)
 data/raw/
-data/processed/
+data/clean/
+data/exports/
+data/dumps/
+data/.cache/
+data/.import_staging/
+data/logs/
 data/*.db
-data/logs/*.log
+data/*.rar
+data/reference/
 
-#Dump de la base de datos
-db\dump-db_football_completa-202605190935.sql
-db/migrations/football_db_backup.dump
+# Dumps de base de datos (demasiado grandes para GitHub; guardar en local/Desktop)
+db/migrations/photo_urls.csv
+data/exports/*.dump
+db/dump-*.sql
+db/*.dump
 *.dump
 db/migrations/football_db.dump/
 

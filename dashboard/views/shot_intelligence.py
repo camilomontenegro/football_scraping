@@ -96,6 +96,12 @@ def render() -> None:
                 _sm_row = _sm_matches[_sm_matches["label"] == sm_match_label].iloc[0]
                 _sm_mid = int(_sm_row["match_id"])
 
+                # Flag shootout ties (WhoScored kicks at minute > 120). The
+                # exact shootout score is unreliable (source occasionally
+                # drops kicks), so show only the badge, not a number.
+                if analytics.get_shootout_result(_sm_mid) is not None:
+                    st.info(f"⚽ {t('decided_on_penalties')}")
+
                 _SM_COLORS = {
                     "Goal":        "#2ecc71",
                     "MissedShots": "#e74c3c",
@@ -103,10 +109,12 @@ def render() -> None:
                     "ShotOnPost":  "#f39c12",
                 }
 
-                def _draw_shot_map(team_name: str, team_id: int) -> None:
-                    shots = analytics.get_match_shots(_sm_mid, team_id)
+                def _draw_shot_map(
+                    team_name: str, team_id: int, shootout: bool = False
+                ) -> None:
+                    shots = analytics.get_match_shots(_sm_mid, team_id, shootout=shootout)
                     if shots.empty:
-                        st.info(t("no_shot_data"))
+                        st.info(t("no_shootout_data") if shootout else t("no_shot_data"))
                         return
 
                     pitch = _SmPitch(
@@ -121,6 +129,10 @@ def render() -> None:
                         if sub.empty:
                             continue
                         is_goal = etype == "Goal"
+                        # Dot size encodes WhoScored's big-chance flag (a
+                        # goal-quality proxy): big chances are drawn larger.
+                        _big = sub["is_big_chance"].fillna(False).to_numpy(dtype=bool)
+                        _sizes = np.where(_big, 230, 80)
                         # Trajectory to the goal-line crossing point — only
                         # for shots whose end coords have been populated.
                         traj = sub.dropna(subset=["end_x", "end_y"])
@@ -134,7 +146,7 @@ def render() -> None:
                             )
                         pitch.scatter(
                             sub["x"] * 105, sub["y"] * 68,
-                            s=160 if is_goal else 90,
+                            s=_sizes,
                             color=color, edgecolors="white",
                             linewidths=1.0 if is_goal else 0.6,
                             alpha=0.95, zorder=5 if is_goal else 4,
@@ -147,10 +159,12 @@ def render() -> None:
 
                     n_goals = int((shots["event_type"] == "Goal").sum())
                     n_target = int(shots["event_type"].isin(["Goal", "SavedShot"]).sum())
-                    c1, c2, c3 = st.columns(3)
+                    n_big = int(shots["is_big_chance"].fillna(False).sum())
+                    c1, c2, c3, c4 = st.columns(4)
                     c1.metric("Shots", len(shots))
                     c2.metric("On target", n_target)
                     c3.metric("Goals", n_goals)
+                    c4.metric("Big chances", n_big)
 
                     with st.expander(f"{team_name} — shot list"):
                         st.dataframe(
@@ -158,16 +172,18 @@ def render() -> None:
                             width="stretch", hide_index=True,
                         )
 
-                def _draw_goal_mouth(team_name: str, team_id: int) -> None:
+                def _draw_goal_mouth(
+                    team_name: str, team_id: int, shootout: bool = False
+                ) -> None:
                     """Front view of the goal: where each shot crossed the
                     goal line, in real metres (goal: 7.32 m × 2.44 m)."""
-                    shots = analytics.get_match_shots(_sm_mid, team_id)
+                    shots = analytics.get_match_shots(_sm_mid, team_id, shootout=shootout)
                     gm = (
                         shots.dropna(subset=["end_y", "end_z"])
                         if not shots.empty else shots
                     )
                     if gm.empty:
-                        st.info(t("no_goalmouth_data"))
+                        st.info(t("no_shootout_data") if shootout else t("no_goalmouth_data"))
                         return
 
                     # WhoScored units → metres:
@@ -196,13 +212,16 @@ def render() -> None:
                             color="white", lw=4, zorder=3,
                             solid_capstyle="round")
 
+                    _big_all = gm["is_big_chance"].fillna(False).to_numpy(dtype=bool)
                     for etype, color in _SM_COLORS.items():
                         m = (gm["event_type"] == etype).to_numpy()
                         if not m.any():
                             continue
                         is_goal = etype == "Goal"
+                        # Dot size encodes WhoScored's big-chance flag.
+                        _sizes = np.where(_big_all[m], 190, 65)
                         ax.scatter(
-                            y_m[m], z_m[m], s=130 if is_goal else 70,
+                            y_m[m], z_m[m], s=_sizes,
                             color=color, edgecolors="white",
                             linewidths=1.0 if is_goal else 0.6,
                             alpha=0.95, zorder=5 if is_goal else 4,
@@ -229,10 +248,12 @@ def render() -> None:
 
                     n_goals = int((gm["event_type"] == "Goal").sum())
                     n_target = int(gm["event_type"].isin(["Goal", "SavedShot"]).sum())
-                    c1, c2, c3 = st.columns(3)
+                    n_big = int(gm["is_big_chance"].fillna(False).sum())
+                    c1, c2, c3, c4 = st.columns(4)
                     c1.metric("Shots plotted", len(gm) + n_off)
                     c2.metric("On target", n_target)
                     c3.metric("Goals", n_goals)
+                    c4.metric("Big chances", n_big)
 
                 _draw_team = (
                     _draw_shot_map if si_view == t("shot_map") else _draw_goal_mouth
@@ -243,18 +264,37 @@ def render() -> None:
                 with sm_away:
                     _draw_team(str(_sm_row["away"]), int(_sm_row["away_team_id"]))
 
+                # When the match was decided on penalties, add a second pair of
+                # field images with just the shootout kicks for each team.
+                if analytics.get_shootout_result(_sm_mid) is not None:
+                    st.divider()
+                    st.subheader(f"⚽ {t('penalty_shootout')}")
+                    so_home, so_away = st.columns(2)
+                    with so_home:
+                        _draw_team(
+                            str(_sm_row["home"]), int(_sm_row["home_team_id"]),
+                            shootout=True,
+                        )
+                    with so_away:
+                        _draw_team(
+                            str(_sm_row["away"]), int(_sm_row["away_team_id"]),
+                            shootout=True,
+                        )
+
                 if si_view == t("shot_map"):
                     st.caption(
                         "Source: fact_events (WhoScored) · Dot = shot origin · "
+                        "Larger dot = big chance (WhoScored flag) · "
                         "Goal / MissedShots / SavedShot / ShotOnPost are WhoScored outcomes · "
-                        "On target = Goal + SavedShot · Penalty shootouts excluded"
+                        "On target = Goal + SavedShot · Penalty shootouts shown separately"
                     )
                 else:
                     st.caption(
                         "Source: fact_events (WhoScored goalMouthY/goalMouthZ) · "
                         "Front view of the goal in real metres (7.32 m × 2.44 m) · "
                         "Dot = where the shot crossed the goal-line plane · "
-                        "Penalty shootouts excluded"
+                        "Larger dot = big chance (WhoScored flag) · "
+                        "Penalty shootouts shown separately"
                     )
 
             st.divider()
