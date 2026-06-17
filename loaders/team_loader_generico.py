@@ -35,6 +35,7 @@ import html
 
 from loaders.common import engine
 from utils.canonical_teams import normalize_team_name
+from utils.team_countries import resolve_team_country
 
 log = logging.getLogger(__name__)
 
@@ -191,12 +192,15 @@ def _load_from_transfermarkt(conn,tm_path: Path) -> int:
        
         cid = _upsert_team(conn, name, "id_transfermarkt", tm_id)
 
-        # Enriquecer con country si es necesario
-        if info.get("country"):
+        resolved = resolve_team_country(
+            normalize_team_name(name),
+            tm_country=info.get("country"),
+            tm_id=int(tm_id) if tm_id else None,
+        )
+        if resolved:
             conn.execute(
-                #-- con COALESCE — solo actualiza si es NULL
-                text("UPDATE dim_team SET country = COALESCE(country, :c) WHERE canonical_id = :cid"),
-                {"c": info["country"], "cid": cid}
+                text("UPDATE dim_team SET country = :c WHERE canonical_id = :cid"),
+                {"c": resolved, "cid": cid},
             )
         count += 1
 
@@ -291,13 +295,18 @@ def _load_from_whoscored(conn, ws_path: Path) -> int:
         return 0
 
     count = 0
+    seen: set[tuple[int, str]] = set()
     for _, row in df.iterrows():
-        ws_id   = row.get("whoscored_team_id")
-        ws_name = row.get("team_name")
-        if not ws_id or not ws_name:
+        ws_id = row.get("whoscored_team_id")
+        ws_name = row.get("team_name") or row.get("name")
+        if pd.isna(ws_id) or not ws_name or not str(ws_name).strip():
             continue
-
-        _upsert_team(conn, ws_name, "id_whoscored", ws_id)
+        ws_id = int(ws_id)
+        key = (ws_id, str(ws_name).strip().lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        _upsert_team(conn, str(ws_name).strip(), "id_whoscored", ws_id)
         count += 1
 
     log.info("dim_team ← WhoScored: %d equipos", count)

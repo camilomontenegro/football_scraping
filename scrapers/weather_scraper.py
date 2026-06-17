@@ -67,14 +67,14 @@ MATCHES_QUERY = """
     JOIN LATERAL (
         SELECT latitude, longitude
         FROM dim_stadium
-        WHERE stadium_id = COALESCE(m.match_stadium_id, m.stadium_id)
+        WHERE stadium_id = m.match_stadium_id
           AND latitude IS NOT NULL
           AND longitude IS NOT NULL
         LIMIT 1
     ) s ON TRUE
     WHERE m.match_date IS NOT NULL
       AND m.temperature_c IS NULL
-      AND COALESCE(m.match_stadium_id, m.stadium_id) IS NOT NULL
+      AND m.match_stadium_id IS NOT NULL
 """
 
 UPDATE_SQL = text("""

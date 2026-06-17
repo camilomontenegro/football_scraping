@@ -291,39 +291,36 @@ def get_league_teams(season: int,competicion_slug:str, league_code:str) -> list[
 
 def get_team_country(team_slug: str, team_id: int) -> Optional[str]:
     """
-    Accede a la página del equipo y extrae el país.
-
-    URL:
-        https://www.transfermarkt.es/{team_slug}/startseite/verein/{team_id}
-
-    El país está en el label "Liga:" dentro de data-header:
-        <span class="data-header__label">
-            <strong>Liga:</strong>
-            <span class="data-header__content">
-                <a href="...">
-                    <img title="Inglaterra" alt="Inglaterra" class="flaggenrahmen">
-                </a>
-            </span>
-        </span>
-
-    Parámetros:
-        team_slug (str): slug del equipo, ej: "manchester-city"
-        team_id   (int): ID del equipo en Transfermarkt, ej: 281
-
-    Devuelve:
-        str con el país, ej: "Inglaterra", o None si no se encuentra
-
-        ** Este metodo se va a llamar en get_league_teams. Otra opcion seria  prescindir del método y  usar la logia de extraccion en get_squad ya que  el dato del pais del equipo se encuentra en la misma pagian que la plantilla del equipo. Habria que modificar get_squady  para que devolvise tambien un string.
-        Se deja asi porsi solo se quiere obtener datos de los equipos. 
+    País del club (no de la liga). Prioridad: overrides TM id → sede → bandera Liga.
     """
+    from utils.team_countries import TM_ID_COUNTRY_OVERRIDES
+
+    if team_id in TM_ID_COUNTRY_OVERRIDES:
+        return TM_ID_COUNTRY_OVERRIDES[team_id]
+
+    url = f"https://www.transfermarkt.es/{team_slug}/stadion/verein/{team_id}"
+    response = request_with_retry(url)
+    if response:
+        soup = BeautifulSoup(response.content, "html.parser")
+        for label in soup.find_all("span", class_="data-header__label"):
+            text = label.get_text(" ", strip=True)
+            if any(k in text for k in ("País", "Pais", "Country")):
+                flag = label.find("img", class_="flaggenrahmen")
+                if flag and flag.get("title"):
+                    return flag.get("title")
+        for row in soup.select("span.data-header__label, li"):
+            txt = row.get_text(" ", strip=True)
+            if "País" in txt or "Pais:" in txt:
+                flag = row.find("img", class_="flaggenrahmen")
+                if flag and flag.get("title"):
+                    return flag.get("title")
+
     url = f"https://www.transfermarkt.es/{team_slug}/startseite/verein/{team_id}"
     response = request_with_retry(url)
     if not response:
         return None
 
     soup = BeautifulSoup(response.content, "html.parser")
-
-    # busca el label "Liga:" por texto — más estable que posición en el DOM
     for label in soup.find_all("span", class_="data-header__label"):
         if "Liga" in label.text:
             flag = label.find("img", class_="flaggenrahmen")

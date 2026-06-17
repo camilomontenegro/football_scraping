@@ -120,14 +120,24 @@ def get_coverage_by_source(competition: str, season_label: str) -> list[dict]:
     eng = get_engine()
     with eng.connect() as conn:
         rows = conn.execute(text("""
-            SELECT data_source, COUNT(*)
-            FROM dim_match
-            WHERE season = :season
-            GROUP BY data_source
-        """), {"season": season_label}).fetchall()
+            SELECT m.data_source, COUNT(*)
+            FROM dim_match m
+            JOIN dim_competition c ON c.canonical_id = m.competition_id
+            WHERE m.season = :season
+              AND c.canonical_name = :competition
+            GROUP BY m.data_source
+        """), {"season": season_label, "competition": competition}).fetchall()
     counts = {(r[0] or "").lower(): r[1] for r in rows}
+    # _TOTAL_BY_SOURCE holds La-Liga reference totals (380 matches); a fixed
+    # ratio is only meaningful for La Liga, so other competitions report the
+    # loaded count without a misleading "loaded / total" bar.
+    is_la_liga = (competition or "").strip().lower() == "la liga"
     return [
-        {"source": src, "loaded": counts.get(src, 0), "total": _TOTAL_BY_SOURCE[src]}
+        {
+            "source": src,
+            "loaded": counts.get(src, 0),
+            "total": _TOTAL_BY_SOURCE[src] if is_la_liga else None,
+        }
         for src in _SOURCES
     ]
 

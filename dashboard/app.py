@@ -34,18 +34,21 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from dashboard import analytics, db, explore, pass_network, player_detail, scanner, wizard_view
-from dashboard.i18n import t, get_lang, LANGUAGES
+from dashboard import analytics, db, explore, pass_network, player_detail, scanner, stadium_fill, stadium_fill_svg, wizard_view
+from dashboard.i18n import t, get_lang, LANGUAGES, DEFAULT_LANG
+
+if "app_language" not in st.session_state:
+    st.session_state["app_language"] = DEFAULT_LANG
 
 st.set_page_config(
-    page_title="Football Scraping Dashboard",
+    page_title=t("page_title"),
     page_icon="⚽",
     layout="wide",
 )
 
 # ── Language selector (sidebar) ──────────────────────────
 _lang_label = st.sidebar.selectbox(
-    "🌐 Language / Idioma",
+    t("lang_label"),
     list(LANGUAGES.keys()),
     index=0,
     key="lang_selector",
@@ -65,19 +68,84 @@ def _fmt(n) -> str:
     return f"{int(n):,}".replace(",", ".")
 
 
+def _format_name_era_span(vf, vt, is_current: bool) -> str:
+    """Human-readable year span for a stadium name era."""
+    if is_current and pd.isna(vf) and pd.isna(vt):
+        return t("stadium_name_current")
+    parts: list[str] = []
+    if pd.notna(vf):
+        parts.append(f"{t('stadium_name_from')} {int(vf)}")
+    if pd.notna(vt):
+        parts.append(f"{t('stadium_name_until')} {int(vt)}")
+    if parts:
+        return " · ".join(parts)
+    return "—"
+
+
+def _render_stadium_name_history(row: pd.Series) -> None:
+    master_id = row.get("master_stadium_id")
+    if pd.isna(master_id):
+        return
+    hist = explore.get_stadium_name_history(int(master_id))
+    st.markdown(f"**{t('stadium_name_history')}**")
+    if hist.empty:
+        st.caption(t("stadium_name_history_none"))
+        return
+    has_timeline = len(hist) > 1 or hist["valid_from_year"].notna().any() or hist["valid_to_year"].notna().any()
+    if not has_timeline:
+        st.caption(t("stadium_name_history_none"))
+        return
+    for _, h in hist.iterrows():
+        name = str(h["stadium_name"])
+        span = _format_name_era_span(h["valid_from_year"], h["valid_to_year"], bool(h["is_current"]))
+        if bool(h["is_current"]) and span != t("stadium_name_current"):
+            line = f"- **{name}** — {span} · *{t('stadium_name_current')}*"
+        elif bool(h["is_current"]):
+            line = f"- **{name}** — *{t('stadium_name_current')}*"
+        else:
+            line = f"- {name} — {span}"
+        st.markdown(line)
+
+
+def _render_stadium_location_map(lat, lon) -> None:
+    """Mapa con la ubicación del estadio (coordenadas en BD)."""
+    if pd.isna(lat) or pd.isna(lon):
+        st.markdown(f"**{t('stadium_location')}**")
+        st.caption(t("stadium_no_coords"))
+        return
+
+    lat_f, lon_f = float(lat), float(lon)
+    map_col, _ = st.columns([0.48, 1.52])
+    with map_col:
+        st.markdown(f"**{t('stadium_location')}**")
+        st.caption(f"{lat_f:.5f}, {lon_f:.5f}")
+        st.map(
+            pd.DataFrame({"lat": [lat_f], "lon": [lon_f]}),
+            zoom=14,
+            height=240,
+            use_container_width=True,
+        )
+        st.link_button(
+            t("stadium_open_maps"),
+            f"https://www.google.com/maps?q={lat_f},{lon_f}",
+            use_container_width=True,
+        )
+
+
 def _render_stadium_detail(row: pd.Series) -> None:
     """Detail panel: photo, metadata and external links for one stadium row."""
     st.subheader(t("stadium_detail"))
-    img_col, info_col = st.columns([1, 1.4])
+    img_col, info_col = st.columns([0.55, 1.45])
 
     with img_col:
         image_url = row.get("image_url")
         lat, lon = row.get("latitude"), row.get("longitude")
         if pd.notna(image_url) and str(image_url).strip():
-            st.image(str(image_url), caption=str(row.get("stadium_name") or ""), width="stretch")
-        elif pd.notna(lat) and pd.notna(lon):
-            st.caption(t("stadium_map_fallback"))
-            st.map(pd.DataFrame({"lat": [float(lat)], "lon": [float(lon)]}), zoom=12)
+            st.image(
+                str(image_url),
+                caption=str(row.get("stadium_name") or ""),
+                width=280,
+            )
         else:
             st.info(t("stadium_no_photo"))
 
@@ -126,6 +194,11 @@ def _render_stadium_detail(row: pd.Series) -> None:
         if pd.notna(tm) and str(tm).strip():
             link_cols[2].link_button("Transfermarkt", str(tm))
 
+    st.divider()
+    _render_stadium_location_map(lat, lon)
+    st.divider()
+    _render_stadium_name_history(row)
+
 
 # ════════════════════════════════════════════════════════════════════
 # SHARED HELPER — 3-column selector row (reused across tabs)
@@ -137,14 +210,14 @@ def _tab_selectors(key_prefix: str, all_seasons: bool = False):
     with sc1:
         _comp = st.selectbox(t("competition"), _comps, key=f"{key_prefix}_comp")
     _seasons = explore.get_seasons_for_competition(_comp)
-    season_opts = ([t("all_seasons")] + _seasons) if all_seasons else (_seasons or ["(no seasons)"])
+    season_opts = ([t("all_seasons")] + _seasons) if all_seasons else (_seasons or [t("no_seasons_paren")])
     with sc2:
         _season_sel = st.selectbox(
             t("season"), season_opts,
             key=f"{key_prefix}_season",
             disabled=not _seasons,
         )
-    _season = None if (_season_sel in (t("all_seasons"), "(no seasons)") or not _seasons) else _season_sel
+    _season = None if (_season_sel in (t("all_seasons"), t("no_seasons_paren")) or not _seasons) else _season_sel
     _teams = explore.get_teams_for_season(_season or (_seasons[0] if _seasons else ""), _comp) if _seasons else []
     with sc3:
         _team_sel = st.selectbox(
@@ -183,7 +256,7 @@ with tab_explore:
     seasons = explore.get_seasons_for_competition(competition)
     with c2:
         season = st.selectbox(
-            t("season"), seasons or ["(no seasons in DB)"], key="ex_season",
+            t("season"), seasons or [t("no_seasons_in_db")], key="ex_season",
             disabled=not seasons,
         )
     teams = explore.get_teams_for_season(season, competition) if seasons else []
@@ -230,14 +303,10 @@ with tab_explore:
         with t_player_stats:
             df = explore.get_player_stats(season, team, competition)
             if df.empty:
-                st.info("No shot data found for this selection. "
-                        "Check pipeline coverage in the monitoring tab.")
+                st.info(t("no_shot_data_pipeline"))
             else:
                 st.dataframe(df, width='stretch')
-                st.caption(
-                    "Source: fact_shots (all sources combined — "
-                    "StatsBomb, Understat, SofaScore)."
-                )
+                st.caption(t("caption_player_stats"))
 
         # ── Shots by source ───────────────────────────────
         with t_shots:
@@ -247,31 +316,28 @@ with tab_explore:
             else:
                 st.dataframe(df, width='stretch')
                 st.bar_chart(df.set_index("data_source")["shots"])
-                st.caption(
-                    "Each source covers different event types. Understat and StatsBomb "
-                    "include xG. SofaScore shots may have NULL coordinates."
-                )
+                st.caption(t("caption_shots_by_source"))
 
         # ── Events ────────────────────────────────────────
         with t_events:
             df = explore.get_events_summary(season, team, competition)
             if df.empty:
-                st.info("No event data found for this selection.")
+                st.info(t("no_event_data_selection"))
             else:
                 st.dataframe(df, width='stretch')
-                st.caption(
-                    "SofaScore events are incident-only (cards, substitutions, VAR) — "
-                    "coordinates are NULL by design. WhoScored and StatsBomb events "
-                    "include x/y coordinates."
-                )
+                st.caption(t("caption_events_summary"))
 
         # ── Standings (formerly Teams tab) ────────────────
         with t_standings:
             df = explore.get_team_standings(season, team, competition)
             if df.empty:
-                st.info("No match data found. Run pipeline_runner.py to populate dim_match.")
+                st.info(t("no_match_data_pipeline"))
             else:
-                total_matches = int(df["p"].sum()) // 2
+                # A selected team yields a single standings row whose "played"
+                # already equals its match count; only halve for the full table
+                # (each match appears twice, once per team).
+                _p_sum = int(df["p"].sum())
+                total_matches = _p_sum if len(df) <= 1 else _p_sum // 2
                 total_goals = int(df["gf"].sum())
                 avg_goals = round(total_goals / total_matches, 2) if total_matches else 0
                 avg_xg = round(float(df["xg_for"].sum()) / total_matches, 2) if total_matches else 0
@@ -283,16 +349,13 @@ with tab_explore:
                 sm4.metric(t("avg_xg_match"), f"{avg_xg:.2f}")
 
                 display_df = df.rename(columns={
-                    "p": "Played", "w": "Won", "d": "Drawn", "l": "Lost",
-                    "gf": "Goals For", "ga": "Goals Against", "gd": "Goal Diff",
-                    "xg_for": "xG For (season total)", "xg_against": "xG Against (season total)",
-                    "shots_for": "Shots For", "shots_against": "Shots Against",
+                    "p": t("col_played"), "w": t("col_won"), "d": t("col_drawn"), "l": t("col_lost"),
+                    "gf": t("col_gf"), "ga": t("col_ga"), "gd": t("col_gd"),
+                    "xg_for": t("col_xg_for"), "xg_against": t("col_xg_against"),
+                    "shots_for": t("col_shots_for"), "shots_against": t("col_shots_against"),
                 })
                 st.dataframe(display_df, width='stretch')
-                st.caption(
-                    "Source: dim_match (all sources combined) · xG and shots: fact_shots · "
-                    "xG For/Against = season-total expected goals (sum across all matches, not per-shot)"
-                )
+                st.caption(t("caption_standings"))
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -301,8 +364,9 @@ with tab_explore:
 with tab_players:
     st.header(t("tab_players"))
 
-    t_discipline, t_gk, t_detail, t_injuries = st.tabs(
-        [t("tab_players"), t("tab_goalkeepers"), "Player Detail", t("tab_injuries")]
+    t_discipline, t_cards, t_gk, t_detail, t_injuries = st.tabs(
+        [t("tab_players"), t("cards_fouls_section"), t("tab_goalkeepers"),
+         t("tab_player_detail"), t("tab_injuries")]
     )
 
     # ── Discipline ──────────────────────────────────────────
@@ -311,7 +375,7 @@ with tab_players:
 
         df = explore.get_player_discipline(_pl_season, _pl_team, _pl_comp)
         if df.empty:
-            st.info("No player data found for this selection.")
+            st.info(t("no_player_data"))
         else:
             m1, m2, m3, m4 = st.columns(4)
             m1.metric(t("players_tracked"), df["player"].nunique())
@@ -329,15 +393,15 @@ with tab_players:
                 top10 = df.groupby("player")["goals"].sum().nlargest(10).reset_index()
                 if not top10.empty:
                     _pl_sort_asc = st.radio(
-                        "Sort order", ["Descending", "Ascending"],
+                        t("sort_order"), [t("descending"), t("ascending")],
                         horizontal=True, key="pl_top_sort",
-                    ) == "Ascending"
+                    ) == t("ascending")
                     top10 = top10.sort_values("goals", ascending=_pl_sort_asc)
                     fig_pl, ax_pl = plt.subplots(figsize=(10, max(3, len(top10) * 0.45)))
                     fig_pl.patch.set_facecolor("#0e1117")
                     ax_pl.set_facecolor("#0e1117")
                     ax_pl.barh(top10["player"], top10["goals"], color="#3498db")
-                    ax_pl.set_xlabel("Goals", color="white")
+                    ax_pl.set_xlabel(t("goals"), color="white")
                     ax_pl.tick_params(colors="white")
                     for spine in ax_pl.spines.values():
                         spine.set_color("#444")
@@ -346,10 +410,63 @@ with tab_players:
                     st.pyplot(fig_pl)
                     plt.close(fig_pl)
 
-            st.caption(
-                "Goals and xG: fact_shots (all sources) · Cards: fact_events (SofaScore incidents + StatsBomb)\n"
-                "Rows show per-season accumulation when All seasons is selected."
+            st.caption(t("caption_discipline_rows"))
+
+    # ── Cards & fouls ───────────────────────────────────────
+    with t_cards:
+        _cf_comp, _cf_season, _cf_team = _tab_selectors("cards_fouls")
+        if _cf_season is None:
+            st.info(t("select_season"))
+        else:
+            _cf_min = st.slider(t("min_matches"), 1, 20, 3, key="cf_min_matches")
+            _df_cf = explore.get_player_cards_fouls(
+                _cf_season, _cf_team, _cf_comp, _cf_min
             )
+            if _df_cf.empty:
+                st.info(t("no_data"))
+            else:
+                _cf1, _cf2, _cf3, _cf4 = st.columns(4)
+                _cf1.metric(t("players_tracked"), _df_cf["player"].nunique())
+                _cf2.metric(t("yellow_cards"), _fmt(_df_cf["yellow_cards"].sum()))
+                _cf3.metric(t("red_cards"), _fmt(_df_cf["red_cards"].sum()))
+                _cf4.metric(t("fouls"), _fmt(_df_cf["fouls"].sum()))
+
+                st.dataframe(
+                    _df_cf.rename(columns={
+                        "player": t("col_player"), "team": t("team"), "matches": t("col_matches"),
+                        "yellow_cards": t("yellow_cards"), "red_cards": t("red_cards"),
+                        "total_cards": t("total_cards"),
+                        "cards_per_match": t("cards_per_match"),
+                        "fouls": t("fouls"), "fouls_per_match": t("fouls_per_match"),
+                    }),
+                    width="stretch", hide_index=True,
+                )
+
+                _topc = _df_cf[_df_cf["matches"] >= _cf_min].sort_values(
+                    "cards_per_match", ascending=False
+                ).head(15)
+                if not _topc.empty:
+                    st.subheader(t("cards_per_match"))
+                    fig_cf, ax_cf = plt.subplots(figsize=(10, max(3, len(_topc) * 0.45)))
+                    fig_cf.patch.set_facecolor("#0e1117")
+                    ax_cf.set_facecolor("#0e1117")
+                    _cf_lbl = [f"{r.player} ({r.team})" for r in _topc.itertuples()]
+                    _cf_y = _topc["yellow_cards"].to_numpy(float) / _topc["matches"].to_numpy(float)
+                    _cf_r = _topc["red_cards"].to_numpy(float) / _topc["matches"].to_numpy(float)
+                    ax_cf.barh(_cf_lbl, _cf_y, color="#f1c40f", label=t("yellow_cards"))
+                    ax_cf.barh(_cf_lbl, _cf_r, left=_cf_y, color="#e74c3c", label=t("red_cards"))
+                    ax_cf.set_xlabel(t("cards_per_match"), color="white")
+                    ax_cf.tick_params(colors="white")
+                    ax_cf.legend(facecolor="#1a1a2e", edgecolor="#444",
+                                 labelcolor="white", fontsize=9)
+                    for _sp in ax_cf.spines.values():
+                        _sp.set_color("#444")
+                    ax_cf.invert_yaxis()
+                    plt.tight_layout()
+                    st.pyplot(fig_cf)
+                    plt.close(fig_cf)
+
+                st.caption(t("caption_cards_fouls"))
 
     # ── Goalkeepers ─────────────────────────────────────────
     with t_gk:
@@ -360,7 +477,7 @@ with tab_players:
         else:
             df = explore.get_goalkeeper_stats(_gk_season, _gk_team, _gk_comp)
             if df.empty:
-                st.info("No goalkeeper data found for this selection.")
+                st.info(t("no_gk_data"))
             else:
                 gk_count = len(df)
                 total_saves = int(df["saves"].sum())
@@ -374,44 +491,37 @@ with tab_players:
                 m4.metric(t("clean_sheets"), _fmt(total_cs))
 
                 display_df = df.rename(columns={
-                    "goalkeeper": "Goalkeeper",
-                    "team": "Team",
-                    "matches_played": "Matches",
-                    "goals_allowed": "Goals Allowed",
-                    "shots_faced": "Shots On Target Faced",
-                    "saves": "Saves",
-                    "save_pct": "Save % (saves/shots×100)",
-                    "xg_conceded": "xG Conceded",
-                    "goals_saved_above_expected": "Goals Saved Above Expected",
-                    "clean_sheets": "Clean Sheets",
+                    "goalkeeper": t("col_goalkeeper"),
+                    "team": t("team"),
+                    "matches_played": t("col_matches"),
+                    "goals_allowed": t("col_goals_allowed"),
+                    "shots_faced": t("col_shots_faced"),
+                    "saves": t("col_saves"),
+                    "save_pct": t("col_save_pct_formula"),
+                    "xg_conceded": t("col_xg_conceded"),
+                    "goals_saved_above_expected": t("col_gsae"),
+                    "clean_sheets": t("clean_sheets"),
                 })
                 st.dataframe(display_df, width='stretch')
-                st.caption(
-                    "Stats are scoped to matches where each GK appeared in event data (substitutions, cards, etc.) — "
-                    "used as a proxy for matches played. "
-                    "Shots On Target Faced = goals + saves (blocked/missed excluded) · "
-                    "Save % = saves ÷ shots on target × 100 · "
-                    "xG Conceded = total expected-goal value of shots faced · "
-                    "Goals Saved Above Expected = saves − xG conceded (positive = outperforming)"
-                )
+                st.caption(t("caption_gk_stats"))
 
     # ── Player Detail ───────────────────────────────────────
     with t_detail:
         try:
             from mplsoccer import Pitch as _PlayerPitch
         except ImportError:
-            st.error("Install mplsoccer: pip install mplsoccer")
+            st.error(t("install_mplsoccer"))
             st.stop()
 
         _pd_all = player_detail.get_all_players()
-        _pd_search = st.text_input("Search player", key="pd_search", placeholder="Type a name…")
+        _pd_search = st.text_input(t("search_player"), key="pd_search", placeholder=t("search_player_ph"))
         _pd_filtered = _pd_all[
             _pd_all["canonical_name"].str.contains(_pd_search, case=False, na=False)
         ] if _pd_search else _pd_all
         _pd_names = _pd_filtered["canonical_name"].tolist()
 
         _pd_selected_name = st.selectbox(
-            "Select player", options=_pd_names if _pd_names else ["(no match)"],
+            t("select_player"), options=_pd_names if _pd_names else [t("no_player_match")],
             key="pd_select", disabled=not _pd_names,
         )
 
@@ -427,11 +537,13 @@ with tab_players:
             # ═══════════════════════════════════════════════════════
             # SECTION 1 — PLAYER CARD (LaLiga-style header)
             # ═══════════════════════════════════════════════════════
-            _sm_seasons_all = ["All"] + player_detail.get_player_shot_seasons(_pd_cid)
+            _PD_ALL = "All"
+            _sm_seasons_all = [_PD_ALL] + player_detail.get_player_shot_seasons(_pd_cid)
             _pd_season_sel = st.selectbox(
-                "Season", _sm_seasons_all, key="pd_season_global",
+                t("season"), _sm_seasons_all, key="pd_season_global",
+                format_func=lambda s: t("filter_all") if s == _PD_ALL else s,
             )
-            _pd_season_val = None if _pd_season_sel == "All" else _pd_season_sel
+            _pd_season_val = None if _pd_season_sel == _PD_ALL else _pd_season_sel
 
             _summary = player_detail.get_player_summary_stats(_pd_cid, _pd_season_sel)
 
@@ -468,11 +580,13 @@ with tab_players:
                 if _bd:
                     from datetime import date as _date_cls
                     _age = (_date_cls.today() - _bd).days // 365
-                    _ft_items.append(f"**Born:** {_bd.strftime('%d/%m/%Y')} ({_age} yrs)")
+                    _ft_items.append(
+                        f"**{t('born')}:** {_bd.strftime('%d/%m/%Y')} ({_age} {t('years_old')})"
+                    )
                 if _pd["nationality"]:
-                    _ft_items.append(f"**Nationality:** {_pd['nationality']}")
+                    _ft_items.append(f"**{t('nationality')}:** {_pd['nationality']}")
                 if _pd["position"]:
-                    _ft_items.append(f"**Position:** {_pd['position']}")
+                    _ft_items.append(f"**{t('position')}:** {_pd['position']}")
                 st.markdown(" · ".join(_ft_items) if _ft_items else "—")
 
                 # Source badges
@@ -496,9 +610,11 @@ with tab_players:
             # ═══════════════════════════════════════════════════════
             # SECTION 2 — STATS GRID (LaLiga-style numbers)
             # ═══════════════════════════════════════════════════════
-            _season_label = _pd_season_sel if _pd_season_sel != "All" else "All seasons"
+            _season_label = (
+                _pd_season_sel if _pd_season_sel != _PD_ALL else t("all_seasons")
+            )
             st.markdown(
-                f'<h3 style="margin-bottom:0.3em">Statistics — {_season_label}</h3>',
+                f'<h3 style="margin-bottom:0.3em">{t("statistics_title").format(season=_season_label)}</h3>',
                 unsafe_allow_html=True,
             )
 
@@ -514,14 +630,14 @@ with tab_players:
             # Row 1: Goals · Shots · xG · Matches
             _r1c1, _r1c2, _r1c3, _r1c4 = st.columns(4)
             _stat_card(t("goals"),   _summary["goals"],   _r1c1)
-            _stat_card("Shots",      _summary["shots"],   _r1c2)
-            _stat_card("xG",        f'{_summary["xg"]:.2f}', _r1c3)
+            _stat_card(t("shots"),      _summary["shots"],   _r1c2)
+            _stat_card(t("col_xg"),     f'{_summary["xg"]:.2f}', _r1c3)
             _stat_card(t("matches"), _summary["matches"], _r1c4)
 
             # Row 2: Penalties · Penalty Goals · Yellow · Red
             _r2c1, _r2c2, _r2c3, _r2c4 = st.columns(4)
-            _stat_card("Penalties",      _summary["penalties"],     _r2c1)
-            _stat_card("Penalty Goals",  _summary["penalty_goals"], _r2c2)
+            _stat_card(t("penalties"),      _summary["penalties"],     _r2c1)
+            _stat_card(t("penalty_goals"),  _summary["penalty_goals"], _r2c2)
             _stat_card(t("yellow_cards"), _summary["yellows"],      _r2c3)
             _stat_card(t("red_cards"),    _summary["reds"],         _r2c4)
 
@@ -534,9 +650,9 @@ with tab_players:
                 _summary["goals"] / _summary["matches"] if _summary["matches"] else 0, 2
             )
             _r3c1, _r3c2, _r3c3, _r3c4 = st.columns(4)
-            _stat_card("Conversion %", f"{_conv}%", _r3c1)
-            _stat_card("Goals − xG",   f"{_g_minus_xg_total:+.2f}", _r3c2)
-            _stat_card("Goals/Match",   f"{_gpm:.2f}", _r3c3)
+            _stat_card(t("conversion_pct"), f"{_conv}%", _r3c1)
+            _stat_card(t("goals_minus_xg"),   f"{_g_minus_xg_total:+.2f}", _r3c2)
+            _stat_card(t("goals_per_match"),   f"{_gpm:.2f}", _r3c3)
             _r3c4.write("")  # empty cell
 
             st.divider()
@@ -554,10 +670,15 @@ with tab_players:
 
                 # ── Compare-to selector ──────────────────────────
                 _cmp_col1, _cmp_col2 = st.columns([1, 2])
+                _CMP_LEAGUE, _CMP_PLAYER = "__league__", "__player__"
                 with _cmp_col1:
                     _cmp_mode = st.radio(
-                        "Compare against",
-                        [f"{_comp_name} average", "Another player"],
+                        t("compare_with"),
+                        [_CMP_LEAGUE, _CMP_PLAYER],
+                        format_func=lambda m: (
+                            t("compare_mode_league").format(comp=_comp_name)
+                            if m == _CMP_LEAGUE else t("compare_mode_player")
+                        ),
                         key="pd_cmp_mode",
                         horizontal=True,
                     )
@@ -565,10 +686,10 @@ with tab_players:
                 _cmp_label = f"{_comp_name} avg"
                 _cmp_vals = None
 
-                if _cmp_mode == "Another player":
+                if _cmp_mode == _CMP_PLAYER:
                     with _cmp_col2:
                         _cmp_search = st.text_input(
-                            "Search rival", key="pd_cmp_search", placeholder="Type a name…"
+                            t("search_rival"), key="pd_cmp_search", placeholder=t("search_player_ph")
                         )
                         _cmp_candidates = _pd_all[
                             (_pd_all["canonical_name"].str.contains(_cmp_search, case=False, na=False))
@@ -576,12 +697,12 @@ with tab_players:
                         ] if _cmp_search else _pd_all[_pd_all["canonical_id"] != _pd_cid]
                         _cmp_names = _cmp_candidates["canonical_name"].tolist()
                         _cmp_selected = st.selectbox(
-                            "Select player to compare",
-                            _cmp_names if _cmp_names else ["(no match)"],
+                            t("select_player_compare"),
+                            _cmp_names if _cmp_names else [t("no_player_match")],
                             key="pd_cmp_select",
                             disabled=not _cmp_names,
                         )
-                    if _cmp_names and _cmp_selected != "(no match)":
+                    if _cmp_names and _cmp_selected != t("no_player_match"):
                         _cmp_row = _cmp_candidates[
                             _cmp_candidates["canonical_name"] == _cmp_selected
                         ]
@@ -689,7 +810,7 @@ with tab_players:
                         plt.close(_fig_r)
                     with _rc2:
                         _rv_df = pd.DataFrame({
-                            "Metric": _labels,
+                            t("col_metric"): _labels,
                             _pd["canonical_name"]: [
                                 _fmt_val(_p_vals[i], i) for i in range(_n)
                             ],
@@ -699,53 +820,56 @@ with tab_players:
                         })
                         st.dataframe(_rv_df, width="stretch", hide_index=True)
                         _caption = (
-                            "Per-match averages. Conversion % is per-shot."
-                            if _cmp_mode == "Another player"
-                            else "Per-match averages vs league (excluding this player). "
-                                 "Conversion % is per-shot."
+                            t("caption_radar_player")
+                            if _cmp_mode == _CMP_PLAYER
+                            else t("caption_radar_league")
                         )
                         st.caption(_caption)
                 else:
-                    if _cmp_mode == "Another player":
-                        st.info("No shot data for this player in the same competition/season.")
+                    if _cmp_mode == _CMP_PLAYER:
+                        st.info(t("no_shot_cmp_player"))
                     else:
-                        st.info("Not enough league data to compute average.")
+                        st.info(t("not_enough_league"))
 
                 st.divider()
 
             # ═══════════════════════════════════════════════════════
             # SECTION 4 — SHOT MAP  (kept from before)
             # ═══════════════════════════════════════════════════════
-            st.subheader("Shot Map")
-            _sm_sources = ["All"] + player_detail.get_player_shot_sources(_pd_cid)
+            st.subheader(t("shot_map"))
+            _sm_sources = [_PD_ALL] + player_detail.get_player_shot_sources(_pd_cid)
             _smc1, _smc2 = st.columns(2)
             with _smc1:
-                _sm_source = st.selectbox("Source", _sm_sources, key="pd_sm_source")
+                _sm_source = st.selectbox(
+                    t("source"), _sm_sources, key="pd_sm_source",
+                    format_func=lambda s: t("filter_all") if s == _PD_ALL else s,
+                )
             _sm_matches_df = player_detail.get_player_shot_matches(
                 _pd_cid, _pd_season_sel, _sm_source
             )
-            _sm_match_options = {"All": None}
+            _sm_match_options = {_PD_ALL: None}
             for _match in _sm_matches_df.itertuples(index=False):
                 _date = (
                     _match.match_date.strftime("%Y-%m-%d")
-                    if pd.notna(_match.match_date) else "Unknown date"
+                    if pd.notna(_match.match_date) else t("unknown_date")
                 )
-                _home = _match.home_team or "Home"
-                _away = _match.away_team or "Away"
+                _home = _match.home_team or t("home_label")
+                _away = _match.away_team or t("away_label")
                 _score = (
                     f" {_match.home_score}-{_match.away_score}"
                     if pd.notna(_match.home_score) and pd.notna(_match.away_score) else ""
                 )
                 _comp = f" | {_match.competition}" if _match.competition else ""
-                _shots_label = f" | {_match.shots} shots"
+                _shots_label = f" | {_match.shots} {t('shots').lower()}"
                 _label = f"{_date} | {_home}{_score} {_away}{_comp}{_shots_label}"
                 _sm_match_options[_label] = int(_match.match_id)
             with _smc2:
                 _sm_match_label = st.selectbox(
-                    "Match",
+                    t("match"),
                     list(_sm_match_options.keys()),
                     key="pd_sm_match",
                     disabled=_sm_matches_df.empty,
+                    format_func=lambda k: t("all_matches_filter") if k == _PD_ALL else k,
                 )
             _sm_match_id = _sm_match_options.get(_sm_match_label)
 
@@ -753,7 +877,7 @@ with tab_players:
                 _pd_cid, _pd_season_sel, _sm_source, _sm_match_id
             )
             if _shots_df.empty:
-                st.info("No shot data found for this selection.")
+                st.info(t("no_shot_data_selection"))
             else:
                 _pitch = _PlayerPitch(
                     pitch_type="custom",
@@ -772,10 +896,10 @@ with tab_players:
                 _is_goal = (_shots_df["result"] == "Goal").to_numpy()
                 _pitch.scatter(_x[~_is_goal], _y[~_is_goal], s=_sizes[~_is_goal],
                     color="white", edgecolors="#cccccc", linewidths=0.4, alpha=0.6,
-                    ax=_ax_sm, zorder=3, label="No goal")
+                    ax=_ax_sm, zorder=3, label=t("shot_map_no_goal"))
                 _pitch.scatter(_x[_is_goal], _y[_is_goal], s=_sizes[_is_goal],
                     color="red", edgecolors="white", linewidths=0.5, alpha=0.9,
-                    ax=_ax_sm, zorder=4, label="Goal")
+                    ax=_ax_sm, zorder=4, label=t("shot_map_goal"))
                 _ax_sm.legend(facecolor="#1a472a", labelcolor="white", loc="upper right", fontsize=8)
                 st.pyplot(_fig_sm)
                 plt.close(_fig_sm)
@@ -784,40 +908,70 @@ with tab_players:
                 _total_goals = int(_is_goal.sum())
                 _total_xg = round(float(_xg_arr.sum()), 2)
                 _g_minus_xg = round(_total_goals - _total_xg, 2)
-                _st1.metric("Shots", _total_shots)
-                _st2.metric("Goals", _total_goals)
-                _st3.metric("xG", _total_xg)
-                _st4.metric("Goals − xG", f"{_g_minus_xg:+.2f}")
+                _st1.metric(t("shots"), _total_shots)
+                _st2.metric(t("goals"), _total_goals)
+                _st3.metric(t("col_xg"), _total_xg)
+                _st4.metric(t("goals_minus_xg"), f"{_g_minus_xg:+.2f}")
+            st.divider()
+
+            # ═══════════════════════════════════════════════════════
+            # SECTION 4b — ACTION HEATMAP (WhoScored events)
+            # ═══════════════════════════════════════════════════════
+            st.subheader(t("action_heatmap"))
+            _hm_loc = player_detail.get_player_event_locations(_pd_cid, _pd_season_sel)
+            if _hm_loc.empty:
+                st.info(t("no_event_data"))
+            else:
+                _hx = pd.to_numeric(_hm_loc["x"], errors="coerce").to_numpy(dtype=float)
+                _hy = pd.to_numeric(_hm_loc["y"], errors="coerce").to_numpy(dtype=float)
+                _pitch_hm = _PlayerPitch(
+                    pitch_type="custom", pitch_length=105, pitch_width=68,
+                    pitch_color="#1a472a", line_color="white", line_zorder=2,
+                )
+                _fig_hm, _ax_hm = _pitch_hm.draw(figsize=(7, 4.5))
+                _fig_hm.patch.set_facecolor("#1a472a")
+                try:
+                    _pitch_hm.kdeplot(
+                        _hx, _hy, ax=_ax_hm, fill=True, levels=50,
+                        thresh=0.05, cmap="hot", alpha=0.7, zorder=1,
+                    )
+                except Exception:
+                    _pitch_hm.hexbin(
+                        _hx, _hy, ax=_ax_hm, gridsize=20, cmap="hot", zorder=1,
+                    )
+                st.pyplot(_fig_hm)
+                plt.close(_fig_hm)
+                st.caption(t("caption_action_heatmap").format(n=len(_hm_loc)))
             st.divider()
 
             # ═══════════════════════════════════════════════════════
             # SECTION 5 — SEASONAL STATS + INJURIES + MDM
             # ═══════════════════════════════════════════════════════
-            st.subheader("Seasonal Stats")
+            st.subheader(t("seasonal_stats"))
             _ss_df = player_detail.get_player_seasonal_stats(_pd_cid)
             if _ss_df.empty:
-                st.info("No shot data available for this player.")
+                st.info(t("no_shot_data_player"))
             else:
-                _ss_df.columns = ["Season", "Competition", "Shots", "Goals", "xG"]
+                _ss_df.columns = [t("col_season_short"), t("col_competition"), t("col_shots"), t("goals"), t("col_xg")]
                 st.dataframe(_ss_df, width="stretch", hide_index=True)
             st.divider()
 
-            st.subheader("Injury History")
+            st.subheader(t("injury_history"))
             _inj_df = player_detail.get_player_injuries(_pd_cid)
             if _inj_df.empty:
-                st.info("No injury records found for this player.")
+                st.info(t("no_injury_records"))
             else:
-                _inj_df.columns = ["Season", "Injury type", "Date from", "Date until",
-                                    "Days absent", "Matches missed"]
+                _inj_df.columns = [t("col_season_short"), t("injury_type"), t("date_from"), t("date_until"),
+                                    t("days_absent"), t("matches_missed")]
                 st.dataframe(_inj_df, width="stretch", hide_index=True)
             st.divider()
 
-            with st.expander("Source Identity (MDM)"):
+            with st.expander(t("mdm_expander")):
                 _mdm_df = player_detail.get_player_mdm(_pd_cid)
                 if _mdm_df.empty:
-                    st.info("No source aliases recorded for this player.")
+                    st.info(t("no_source_aliases"))
                 else:
-                    _mdm_df.columns = ["Source", "Name used", "Source ID", "Score", "Resolved"]
+                    _mdm_df.columns = [t("mdm_source"), t("mdm_name_used"), t("mdm_source_id"), t("mdm_score"), t("mdm_resolved")]
                     st.dataframe(_mdm_df, width="stretch", hide_index=True)
 
     # ── Injuries (aggregate) ────────────────────────────────
@@ -826,7 +980,7 @@ with tab_players:
 
         df = explore.get_injuries_standalone(_inj_season, _inj_team)
         if df.empty:
-            st.info("No injury data found for this selection.")
+            st.info(t("no_injury_data"))
         else:
             total_inj = len(df)
             total_days = int(pd.to_numeric(df["days_absent"], errors="coerce").fillna(0).sum())
@@ -840,22 +994,22 @@ with tab_players:
             m4.metric(t("ongoing_injuries"), _fmt(ongoing))
 
             df_render = df.copy()
-            df_render["date_until"] = df_render["date_until"].fillna("Ongoing").astype(str)
+            df_render["date_until"] = df_render["date_until"].fillna(t("ongoing")).astype(str)
             st.dataframe(df_render, width='stretch')
 
             breakdown = explore.get_injury_type_breakdown(_inj_season, _inj_team)
             if not breakdown.empty:
                 st.subheader(t("top_injury_types"))
                 _inj_sort_asc = st.radio(
-                    "Sort order", ["Descending", "Ascending"],
+                    t("sort_order"), [t("descending"), t("ascending")],
                     horizontal=True, key="inj_type_sort",
-                ) == "Ascending"
+                ) == t("ascending")
                 breakdown = breakdown.sort_values("count", ascending=_inj_sort_asc).head(10)
                 fig_inj, ax_inj = plt.subplots(figsize=(10, max(3, len(breakdown) * 0.45)))
                 fig_inj.patch.set_facecolor("#0e1117")
                 ax_inj.set_facecolor("#0e1117")
                 ax_inj.barh(breakdown["injury_type"], breakdown["count"], color="#e67e22")
-                ax_inj.set_xlabel("Count", color="white")
+                ax_inj.set_xlabel(t("count"), color="white")
                 ax_inj.tick_params(colors="white")
                 for spine in ax_inj.spines.values():
                     spine.set_color("#444")
@@ -870,10 +1024,7 @@ with tab_players:
                     st.subheader(t("season_trend"))
                     st.dataframe(trend, width='stretch')
 
-            st.caption(
-                "Source: fact_injuries (Transfermarkt)\n"
-                "date_until = NULL means the player was still injured at time of data collection."
-            )
+            st.caption(t("caption_injuries"))
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -881,13 +1032,13 @@ with tab_players:
 # ════════════════════════════════════════════════════════════════════
 with tab_shot:
     st.header(t("shot_intelligence"))
-    st.caption("All sources · Pitch coordinates: 105 m × 68 m · Coordinates normalised to metres")
+    st.caption(t("si_caption_coords"))
 
     # ── mplsoccer availability guard ─────────────────────────────
     try:
         from mplsoccer import Pitch as _Pitch
     except ImportError:
-        st.error("Install mplsoccer: pip install mplsoccer")
+        st.error(t("install_mplsoccer"))
         st.stop()
 
     # ── Shared filters ───────────────────────────────────────────
@@ -899,41 +1050,41 @@ with tab_shot:
     sf1, sf2, sf3, sf4 = st.columns(4)
     with sf1:
         si_competition = st.selectbox(
-            "Competition",
-            _si_competitions or ["(none)"],
+            t("competition"),
+            _si_competitions or [t("none_option")],
             key="si_competition",
             disabled=not _si_competitions,
         )
     _si_seasons = explore.get_seasons_for_competition(si_competition) if _si_competitions else []
     with sf2:
         si_season = st.selectbox(
-            "Season",
-            _si_seasons or ["(no seasons in DB)"],
+            t("season"),
+            _si_seasons or [t("no_seasons_in_db")],
             key="si_season",
             disabled=not _si_seasons,
         )
     _si_teams = explore.get_teams_for_season(si_season, si_competition) if _si_seasons else []
     with sf3:
         si_team_choice = st.selectbox(
-            "Team", ["All teams"] + _si_teams,
+            t("team"), [t("all_teams")] + _si_teams,
             key="si_team",
             disabled=not _si_teams,
         )
-    _si_team_name = None if si_team_choice == "All teams" else si_team_choice
+    _si_team_name = None if si_team_choice == t("all_teams") else si_team_choice
     _si_team_id = analytics._resolve_team_id(_si_team_name)
     _si_competition_val = si_competition if _si_competitions else None
 
     with sf4:
         metric_choice = st.radio(
-            "Metric",
-            ["Average xG per shot", "Conversion rate"],
+            t("metric_label"),
+            [t("si_metric_avg_xg"), t("si_metric_conversion")],
             key="si_metric",
         )
-    metric_col = "avg_xg" if metric_choice == "Average xG per shot" else "conversion_rate"
-    metric_label = "Avg xG" if metric_col == "avg_xg" else "Conversion Rate"
+    metric_col = "avg_xg" if metric_choice == t("si_metric_avg_xg") else "conversion_rate"
+    metric_label = t("si_avg_xg_label") if metric_col == "avg_xg" else t("si_conversion_label")
 
     if not _si_seasons:
-        st.info("No seasons in the database yet.")
+        st.info(t("no_seasons"))
     else:
         # ── Section 1 — Pitch Danger Heatmap ─────────────────────
         st.subheader(t("pitch_danger_heatmap"))
@@ -941,10 +1092,10 @@ with tab_shot:
         hm_df = analytics.get_heatmap_data(si_season, _si_team_id, _si_competition_val)
 
         if hm_df.empty:
-            st.info("No shot data with coordinates for this selection.")
+            st.info(t("no_shots_coords"))
         else:
             scope = si_team_choice
-            hm_title = f"{metric_label} by zone — {si_season} · {scope}"
+            hm_title = t("hm_title").format(metric=metric_label, season=si_season, scope=scope)
 
             X_BANDS = list(range(0, 101, 10))
             Y_BANDS = list(range(0, 61, 10))
@@ -974,7 +1125,7 @@ with tab_shot:
             st.pyplot(fig)
             plt.close(fig)
 
-            with st.expander("Zone data table"):
+            with st.expander(t("zone_data_expander")):
                 st.dataframe(
                     hm_df[["x_band", "y_band", "shots", "goals", "avg_xg", "conversion_rate"]],
                     width='stretch',
@@ -984,17 +1135,17 @@ with tab_shot:
 
         # ── Section 2 — Player Finishing Quality ──────────────────
         st.subheader(t("player_finishing"))
-        st.caption("Min. 20 shots to qualify · Goals − xG: positive = overperforming")
+        st.caption(t("si_finishing_caption"))
 
         pf_df = analytics.get_player_finishing(si_season, _si_team_id, _si_competition_val)
 
         if pf_df.empty:
-            st.info("No players with 20+ shots for this selection.")
+            st.info(t("no_players_20_shots"))
         else:
             _pf_sort_asc = st.radio(
-                "Sort order", ["Descending", "Ascending"],
+                t("sort_order"), [t("descending"), t("ascending")],
                 horizontal=True, key="si_finishing_sort",
-            ) == "Ascending"
+            ) == t("ascending")
             pf_df = pf_df.sort_values("goals_minus_xg", ascending=_pf_sort_asc)
             goals_minus_xg = pd.to_numeric(
                 pf_df["goals_minus_xg"], errors="coerce"
@@ -1009,7 +1160,7 @@ with tab_shot:
             ax2.set_facecolor("#0e1117")
             ax2.barh(pf_df["player"], goals_minus_xg, color=bar_colors)
             ax2.axvline(0, color="white", linewidth=0.8, linestyle="--")
-            ax2.set_xlabel("Goals − xG", color="white")
+            ax2.set_xlabel(t("goals_minus_xg"), color="white")
             ax2.tick_params(colors="white")
             for spine in ax2.spines.values():
                 spine.set_color("#444")
@@ -1032,25 +1183,25 @@ with tab_shot:
         sp_df = analytics.get_setpiece_goals(si_season, _si_team_id, competition=_si_competition_val)
 
         if sp_df.empty:
-            st.info("No set-piece goal data for this selection.")
+            st.info(t("no_setpiece_data"))
         else:
             display_sp = sp_df.rename(columns={
-                "player":        "Player",
-                "team":          "Team",
-                "penalty_goals": "Penalty Goals",
-                "freekick_goals":"Free Kick Goals",
-                "openplay_goals":       "Open Play Goals",
-                "setpiece_other_goals": "Set Piece / Other",
-                "total_goals":          "Total Goals",
-            }).sort_values("Penalty Goals", ascending=False)
+                "player":        t("col_player"),
+                "team":          t("team"),
+                "penalty_goals": t("col_penalty_goals"),
+                "freekick_goals": t("col_freekick_goals"),
+                "openplay_goals":       t("col_openplay_goals"),
+                "setpiece_other_goals": t("col_setpiece_other"),
+                "total_goals":          t("col_total_goals"),
+            }).sort_values(t("col_penalty_goals"), ascending=False)
             st.dataframe(display_sp, width='stretch')
 
             _sp_players = explore.get_players_for_season(si_season, _si_team_id, _si_competition_val)
-            _sp_labels = ["All players"] + [name for name, _ in _sp_players]
+            _sp_labels = [t("all_players")] + [name for name, _ in _sp_players]
             _sp_id_map = {name: pid for name, pid in _sp_players}
 
             si_player_name = st.selectbox(
-                "Player drill-down", _sp_labels, key="si_player"
+                t("player_drilldown"), _sp_labels, key="si_player"
             )
             si_player_id = _sp_id_map.get(si_player_name)
 
@@ -1062,11 +1213,7 @@ with tab_shot:
                 if not bucket_df.empty:
                     st.bar_chart(bucket_df.set_index("situation_bucket")["goals"])
 
-            st.caption(
-                "Source: fact_shots (all sources) · "
-                "Penalty = situation 'penalty' · "
-                "Free Kick = 'direct freekick' / 'free-kick'"
-            )
+            st.caption(t("si_setpiece_caption"))
 
         st.divider()
 
@@ -1078,10 +1225,134 @@ with tab_match_ctx:
     st.header(t("tab_match_context"))
     _mc_comp, _mc_season, _mc_team = _tab_selectors("match_ctx")
 
-    t_weather, t_attendance, t_referees, t_managers = st.tabs(
-        [t("weather_section"), t("attendance_section"),
-         t("referees_section"), t("managers_section")]
+    t_match, t_weather, t_attendance, t_referees, t_managers, t_chalk = st.tabs(
+        [t("match_detail_section"), t("weather_section"), t("attendance_section"),
+         t("referees_section"), t("managers_section"), t("chalkboard_section")]
     )
+
+    # ── Match (per-match context card) ───────────────────────
+    with t_match:
+        if _mc_season is None:
+            st.info(t("select_season"))
+        else:
+            _df_matches = explore.get_matches_for_context(
+                _mc_season, _mc_team, _mc_comp
+            )
+            if _df_matches.empty:
+                st.info(t("no_matches_found"))
+            else:
+                def _mc_match_label(_r) -> str:
+                    _d = _r["match_date"]
+                    _ds = _d.strftime("%Y-%m-%d") if hasattr(_d, "strftime") else str(_d)
+                    _sc = ""
+                    if pd.notna(_r["home_score"]) and pd.notna(_r["away_score"]):
+                        _sc = f" {int(_r['home_score'])}-{int(_r['away_score'])}"
+                    return f"{_ds} · {_r['home_team']}{_sc} {_r['away_team']}"
+
+                _mc_labels = [_mc_match_label(_r) for _, _r in _df_matches.iterrows()]
+                _mc_idx = st.selectbox(
+                    t("match_select"), range(len(_mc_labels)),
+                    format_func=lambda i: _mc_labels[i], key="mc_match_pick",
+                )
+                _mid = int(_df_matches.iloc[_mc_idx]["match_id"])
+                _ctx = explore.get_match_context(_mid)
+
+                if not _ctx:
+                    st.info(t("no_data"))
+                else:
+                    _hs, _as = _ctx.get("home_score"), _ctx.get("away_score")
+                    _score = (
+                        f"{int(_hs)} – {int(_as)}"
+                        if pd.notna(_hs) and pd.notna(_as) else "—"
+                    )
+                    _sb1, _sb2, _sb3 = st.columns([3, 1, 3])
+                    _sb1.markdown(f"### {_ctx.get('home_team') or '—'}")
+                    _sb2.markdown(
+                        f"<h2 style='text-align:center;margin:0'>{_score}</h2>",
+                        unsafe_allow_html=True,
+                    )
+                    _sb3.markdown(
+                        f"<h3 style='text-align:right;margin:0'>"
+                        f"{_ctx.get('away_team') or '—'}</h3>",
+                        unsafe_allow_html=True,
+                    )
+                    _md = _ctx.get("match_date")
+                    _md_s = _md.strftime("%Y-%m-%d") if hasattr(_md, "strftime") else str(_md or "")
+                    _meta = [
+                        x for x in (
+                            _md_s, _mc_comp,
+                            str(_ctx.get("stadium") or _ctx.get("venue_name") or ""),
+                        ) if x
+                    ]
+                    st.caption(" · ".join(_meta))
+                    st.divider()
+
+                    _left, _right = st.columns(2)
+
+                    with _left:
+                        st.subheader(t("weather_section"))
+                        _temp = _ctx.get("temperature_c")
+                        if _temp is None or pd.isna(_temp):
+                            st.caption(t("no_weather_data"))
+                        else:
+                            def _wfmt(v, unit, dec=0):
+                                if v is None or pd.isna(v):
+                                    return "—"
+                                return f"{float(v):.{dec}f}{unit}"
+                            _w1, _w2 = st.columns(2)
+                            _w1.metric(t("temperature"), _wfmt(_temp, " °C", 1))
+                            _w2.metric(t("humidity"), _wfmt(_ctx.get("humidity_pct"), "%"))
+                            _w3, _w4 = st.columns(2)
+                            _w3.metric(t("precipitation"), _wfmt(_ctx.get("precipitation_mm"), " mm", 1))
+                            _w4.metric(t("wind"), _wfmt(_ctx.get("wind_speed_kmh"), " km/h"))
+
+                        st.subheader(t("match_officials"))
+                        st.metric(t("referee"), str(_ctx.get("referee") or "—"))
+                        _cards = explore.get_match_cards(_mid)
+                        if not _cards.empty:
+                            _cy = int(pd.to_numeric(_cards["yellow_cards"], errors="coerce").fillna(0).sum())
+                            _cr = int(pd.to_numeric(_cards["red_cards"], errors="coerce").fillna(0).sum())
+                            _cc1, _cc2 = st.columns(2)
+                            _cc1.metric(t("yellow_cards"), _cy)
+                            _cc2.metric(t("red_cards"), _cr)
+                            st.dataframe(
+                                _cards.rename(columns={
+                                    "team": t("team"),
+                                    "yellow_cards": t("yellow_cards"),
+                                    "red_cards": t("red_cards"),
+                                }),
+                                width="stretch", hide_index=True,
+                            )
+
+                        st.subheader(t("managers_section"))
+                        _mg1, _mg2 = st.columns(2)
+                        _mg1.metric(t("home_label"), str(_ctx.get("manager_home") or "—"))
+                        _mg2.metric(t("away_label"), str(_ctx.get("manager_away") or "—"))
+
+                    with _right:
+                        st.subheader(t("attendance_section"))
+                        _att = _ctx.get("attendance")
+                        _cap = _ctx.get("capacity")
+                        _fill = _ctx.get("fill_pct")
+                        _has_att = _att is not None and not pd.isna(_att)
+                        _has_cap = _cap not in (None, 0) and not pd.isna(_cap)
+                        if _has_att and _has_cap and _fill is not None:
+                            stadium_fill_svg.render_stadium_fill_svg(
+                                float(_fill),
+                                attendance=int(_att),
+                                capacity=int(_cap),
+                                title=str(_ctx.get("stadium") or ""),
+                                subtitle=f"{_ctx.get('home_team')} vs {_ctx.get('away_team')}",
+                                height=430,
+                            )
+                            _am1, _am2 = st.columns(2)
+                            _am1.metric(t("attendance"), _fmt(int(_att)))
+                            _am2.metric(t("total_capacity"), _fmt(int(_cap)))
+                        elif _has_att:
+                            st.metric(t("attendance"), _fmt(int(_att)))
+                            st.caption(t("stadium_fill_no_cap"))
+                        else:
+                            st.caption(t("no_attendance_data"))
 
     # ── Weather ──────────────────────────────────────────────
     with t_weather:
@@ -1164,7 +1435,7 @@ with tab_match_ctx:
                         color=_bar_colors,
                         error_kw={"ecolor": "#aaa", "capsize": 3, "linewidth": 0.8},
                     )
-                    ax_wv.set_xlabel("°C (avg, min–max range)", color="white")
+                    ax_wv.set_xlabel(t("temp_axis_label"), color="white")
                     ax_wv.tick_params(colors="white")
                     for spine in ax_wv.spines.values():
                         spine.set_color("#444")
@@ -1175,18 +1446,14 @@ with tab_match_ctx:
 
                     # Venue data table
                     _wv_display = df_venue.rename(columns={
-                        "venue": "Stadium", "home_team": "Home Team",
-                        "matches": "Matches", "avg_temp": "Avg °C",
-                        "min_temp": "Min °C", "max_temp": "Max °C",
-                        "avg_humidity": "Avg Humidity %", "rainy": "Rainy Matches",
+                        "venue": t("col_stadium"), "home_team": t("col_home_team"),
+                        "matches": t("col_matches"), "avg_temp": t("col_avg_temp"),
+                        "min_temp": t("col_min_temp_c"), "max_temp": t("col_max_temp_c"),
+                        "avg_humidity": t("col_avg_humidity"), "rainy": t("col_rainy_matches"),
                     })
                     st.dataframe(_wv_display, width="stretch")
 
-                    st.caption(
-                        "Venues from match_stadium_id (dim_stadium), not only venue_name. "
-                        "Color: red > 25°C · orange 10–25°C · blue < 10°C. "
-                        "Error bars show min–max range across matches at that venue."
-                    )
+                    st.caption(t("venue_weather_caption"))
 
                 # ── Cross-season temperature for a specific stadium/team ──
                 st.subheader("📊 " + t("temperature") + " — " + t("season_trend"))
@@ -1194,7 +1461,7 @@ with tab_match_ctx:
                 with _wcs1:
                     _venue_list = explore.get_venues_list(_mc_team)
                     _venue_sel = st.selectbox(
-                        "Stadium / Venue",
+                        t("stadium_venue_select"),
                         [t("all_teams")] + _venue_list,
                         key="weather_venue_sel",
                     )
@@ -1287,18 +1554,15 @@ with tab_match_ctx:
                         # ── Data table ──
                         _wcs_display = df_cross.rename(columns={
                             "season": t("season"), "matches": t("matches"),
-                            "avg_temp": "Avg °C", "min_temp": "Min °C",
-                            "max_temp": "Max °C", "avg_humidity": "Avg Humidity %",
+                            "avg_temp": t("col_avg_temp"), "min_temp": t("col_min_temp_c"),
+                            "max_temp": t("col_max_temp_c"), "avg_humidity": t("col_avg_humidity"),
                             "rainy": t("rainy_matches"),
                         })
                         st.dataframe(_wcs_display, width="stretch")
 
-                        st.caption(
-                            "Color: red > 25°C · orange 10–25°C · blue < 10°C. "
-                            "Error bars show min–max range per season."
-                        )
+                        st.caption(t("weather_trend_color_caption"))
                 else:
-                    st.info("Selecciona un estadio o equipo para ver la evolución por temporada.")
+                    st.info(t("select_stadium_team"))
 
                 with st.expander(t("results")):
                     if not df_w.empty:
@@ -1328,6 +1592,83 @@ with tab_match_ctx:
                 if _has_fill_match:
                     avg_fill = df_att["fill_pct"].dropna().mean()
                     am5.metric("Avg Fill %", f"{avg_fill:.1f}%")
+
+                # ── Stadium fill illustration ────────────────────
+                if _has_fill_match:
+                    df_fill = df_att[df_att["fill_pct"].notna()].copy()
+                    if not df_fill.empty:
+                        st.subheader(t("stadium_fill_viz"))
+                        _fill_options: list[str] = [t("stadium_fill_avg")]
+                        _fill_rows: list[pd.Series | None] = [None]
+
+                        df_fill_sorted = df_fill.sort_values("match_date")
+                        for _, _fr in df_fill_sorted.iterrows():
+                            _md = _fr["match_date"]
+                            _md_str = (
+                                _md.strftime("%Y-%m-%d")
+                                if hasattr(_md, "strftime") else str(_md)
+                            )
+                            _fill_options.append(
+                                f"{_md_str} · {_fr['home_team']} vs {_fr['away_team']}"
+                                f" ({_fr['fill_pct']:.0f}%)"
+                            )
+                            _fill_rows.append(_fr)
+
+                        _fill_pick = st.selectbox(
+                            t("stadium_fill_select"),
+                            range(len(_fill_options)),
+                            format_func=lambda i: _fill_options[i],
+                            key="att_stadium_fill_sel",
+                        )
+
+                        if _fill_pick == 0:
+                            _viz_att = int(att_vals.mean())
+                            _viz_fill = float(df_fill["fill_pct"].mean())
+                            _cap_vals = pd.to_numeric(
+                                df_fill["capacity"], errors="coerce"
+                            ).dropna()
+                            _viz_cap = (
+                                int(_cap_vals.mean())
+                                if not _cap_vals.empty
+                                else int(_viz_att / (_viz_fill / 100))
+                                if _viz_fill > 0 else 0
+                            )
+                            _viz_title = (
+                                _mc_team or _mc_comp or _mc_season or ""
+                            )
+                            _viz_sub = t("stadium_fill_avg")
+                        else:
+                            _row = _fill_rows[_fill_pick]
+                            _viz_att = int(_row["attendance"])
+                            _viz_cap = int(_row["capacity"])
+                            _viz_fill = float(_row["fill_pct"])
+                            _viz_title = str(_row.get("stadium") or _row.get("venue_name") or "")
+                            _viz_sub = (
+                                f"{_row['home_team']} vs {_row['away_team']}"
+                            )
+
+                        _viz_col, _viz_info = st.columns([2, 1])
+                        with _viz_col:
+                            # Semi-transparent glass-dome stadium (SVG). The old
+                            # matplotlib render is still available as
+                            # stadium_fill.render_stadium_fill if you prefer it.
+                            stadium_fill_svg.render_stadium_fill_svg(
+                                _viz_fill,
+                                attendance=_viz_att,
+                                capacity=_viz_cap,
+                                title=_viz_title,
+                                subtitle=_viz_sub,
+                                height=470,
+                            )
+                        with _viz_info:
+                            st.metric(t("attendance"), _fmt(_viz_att))
+                            st.metric(t("total_capacity"), _fmt(_viz_cap))
+                            st.metric(t("fill_pct"), f"{_viz_fill:.1f}%")
+                            _empty = max(_viz_cap - _viz_att, 0)
+                            st.metric(t("empty_seats"), _fmt(_empty))
+                        st.caption(t("stadium_fill_caption"))
+                    else:
+                        st.info(t("stadium_fill_no_cap"))
 
                 # ── Attendance trend over the season ─────────────
                 df_trend = explore.get_attendance_trend(
@@ -1390,27 +1731,24 @@ with tab_match_ctx:
                         plt.close(fig_att)
 
                         if has_fill:
-                            st.caption(
-                                "Orange % = avg fill rate (avg attendance / stadium capacity × 100). "
-                                "Source: dim_stadium capacity."
-                            )
+                            st.caption(t("attendance_fill_caption"))
 
                         # ── Table with full data ───────────────────
                         _att_display = top_att.rename(columns={
-                            "team": "Team", "home_matches": "Home Matches",
-                            "avg_attendance": "Avg", "max_attendance": "Max",
-                            "min_attendance": "Min", "total_attendance": "Total",
-                            "capacity": "Stadium Capacity", "fill_pct": "Fill %",
+                            "team": t("team"), "home_matches": t("col_home_matches_short"),
+                            "avg_attendance": t("col_avg_short"), "max_attendance": t("col_max_short"),
+                            "min_attendance": t("col_min_short"), "total_attendance": t("col_total_short"),
+                            "capacity": t("col_stadium_capacity"), "fill_pct": t("fill_pct"),
                         })
                         st.dataframe(_att_display, width="stretch")
 
                 with st.expander(t("results")):
                     _att_cols_rename = {
-                        "match_date": "Date", "home_team": "Home",
-                        "away_team": "Away", "home_score": "HG",
-                        "away_score": "AG", "attendance": "Attendance",
-                        "stadium": "Stadium", "venue_name": "Raw Venue",
-                        "capacity": "Capacity", "fill_pct": "Fill %",
+                        "match_date": t("col_date"), "home_team": t("home_label"),
+                        "away_team": t("away_label"), "home_score": t("col_hg"),
+                        "away_score": t("col_ag"), "attendance": t("attendance"),
+                        "stadium": t("col_stadium"), "venue_name": t("col_raw_venue"),
+                        "capacity": t("col_capacity"), "fill_pct": t("fill_pct"),
                     }
                     _att_display = df_att.rename(
                         columns={k: v for k, v in _att_cols_rename.items()
@@ -1437,18 +1775,18 @@ with tab_match_ctx:
                            _fmt(df_ref["yellow_cards"].sum()))
                 rm3.metric(t("red_cards"),
                            _fmt(df_ref["red_cards"].sum()))
-                rm4.metric("Avg Cards/Match", f"{_ref_avg_cpm:.2f}")
+                rm4.metric(t("avg_cards_match"), f"{_ref_avg_cpm:.2f}")
 
                 _ref_scope_label = (
                     f" ({_mc_team})" if _mc_team else ""
                 )
                 display_ref = df_ref.rename(columns={
-                    "referee": "Referee",
-                    "matches_officiated": "Matches",
-                    "yellow_cards": f"Yellows{_ref_scope_label}",
-                    "red_cards": f"Reds{_ref_scope_label}",
-                    "total_cards": f"Total Cards{_ref_scope_label}",
-                    "cards_per_match": f"Cards/Match{_ref_scope_label}",
+                    "referee": t("col_referee"),
+                    "matches_officiated": t("col_matches"),
+                    "yellow_cards": t("col_yellows_scope").format(scope=_ref_scope_label),
+                    "red_cards": t("col_reds_scope").format(scope=_ref_scope_label),
+                    "total_cards": t("col_total_cards_scope").format(scope=_ref_scope_label),
+                    "cards_per_match": t("col_cards_match_scope").format(scope=_ref_scope_label),
                 })
                 st.dataframe(display_ref, width="stretch")
 
@@ -1459,9 +1797,9 @@ with tab_match_ctx:
                 ].copy()
                 if not strict_ref.empty:
                     _chart_title = (
-                        f"Cards/Match vs {_mc_team}"
+                        t("cards_match_vs_team").format(team=_mc_team)
                         if _mc_team
-                        else "Cards/Match (all teams)"
+                        else t("cards_match_all")
                     )
                     st.subheader(_chart_title)
                     top_strict = strict_ref.sort_values(
@@ -1477,14 +1815,14 @@ with tab_match_ctx:
                     _ref_r = top_strict["red_cards"].values / top_strict["matches_officiated"].values
                     ax_ref.barh(
                         top_strict["referee"], _ref_y,
-                        color="#f1c40f", label="Yellows/Match",
+                        color="#f1c40f", label=t("yellows_per_match"),
                     )
                     ax_ref.barh(
                         top_strict["referee"], _ref_r,
                         left=_ref_y,
-                        color="#e74c3c", label="Reds/Match",
+                        color="#e74c3c", label=t("reds_per_match"),
                     )
-                    ax_ref.set_xlabel("Cards per match", color="white")
+                    ax_ref.set_xlabel(t("cards_per_match_label"), color="white")
                     ax_ref.tick_params(colors="white")
                     ax_ref.legend(
                         facecolor="#1a1a2e", edgecolor="#444",
@@ -1498,14 +1836,11 @@ with tab_match_ctx:
                     plt.close(fig_ref)
 
                 _ref_caption = (
-                    f"Cards scoped to {_mc_team}. "
+                    t("ref_scope_team").format(team=_mc_team)
                     if _mc_team else ""
                 )
                 st.caption(
-                    f"Source: dim_referee + dim_match + fact_events. "
-                    f"{_ref_caption}"
-                    f"Min. {_min_ref_matches} matches for chart. "
-                    "Cards/Match = (yellows + reds) / matches."
+                    t("referee_caption").format(scope=_ref_caption, min_m=_min_ref_matches)
                 )
 
     # ── Managers ──────────────────────────────────────────────
@@ -1530,13 +1865,14 @@ with tab_match_ctx:
                 mm4.metric(t("points_pct"), f"{_mgr_avg_ppct:.1f}%")
 
                 display_mgr = df_mgr.rename(columns={
-                    "manager": "Manager",
-                    "team": "Team",
-                    "matches": "Matches",
-                    "wins": "W", "draws": "D", "losses": "L",
-                    "goals_for": "GF", "goals_against": "GA",
-                    "avg_gf": "Avg GF", "avg_ga": "Avg GA",
-                    "points_pct": "Points %",
+                    "manager": t("col_manager"),
+                    "team": t("team"),
+                    "matches": t("col_matches"),
+                    "wins": t("col_wins_short"), "draws": t("col_draws_short"),
+                    "losses": t("col_losses_short"),
+                    "goals_for": t("col_gf"), "goals_against": t("col_ga"),
+                    "avg_gf": t("col_gf"), "avg_ga": t("col_ga"),
+                    "points_pct": t("points_pct"),
                 })
                 st.dataframe(display_mgr, width="stretch")
 
@@ -1558,9 +1894,9 @@ with tab_match_ctx:
                     bar_w = top_mgr["wins"].values
                     bar_d = top_mgr["draws"].values
                     bar_l = top_mgr["losses"].values
-                    ax_mgr.barh(labels_mgr, bar_w, color="#2ecc71", label="W")
-                    ax_mgr.barh(labels_mgr, bar_d, left=bar_w, color="#f39c12", label="D")
-                    ax_mgr.barh(labels_mgr, bar_l, left=bar_w + bar_d, color="#e74c3c", label="L")
+                    ax_mgr.barh(labels_mgr, bar_w, color="#2ecc71", label=t("col_wins_short"))
+                    ax_mgr.barh(labels_mgr, bar_d, left=bar_w, color="#f39c12", label=t("col_draws_short"))
+                    ax_mgr.barh(labels_mgr, bar_l, left=bar_w + bar_d, color="#e74c3c", label=t("col_losses_short"))
                     ax_mgr.set_xlabel(t("matches"), color="white")
                     ax_mgr.tick_params(colors="white")
                     ax_mgr.legend(
@@ -1574,10 +1910,120 @@ with tab_match_ctx:
                     st.pyplot(fig_mgr)
                     plt.close(fig_mgr)
 
-                st.caption(
-                    "Source: dim_match (manager_home / manager_away, WhoScored). "
-                    "Points % = points won / max possible × 100."
+                st.caption(t("manager_caption"))
+
+    # ── Chalkboard (per-match passes / tackles / shots) ──────
+    with t_chalk:
+        if _mc_season is None:
+            st.info(t("select_season"))
+        else:
+            _cb_matches = explore.get_matches_for_context(
+                _mc_season, _mc_team, _mc_comp
+            )
+            if _cb_matches.empty:
+                st.info(t("no_matches_found"))
+            else:
+                def _cb_label(_r) -> str:
+                    _d = _r["match_date"]
+                    _ds = _d.strftime("%Y-%m-%d") if hasattr(_d, "strftime") else str(_d)
+                    _sc = ""
+                    if pd.notna(_r["home_score"]) and pd.notna(_r["away_score"]):
+                        _sc = f" {int(_r['home_score'])}-{int(_r['away_score'])}"
+                    return f"{_ds} · {_r['home_team']}{_sc} {_r['away_team']}"
+
+                _cb_labels = [_cb_label(_r) for _, _r in _cb_matches.iterrows()]
+                _cb_idx = st.selectbox(
+                    t("match"), range(len(_cb_labels)),
+                    format_func=lambda i: _cb_labels[i], key="cb_match_pick",
                 )
+                _cb_mid = int(_cb_matches.iloc[_cb_idx]["match_id"])
+                _cb_ev = explore.get_match_events_xy(_cb_mid)
+
+                if _cb_ev.empty:
+                    st.info(t("no_event_data"))
+                else:
+                    try:
+                        from mplsoccer import Pitch as _CbPitch
+                    except ImportError:
+                        st.error(t("install_mplsoccer"))
+                        _CbPitch = None
+
+                    def _cb_cat(_et):
+                        _e = str(_et).lower()
+                        if "pass" in _e:
+                            return "pass"
+                        if "tackle" in _e:
+                            return "tackle"
+                        if any(k in _e for k in ("shot", "goal", "miss", "saved", "post")):
+                            return "shot"
+                        return "other"
+
+                    _cb_ev = _cb_ev.copy()
+                    _cb_ev["cat"] = _cb_ev["event_type"].map(_cb_cat)
+                    for _c in ("x", "y", "end_x", "end_y"):
+                        _cb_ev[_c] = pd.to_numeric(_cb_ev[_c], errors="coerce")
+
+                    _f1, _f2, _f3 = st.columns([1.2, 1.2, 1.6])
+                    with _f1:
+                        _teams = list(_cb_ev["team"].dropna().unique())
+                        _team_pick = st.selectbox("Equipo", ["Ambos"] + _teams, key="cb_team")
+                    _ev_t = _cb_ev if _team_pick == "Ambos" else _cb_ev[_cb_ev["team"] == _team_pick]
+                    with _f2:
+                        _players = sorted(_ev_t["player"].dropna().unique().tolist())
+                        _player_pick = st.selectbox("Jugador", ["Todos"] + _players, key="cb_player")
+                    with _f3:
+                        _acts = st.multiselect(
+                            t("action_type"),
+                            [t("passes"), t("tackles"), t("shots")],
+                            default=[t("passes"), t("tackles"), t("shots")],
+                            key="cb_acts",
+                        )
+                    _sel = _ev_t if _player_pick == "Todos" else _ev_t[_ev_t["player"] == _player_pick]
+                    _cat_map = {t("passes"): "pass", t("tackles"): "tackle", t("shots"): "shot"}
+                    _wanted = {_cat_map[a] for a in _acts}
+                    _sel = _sel[_sel["cat"].isin(_wanted)]
+
+                    if _CbPitch is not None:
+                        _pitch_cb = _CbPitch(
+                            pitch_type="custom", pitch_length=105, pitch_width=68,
+                            pitch_color="#1a472a", line_color="white", line_zorder=2,
+                        )
+                        _fig_cb, _ax_cb = _pitch_cb.draw(figsize=(9, 6))
+                        _fig_cb.patch.set_facecolor("#1a472a")
+
+                        _p = _sel[(_sel["cat"] == "pass") & _sel["end_x"].notna() & _sel["end_y"].notna()]
+                        _p_ok = _p[_p["outcome"].astype(str).str.lower() == "successful"]
+                        _p_no = _p[_p["outcome"].astype(str).str.lower() != "successful"]
+                        for _grp, _col in ((_p_ok, "#2ecc71"), (_p_no, "#e74c3c")):
+                            if not _grp.empty:
+                                _pitch_cb.arrows(
+                                    _grp["x"] * 105, _grp["y"] * 68,
+                                    _grp["end_x"] * 105, _grp["end_y"] * 68,
+                                    ax=_ax_cb, color=_col, width=1.2,
+                                    headwidth=4, headlength=4, alpha=0.55, zorder=2,
+                                )
+                        _tk = _sel[(_sel["cat"] == "tackle") & _sel["x"].notna() & _sel["y"].notna()]
+                        if not _tk.empty:
+                            _pitch_cb.scatter(
+                                _tk["x"] * 105, _tk["y"] * 68, ax=_ax_cb, s=90,
+                                marker="s", color="#3498db", edgecolors="white",
+                                linewidths=0.5, zorder=3,
+                            )
+                        _sh = _sel[(_sel["cat"] == "shot") & _sel["x"].notna() & _sel["y"].notna()]
+                        if not _sh.empty:
+                            _pitch_cb.scatter(
+                                _sh["x"] * 105, _sh["y"] * 68, ax=_ax_cb, s=150,
+                                marker="*", color="#f1c40f", edgecolors="black",
+                                linewidths=0.4, zorder=4,
+                            )
+                        st.pyplot(_fig_cb)
+                        plt.close(_fig_cb)
+
+                        _m1, _m2, _m3 = st.columns(3)
+                        _m1.metric(t("passes"), _fmt(int((_sel["cat"] == "pass").sum())))
+                        _m2.metric(t("tackles"), _fmt(int((_sel["cat"] == "tackle").sum())))
+                        _m3.metric(t("shots"), _fmt(int((_sel["cat"] == "shot").sum())))
+                        st.caption(t("chalkboard_caption"))
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -1585,29 +2031,25 @@ with tab_match_ctx:
 # ════════════════════════════════════════════════════════════════════
 with tab_passnet:
     st.header(t("pass_network"))
-    st.caption(
-        "WhoScored · Pitch: 105 m × 68 m · Home attacks →, away attacks ← · "
-        "Node = avg pass-origin location (full match, subs included) · "
-        "Receiver = next same-team event"
-    )
+    st.caption(t("pn_caption_header"))
 
     try:
         from mplsoccer import Pitch as _PnPitch
     except ImportError:
-        st.error("Install mplsoccer: pip install mplsoccer")
+        st.error(t("install_mplsoccer"))
         st.stop()
 
     _pn_comps = explore.get_competitions()
     pnf1, pnf2, pnf3 = st.columns([1, 1, 2])
     with pnf1:
         pn_comp = st.selectbox(
-            t("competition"), _pn_comps or ["(none)"],
+            t("competition"), _pn_comps or [t("none_option")],
             key="pn_comp", disabled=not _pn_comps,
         )
     _pn_seasons = explore.get_seasons_for_competition(pn_comp) if _pn_comps else []
     with pnf2:
         pn_season = st.selectbox(
-            t("season"), _pn_seasons or ["(no seasons)"],
+            t("season"), _pn_seasons or [t("no_seasons_paren")],
             key="pn_season", disabled=not _pn_seasons,
         )
 
@@ -1618,7 +2060,7 @@ with tab_passnet:
     with pnf3:
         pn_match_label = st.selectbox(
             t("match"),
-            _pn_matches["label"].tolist() if not _pn_matches.empty else ["(no matches)"],
+            _pn_matches["label"].tolist() if not _pn_matches.empty else [t("no_matches_paren")],
             key="pn_match", disabled=_pn_matches.empty,
         )
 
@@ -1704,11 +2146,7 @@ with tab_passnet:
         with pn_away:
             _draw_pass_network(str(_pn_row["away"]), int(_pn_row["away_team_id"]), "#e74c3c", flip=True)
 
-        st.caption(
-            "Source: fact_events (WhoScored) · Only successful passes where the next "
-            "event belongs to the same team · Edge width/opacity ∝ passes between the "
-            "pair (both directions combined) · Node size ∝ passes made"
-        )
+        st.caption(t("pn_caption"))
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -1716,19 +2154,10 @@ with tab_passnet:
 # ════════════════════════════════════════════════════════════════════
 with tab_stadiums:
     st.header(t("stadiums"))
-    st.caption(
-        "Estadios por equipo — fuentes: Transfermarkt + enriquecimiento Wikidata. "
-        "Modelo SCD2: una fila por estado del estadio. "
-        "Los partidos usan match_stadium_id (sedes neutrales incluidas)."
-    )
+    st.caption(t("stadium_caption"))
 
     if not explore._stadium_table_exists():
-        st.warning(
-            "La tabla `dim_stadium` no existe todavía. "
-            "Aplica la migración:\n\n"
-            "    psql -U postgres -d football_db -f db/add_dim_stadium.sql\n\n"
-            "Y luego carga datos desde el wizard (\"Descargar estadios por temporada\")."
-        )
+        st.warning(t("stadium_table_missing"))
     else:
         # ── Filtros ──────────────────────────────────────────────
         st_seasons   = explore.get_stadium_seasons()
@@ -1738,40 +2167,40 @@ with tab_stadiums:
         f1, f2, f3, f4 = st.columns([1, 1, 1, 2])
         with f1:
             st_season = st.selectbox(
-                "Season",
-                ["All seasons"] + st_seasons,
+                t("season"),
+                [t("all_seasons")] + st_seasons,
                 key="st_season",
                 disabled=not st_seasons,
             )
         with f2:
             st_comp = st.selectbox(
-                "Competition",
-                ["All competitions"] + st_comps,
+                t("competition"),
+                [t("all_competitions")] + st_comps,
                 key="st_comp",
                 disabled=not st_comps,
             )
         with f3:
             st_country = st.selectbox(
-                "Country",
-                ["All countries"] + st_countries,
+                t("country"),
+                [t("all_countries")] + st_countries,
                 key="st_country",
                 disabled=not st_countries,
             )
         with f4:
             st_search = st.text_input(
-                "Search (stadium / team / city)",
+                t("search_stadium"),
                 value="", key="st_search",
             ).strip() or None
 
         st_include_venues = st.checkbox(
-            "Incluir sedes solo de partido (match-venue)",
+            t("stadium_include_venues"),
             value=False,
             key="st_include_match_venues",
         )
 
-        season_q  = None if st_season  == "All seasons"      else st_season
-        comp_q    = None if st_comp    == "All competitions" else st_comp
-        country_q = None if st_country == "All countries"    else st_country
+        season_q  = None if st_season  == t("all_seasons")      else st_season
+        comp_q    = None if st_comp    == t("all_competitions") else st_comp
+        country_q = None if st_country == t("all_countries")    else st_country
 
         # ── Tarjetas resumen ─────────────────────────────────────
         summary = explore.get_stadium_summary(
@@ -1794,23 +2223,22 @@ with tab_stadiums:
             include_match_venues=st_include_venues,
         )
         if df_st.empty:
-            st.info(
-                "No hay estadios para esta combinación de filtros. Si "
-                "acabas de migrar la tabla, lanza desde el wizard "
-                "\"Descargar estadios por temporada\" para poblarla."
-            )
+            st.info(t("stadium_no_results"))
         else:
             st.caption(t("stadium_select_hint"))
             display_df = df_st.copy()
             display_df.columns = [
-                "stadium_id", "Team", "Season", "Stadium", "Capacity",
-                "Seats", "Built", "Owner", "City", "Country", "Surface",
-                "Architect", "Lat", "Lon", "Altitude m", "Timezone",
-                "Source", "Transfermarkt URL",
+                "stadium_id", t("team"), t("season"), t("stadiums"), t("col_capacity"),
+                t("col_seats"), t("col_built"), t("col_owner"), t("col_city"), t("country"), t("col_surface"),
+                t("col_architect"), t("col_lat"), t("col_lon"), t("col_altitude"), t("col_timezone"),
+                t("source"), t("col_tm_url"), "master_stadium_id",
                 "image_url", "wikipedia_url", "wikidata_qid",
             ]
             table_df = display_df.drop(
-                columns=["stadium_id", "image_url", "wikipedia_url", "wikidata_qid"],
+                columns=[
+                    "stadium_id", "master_stadium_id",
+                    "image_url", "wikipedia_url", "wikidata_qid",
+                ],
             )
             selection = st.dataframe(
                 table_df,
@@ -1819,12 +2247,12 @@ with tab_stadiums:
                 selection_mode="single-row",
                 key="stadium_picker",
                 column_config={
-                    "Transfermarkt URL": st.column_config.LinkColumn(
-                        "Transfermarkt", display_text="abrir"
+                    t("col_tm_url"): st.column_config.LinkColumn(
+                        t("tm_link_label"), display_text=t("tm_open")
                     ),
-                    "Capacity": st.column_config.NumberColumn(format="%d"),
-                    "Lat": st.column_config.NumberColumn(format="%.4f"),
-                    "Lon": st.column_config.NumberColumn(format="%.4f"),
+                    t("col_capacity"): st.column_config.NumberColumn(format="%d"),
+                    t("col_lat"): st.column_config.NumberColumn(format="%.4f"),
+                    t("col_lon"): st.column_config.NumberColumn(format="%.4f"),
                 },
             )
             selected_rows = (
@@ -1832,9 +2260,19 @@ with tab_stadiums:
                 if selection is not None and hasattr(selection, "selection")
                 else []
             )
-            if selected_rows:
-                st.divider()
-                _render_stadium_detail(df_st.iloc[selected_rows[0]])
+            stadium_labels = [
+                f"{r.stadium_name} — {r.team}" for r in df_st.itertuples()
+            ]
+            default_idx = selected_rows[0] if selected_rows else 0
+            detail_idx = st.selectbox(
+                t("stadium_view_select"),
+                range(len(stadium_labels)),
+                index=default_idx,
+                format_func=lambda i: stadium_labels[i],
+                key="stadium_detail_sel",
+            )
+            st.divider()
+            _render_stadium_detail(df_st.iloc[detail_idx])
 
             # ── Grafico top-15 por aforo ─────────────────────────
             top = (
@@ -1851,7 +2289,7 @@ with tab_stadiums:
                     f"{r.stadium_name} ({r.team})" for r in top.itertuples()
                 ]
                 ax_st.barh(labels, top["capacity"], color="#9b59b6")
-                ax_st.set_xlabel("Capacity", color="white")
+                ax_st.set_xlabel(t("col_capacity"), color="white")
                 ax_st.tick_params(colors="white")
                 for spine in ax_st.spines.values():
                     spine.set_color("#444")
@@ -1860,11 +2298,7 @@ with tab_stadiums:
                 st.pyplot(fig_st)
                 plt.close(fig_st)
 
-        st.caption(
-            "Source: dim_stadium (Transfermarkt + Wikidata, SCD2). "
-            "Partidos enlazan vía match_stadium_id; el fill % de asistencia "
-            "usa la capacidad del estadio real del partido."
-        )
+        st.caption(t("stadium_footer_caption"))
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -1877,7 +2311,7 @@ with tab_monitor:
     p1, p2, p3, p4 = st.columns(4)
     p1.metric(t("tab_players"),    _fmt(_DB_SUMMARY['players']))
     p2.metric(t("matches"),       _fmt(_DB_SUMMARY['matches']))
-    p3.metric("Shots (xG)",       _fmt(_DB_SUMMARY['shots']))
+    p3.metric(t("shots_xg_metric"),       _fmt(_DB_SUMMARY['shots']))
     p4.metric(t("tab_injuries"),  _fmt(_DB_SUMMARY['injuries']))
 
     st.divider()
@@ -1885,14 +2319,14 @@ with tab_monitor:
     # ── Section 2 — Season scanner ────────────────────────
     st.subheader(t("season_scanner"))
     if st.button(t("scan_all_sources"), type="primary", key="scan_btn"):
-        with st.spinner("Scanning all sources..."):
+        with st.spinner(t("scanning_spinner")):
             st.session_state["scan_results"] = scanner.scan_all()
 
     scan_results = st.session_state.get("scan_results")
     if scan_results is not None:
         errors = scan_results.get("_errors") or {}
         if errors:
-            st.warning(f"Scanner errors: {sorted(errors.keys())}")
+            st.warning(f"{t('scanner_errors')}: {sorted(errors.keys())}")
 
         rows = []
         for src in ("statsbomb", "understat", "sofascore", "transfermarkt", "whoscored"):
@@ -1904,13 +2338,9 @@ with tab_monitor:
                 })
         if rows:
             st.dataframe(pd.DataFrame(rows), width='stretch')
-            st.info(
-                "To load missing seasons, run:\n\n"
-                "    python pipeline_runner.py --sources <source>\n\n"
-                "Loading is intentionally CLI-only in this dashboard."
-            )
+            st.info(t("load_missing_cli"))
         else:
-            st.success("All scanned sources are up-to-date — no missing seasons.")
+            st.success(t("all_sources_up_to_date"))
 
     st.divider()
 
@@ -1921,10 +2351,10 @@ with tab_monitor:
         if cov_competitions else []
     cc1, cc2 = st.columns(2)
     with cc1:
-        cov_comp = st.selectbox("Competition", cov_competitions, key="cov_comp")
+        cov_comp = st.selectbox(t("competition"), cov_competitions, key="cov_comp")
     with cc2:
         cov_season = st.selectbox(
-            "Season", cov_seasons or ["(no seasons)"], key="cov_season",
+            t("season"), cov_seasons or [t("no_seasons_paren")], key="cov_season",
             disabled=not cov_seasons,
         )
 
@@ -1945,13 +2375,37 @@ with tab_monitor:
                 total_loaded += loaded
                 total_total  += total
             if src == "sofascore":
-                st.caption(
-                    "SofaScore events are incident-only. "
-                    "Coordinates are NULL by design."
-                )
+                st.caption(t("sofascore_incident_caption"))
         if total_total > 0:
-            st.write("**Overall**")
+            st.write(f"**{t('overall')}**")
             st.progress(min(total_loaded / total_total, 1.0))
+
+    st.divider()
+
+    # ── Section 3b — Event diagnostics (WhoScored) ────────
+    st.subheader(t("event_diagnostics"))
+    _ev_cov = explore.get_whoscored_event_coverage()
+    if _ev_cov.empty:
+        st.info(t("no_event_data"))
+    else:
+        _ec1, _ec2 = st.columns([1, 1])
+        with _ec1:
+            st.caption(t("whoscored_events_season"))
+            st.dataframe(
+                _ev_cov.rename(columns={
+                    "season": t("season"), "matches": t("matches"), "events": "Eventos",
+                }),
+                width="stretch", hide_index=True,
+            )
+        with _ec2:
+            st.caption(t("event_types_xy"))
+            st.dataframe(
+                explore.get_whoscored_event_types().rename(columns={
+                    "event_type": "event_type", "events": "Eventos", "with_xy": "Con x/y",
+                }),
+                width="stretch", hide_index=True,
+            )
+        st.caption(t("event_diag_caption"))
 
     st.divider()
 
@@ -1965,13 +2419,10 @@ with tab_monitor:
     r4.metric(t("avg_similarity"), f"{pr_stats['avg_score']:.1f}")
     pr_df = db.get_player_review_queue(50)
     if pr_df.empty:
-        st.info("No unresolved entries in `player_review`.")
+        st.info(t("no_unresolved_review"))
     else:
         st.dataframe(pr_df, width='stretch')
-    st.info(
-        "To resolve a case, run:\n\n"
-        "    python -m scripts.review_players --unresolved"
-    )
+    st.info(t("resolve_player_cli"))
 
     st.divider()
 
@@ -1979,7 +2430,7 @@ with tab_monitor:
     st.subheader(t("recent_matches"))
     rm_df = db.get_recent_matches(20)
     if rm_df.empty:
-        st.info("No matches in `dim_match` yet.")
+        st.info(t("no_matches_dim"))
     else:
         st.dataframe(rm_df, width='stretch')
 

@@ -159,23 +159,25 @@ def _load_from_sofascore(conn, ss_path: Path, competition_id: int) -> int:
             season      = normalize_season(row.get("season"))
             home_score  = row.get("home_score")  if pd.notna(row.get("home_score")) else None
             away_score  = row.get("away_score")  if pd.notna(row.get("away_score")) else None
+            attendance  = _safe_int(row.get("attendance"))
 
             conn.execute(text("""
                 INSERT INTO dim_match
                     (match_date, competition, season,
                      home_team_id, away_team_id,
-                     home_score, away_score,
+                     home_score, away_score, attendance,
                      data_source, id_sofascore, competition_id)
                 VALUES
                     (:date, :comp, :season,
                      :hid, :aid,
-                     :hsc, :asc,
+                     :hsc, :asc, :att,
                      'sofascore', :sid, :competition_id)
                 ON CONFLICT (id_sofascore) WHERE id_sofascore IS NOT NULL
                 DO UPDATE SET
                     match_date     = EXCLUDED.match_date,
                     home_score     = EXCLUDED.home_score,
                     away_score     = EXCLUDED.away_score,
+                    attendance     = COALESCE(dim_match.attendance, EXCLUDED.attendance),
                     competition    = EXCLUDED.competition,
                     season         = EXCLUDED.season,
                     competition_id = EXCLUDED.competition_id
@@ -187,6 +189,7 @@ def _load_from_sofascore(conn, ss_path: Path, competition_id: int) -> int:
                 "aid":            a_canonical,
                 "hsc":            int(home_score) if home_score is not None else None,
                 "asc":            int(away_score) if away_score is not None else None,
+                "att":            attendance,
                 "sid":            sid,
                 "competition_id": competition_id,
             })

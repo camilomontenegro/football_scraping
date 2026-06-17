@@ -30,8 +30,8 @@ Sigue exactamente el mismo patrón que `transfermarkt_scraper.py`:
         owner, address, city, construction_cost,
         team_slug, team_id_tm, season
 
-    El loader correspondiente hará el UPSERT contra `dim_stadium`
-    y enlazará `dim_team.home_stadium_id`.
+    El loader correspondiente hará el UPSERT contra `dim_stadium`.
+    `dim_team.home_stadium_master_id` se sincroniza desde bridge vía sync_team_home_stadium.
 """
 
 from __future__ import annotations
