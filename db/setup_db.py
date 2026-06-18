@@ -11,6 +11,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -39,7 +40,14 @@ SQL_PATH = os.path.join(os.path.dirname(__file__), "create_tables.sql")
 # isolation_level="AUTOCOMMIT" es obligatorio para CREATE DATABASE.
 print(" Conectando a PostgreSQL...")
 
-url_postgres = f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/postgres"
+url_postgres = URL.create(
+    drivername="postgresql+psycopg2",
+    username=DB_USER,
+    password=DB_PASSWORD,
+    host=DB_HOST,
+    port=int(DB_PORT),
+    database="postgres"
+)
 
 try:
     engine_postgres = create_engine(url_postgres, isolation_level="AUTOCOMMIT")
@@ -66,7 +74,14 @@ except OperationalError as e:
 # ── PASO 2: Ejecutar el script SQL ────────────────────────
 print(f"\n Ejecutando {SQL_PATH}...")
 
-url_football = f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+url_football = URL.create(
+    drivername="postgresql+psycopg2",
+    username=DB_USER,
+    password=DB_PASSWORD,
+    host=DB_HOST,
+    port=int(DB_PORT),
+    database=DB_NAME
+)
 
 try:
     engine = create_engine(url_football, isolation_level="AUTOCOMMIT")
@@ -83,6 +98,7 @@ try:
     from loaders.competition_loader import load_competitions
 
     seed_engine = create_engine(url_football)
+
     with seed_engine.begin() as conn:
         inserted = load_competitions(conn)
     print(f" dim_competition sembrada correctamente ({inserted} competiciones)\n")
