@@ -1156,18 +1156,18 @@ def get_referee_stats(
         )
         SELECT rm.referee,
                COUNT(DISTINCT rm.match_id) AS matches_officiated,
-               COALESCE(rc.yellow_cards, 0) AS yellow_cards,
-               COALESCE(rc.red_cards, 0) AS red_cards,
-               COALESCE(rc.second_yellow_reds, 0) AS second_yellow_reds,
-               COALESCE(rc.yellow_cards, 0) + COALESCE(rc.red_cards, 0) AS total_cards,
+               COALESCE(MAX(rc.yellow_cards), 0) AS yellow_cards,
+               COALESCE(MAX(rc.red_cards), 0) AS red_cards,
+               COALESCE(MAX(rc.second_yellow_reds), 0) AS second_yellow_reds,
+               COALESCE(MAX(rc.yellow_cards), 0) + COALESCE(MAX(rc.red_cards), 0) AS total_cards,
                ROUND(
-                   (COALESCE(rc.yellow_cards, 0) + COALESCE(rc.red_cards, 0))::numeric
+                   (COALESCE(MAX(rc.yellow_cards), 0) + COALESCE(MAX(rc.red_cards), 0))::numeric
                    / NULLIF(COUNT(DISTINCT rm.match_id), 0),
                    2
                ) AS cards_per_match
         FROM ref_matches rm
         LEFT JOIN ref_cards rc ON rc.referee = rm.referee
-        GROUP BY rm.referee, rc.yellow_cards, rc.red_cards, rc.second_yellow_reds
+        GROUP BY rm.referee
         ORDER BY matches_officiated DESC
     """
     try:
