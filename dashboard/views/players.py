@@ -33,9 +33,10 @@ from dashboard.views.shared import (
 def render() -> None:
     st.header(t("tab_players"))
  
-    t_discipline, t_gk, t_detail, t_injuries, t_market_value, t_transfer_history = st.tabs(
+    t_discipline, t_cards, t_gk, t_detail, t_injuries, t_market_value, t_transfer_history = st.tabs(
         [
             t("tab_players"),
+            t("cards_fouls_section"),
             t("tab_goalkeepers"),
             "Player Detail",
             t("tab_injuries"),
@@ -89,7 +90,63 @@ def render() -> None:
                 "Goals and xG: fact_shots (all sources) · Cards: fact_events (SofaScore incidents + StatsBomb)\n"
                 "Rows show per-season accumulation when All seasons is selected."
             )
- 
+
+    # ── Cards & fouls ───────────────────────────────────────
+    with t_cards:
+        _cf_comp, _cf_season, _cf_team = _tab_selectors("cards_fouls")
+        if _cf_season is None:
+            st.info(t("select_season"))
+        else:
+            _cf_min = st.slider(t("min_matches"), 1, 20, 3, key="cf_min_matches")
+            _df_cf = explore.get_player_cards_fouls(
+                _cf_season, _cf_team, _cf_comp, _cf_min
+            )
+            if _df_cf.empty:
+                st.info(t("no_data"))
+            else:
+                _cf1, _cf2, _cf3, _cf4 = st.columns(4)
+                _cf1.metric(t("players_tracked"), _df_cf["player"].nunique())
+                _cf2.metric(t("yellow_cards"), _fmt(_df_cf["yellow_cards"].sum()))
+                _cf3.metric(t("red_cards"), _fmt(_df_cf["red_cards"].sum()))
+                _cf4.metric(t("fouls"), _fmt(_df_cf["fouls"].sum()))
+
+                st.dataframe(
+                    _df_cf.rename(columns={
+                        "player": t("col_player"), "team": t("team"), "matches": t("col_matches"),
+                        "yellow_cards": t("yellow_cards"), "red_cards": t("red_cards"),
+                        "total_cards": t("total_cards"),
+                        "cards_per_match": t("cards_per_match"),
+                        "fouls": t("fouls"), "fouls_per_match": t("fouls_per_match"),
+                    }),
+                    width="stretch", hide_index=True,
+                )
+
+                _topc = _df_cf[_df_cf["matches"] >= _cf_min].sort_values(
+                    "cards_per_match", ascending=False
+                ).head(15)
+                if not _topc.empty:
+                    st.subheader(t("cards_per_match"))
+                    fig_cf, ax_cf = plt.subplots(figsize=(10, max(3, len(_topc) * 0.45)))
+                    fig_cf.patch.set_facecolor("#0e1117")
+                    ax_cf.set_facecolor("#0e1117")
+                    _cf_lbl = [f"{r.player} ({r.team})" for r in _topc.itertuples()]
+                    _cf_y = _topc["yellow_cards"].to_numpy(float) / _topc["matches"].to_numpy(float)
+                    _cf_r = _topc["red_cards"].to_numpy(float) / _topc["matches"].to_numpy(float)
+                    ax_cf.barh(_cf_lbl, _cf_y, color="#f1c40f", label=t("yellow_cards"))
+                    ax_cf.barh(_cf_lbl, _cf_r, left=_cf_y, color="#e74c3c", label=t("red_cards"))
+                    ax_cf.set_xlabel(t("cards_per_match"), color="white")
+                    ax_cf.tick_params(colors="white")
+                    ax_cf.legend(facecolor="#1a1a2e", edgecolor="#444",
+                                 labelcolor="white", fontsize=9)
+                    for _sp in ax_cf.spines.values():
+                        _sp.set_color("#444")
+                    ax_cf.invert_yaxis()
+                    plt.tight_layout()
+                    st.pyplot(fig_cf)
+                    plt.close(fig_cf)
+
+                st.caption(t("caption_cards_fouls"))
+
     # ── Goalkeepers ─────────────────────────────────────────
     with t_gk:
         _gk_comp, _gk_season, _gk_team = _tab_selectors("gk")
@@ -545,7 +602,35 @@ def render() -> None:
                 _st3.metric("xG", _total_xg)
                 _st4.metric("Goals − xG", f"{_g_minus_xg:+.2f}")
             st.divider()
- 
+
+            # ── Action heatmap (WhoScored events) ─────────────────
+            st.subheader(t("action_heatmap"))
+            _hm_loc = player_detail.get_player_event_locations(_pd_cid, _pd_season_sel)
+            if _hm_loc.empty:
+                st.info(t("no_event_data"))
+            else:
+                _hx = pd.to_numeric(_hm_loc["x"], errors="coerce").to_numpy(dtype=float)
+                _hy = pd.to_numeric(_hm_loc["y"], errors="coerce").to_numpy(dtype=float)
+                _pitch_hm = _PlayerPitch(
+                    pitch_type="custom", pitch_length=105, pitch_width=68,
+                    pitch_color="#1a472a", line_color="white", line_zorder=2,
+                )
+                _fig_hm, _ax_hm = _pitch_hm.draw(figsize=(7, 4.5))
+                _fig_hm.patch.set_facecolor("#1a472a")
+                try:
+                    _pitch_hm.kdeplot(
+                        _hx, _hy, ax=_ax_hm, fill=True, levels=50,
+                        thresh=0.05, cmap="hot", alpha=0.7, zorder=1,
+                    )
+                except Exception:
+                    _pitch_hm.hexbin(
+                        _hx, _hy, ax=_ax_hm, gridsize=20, cmap="hot", zorder=1,
+                    )
+                st.pyplot(_fig_hm)
+                plt.close(_fig_hm)
+                st.caption(t("caption_action_heatmap").format(n=len(_hm_loc)))
+            st.divider()
+
             # ═══════════════════════════════════════════════════════
             # SECTION 5 — SEASONAL STATS + INJURIES + MDM
             # ═══════════════════════════════════════════════════════

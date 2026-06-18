@@ -675,8 +675,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "reds_per_match":        {"es": "Rojas/partido",           "en": "Reds/Match"},
     "cards_per_match_label": {"es": "Tarjetas/partido",        "en": "Cards per match"},
     "referee_caption":       {
-        "es": "Fuente: dim_referee + dim_match + fact_events. {scope}Mín. {min_m} partidos para el gráfico. Tarjetas/partido = (amarillas + rojas) / partidos.",
-        "en": "Source: dim_referee + dim_match + fact_events. {scope}Min. {min_m} matches for chart. Cards/Match = (yellows + reds) / matches.",
+        "es": "Fuente: dim_referee + dim_match + fact_events. {scope}Mín. {min_m} partidos para el gráfico. Rojas = rojas directas; las 2ª amarillas se incluyen como amarillas y se muestran aparte. Tarjetas/partido = (amarillas + rojas directas) / partidos.",
+        "en": "Source: dim_referee + dim_match + fact_events. {scope}Min. {min_m} matches for chart. Reds = direct reds; 2nd yellows are included as yellows and shown separately. Cards/Match = (yellows + direct reds) / matches.",
     },
     "ref_scope_team":        {"es": "Tarjetas limitadas a {team}. ", "en": "Cards scoped to {team}. "},
     "pn_caption_header":     {
@@ -692,6 +692,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "col_referee":           {"es": "Árbitro",                   "en": "Referee"},
     "col_yellows_scope":     {"es": "Amarillas{scope}",          "en": "Yellows{scope}"},
     "col_reds_scope":        {"es": "Rojas{scope}",              "en": "Reds{scope}"},
+    "col_second_yellow_reds": {"es": "2ª amarilla",              "en": "2nd yellow reds"},
     "col_total_cards_scope": {"es": "Tarjetas totales{scope}",   "en": "Total Cards{scope}"},
     "col_avg_temp":          {"es": "Media °C",                "en": "Avg °C"},
     "col_min_temp_c":        {"es": "Mín °C",                  "en": "Min °C"},
