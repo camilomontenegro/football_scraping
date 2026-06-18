@@ -46,6 +46,59 @@ def _comp_clause(competition: str | None, match_alias: str = "m") -> tuple[str, 
     return join, where
 
 
+def _sql_is_yellow_card(fe_alias: str = "fe") -> str:
+    """SQL predicate for a yellow-card event (WhoScored + SofaScore + legacy strings)."""
+    fe = fe_alias
+    return f"""(
+        ({fe}.event_type ILIKE '%%yellow%%' AND {fe}.event_type NOT ILIKE '%%red%%')
+        OR (LOWER({fe}.event_type) = 'card' AND LOWER({fe}.outcome) = 'yellow')
+        OR (
+            LOWER({fe}.event_type) = 'card'
+            AND ({fe}.qualifiers->>'Yellow')::boolean IS TRUE
+            AND COALESCE(({fe}.qualifiers->>'SecondYellow')::boolean, FALSE) IS NOT TRUE
+        )
+    )"""
+
+
+def _sql_is_second_yellow_card(fe_alias: str = "fe") -> str:
+    """SQL predicate for a second-yellow dismissal."""
+    fe = fe_alias
+    return f"""(
+        ({fe}.event_type ILIKE '%%yellow%%red%%')
+        OR (LOWER({fe}.event_type) = 'card' AND LOWER({fe}.outcome) = 'yellowred')
+        OR (
+            LOWER({fe}.event_type) = 'card'
+            AND ({fe}.qualifiers->>'SecondYellow')::boolean IS TRUE
+        )
+    )"""
+
+
+def _sql_is_direct_red_card(fe_alias: str = "fe") -> str:
+    """SQL predicate for a direct red card, excluding second yellows."""
+    fe = fe_alias
+    return f"""(
+        ({fe}.event_type ILIKE '%%red%%' AND {fe}.event_type NOT ILIKE '%%yellow%%')
+        OR (LOWER({fe}.event_type) = 'card' AND LOWER({fe}.outcome) = 'red')
+        OR (
+            LOWER({fe}.event_type) = 'card'
+            AND (
+                ({fe}.qualifiers->>'RedCard')::boolean IS TRUE
+                OR ({fe}.qualifiers->>'Red')::boolean IS TRUE
+            )
+            AND COALESCE(({fe}.qualifiers->>'SecondYellow')::boolean, FALSE) IS NOT TRUE
+        )
+    )"""
+
+
+def _sql_is_red_card(fe_alias: str = "fe") -> str:
+    """SQL predicate for a red-card event (direct red or second yellow)."""
+    fe = fe_alias
+    return f"""(
+        {_sql_is_direct_red_card(fe_alias)}
+        OR {_sql_is_second_yellow_card(fe_alias)}
+    )"""
+
+
 @st.cache_data(ttl=300)
 def get_competitions() -> list[str]:
     """Lista las competiciones del dashboard.
@@ -496,54 +549,101 @@ def get_goalkeeper_stats(
 
     sql = f"""
         WITH {comp_cte}
+        -- Step 1: Identify GKs and their primary team.
+        -- Use fact_shots (opponent shots → GK's team) + fact_events as
+        -- fallback to resolve which team the GK plays for.
+        gk_players AS (
+            -- A GK is identified two ways and we UNION both:
+            --   (a) dim_player.position (Transfermarkt) = goalkeeper, BUT this
+            --       canonical id is often NOT the one the WhoScored events use,
+            --       so on its own it resolves no team and the GK vanishes.
+            --   (b) anyone who lined up as 'GK' in fact_player_match_stats
+            --       (WhoScored) — same canonical id as fact_events, so the
+            --       downstream team-resolution join actually matches.
+            SELECT canonical_id AS player_id, canonical_name AS goalkeeper
+            FROM dim_player
+            WHERE LOWER(position) IN ('portero', 'goalkeeper', 'gk', 'keeper')
+               OR canonical_id IN (
+                   SELECT player_id
+                   FROM fact_player_match_stats
+                   WHERE UPPER(position) = 'GK'
+               )
+        ),
+        -- Team assignment: prefer the team that appears most often as
+        -- the GK's team across fact_events OR as the opposing team in
+        -- fact_shots (the team that was NOT shooting).
         gk_team_raw AS (
-            SELECT p.canonical_id AS player_id, p.canonical_name AS goalkeeper,
-                   fe.team_id, COUNT(*) AS cnt
-            FROM dim_player p
-            JOIN fact_events fe ON fe.player_id = p.canonical_id
+            -- from events (subs, cards, etc.)
+            SELECT gk.player_id, gk.goalkeeper, fe.team_id, COUNT(*) AS cnt
+            FROM gk_players gk
+            JOIN fact_events fe ON fe.player_id = gk.player_id
             JOIN dim_match m ON fe.match_id = m.match_id
-            WHERE p.position IN ('Portero', 'Goalkeeper', 'GK')
-              AND m.season = :season {comp_match_filter}
-            GROUP BY p.canonical_id, p.canonical_name, fe.team_id
+            WHERE m.season = :season {comp_match_filter}
+            GROUP BY gk.player_id, gk.goalkeeper, fe.team_id
+          UNION ALL
+            -- from fact_shots: GK's team is the one being shot AT,
+            -- i.e. the team that is NOT fs.team_id
+            SELECT gk.player_id, gk.goalkeeper,
+                   CASE WHEN m.home_team_id = fs.team_id
+                        THEN m.away_team_id
+                        ELSE m.home_team_id END AS team_id,
+                   COUNT(*) AS cnt
+            FROM gk_players gk
+            JOIN fact_shots fs ON fs.player_id = gk.player_id
+            JOIN dim_match m ON fs.match_id = m.match_id
+            WHERE m.season = :season {comp_match_filter}
+            GROUP BY gk.player_id, gk.goalkeeper,
+                     CASE WHEN m.home_team_id = fs.team_id
+                          THEN m.away_team_id
+                          ELSE m.home_team_id END
+        ),
+        gk_team_agg AS (
+            SELECT player_id, goalkeeper, team_id, SUM(cnt) AS total_cnt
+            FROM gk_team_raw
+            GROUP BY player_id, goalkeeper, team_id
         ),
         gk_team_map AS (
             SELECT DISTINCT ON (player_id) player_id, goalkeeper, team_id
-            FROM gk_team_raw
-            ORDER BY player_id, cnt DESC
+            FROM gk_team_agg
+            ORDER BY player_id, total_cnt DESC
         ),
-        gk_match_list AS (
-            SELECT DISTINCT gtm.player_id, m.match_id
+        -- Step 2: matches_played = all team matches in the season
+        -- (not just matches where the GK had an event).
+        -- This is an approximation — assumes the GK played every match.
+        -- Without a lineup table, it's the best we can do.
+        team_matches AS (
+            SELECT gtm.player_id, m.match_id
             FROM gk_team_map gtm
-            JOIN fact_events fe ON fe.player_id = gtm.player_id
-                                AND fe.team_id = gtm.team_id
-            JOIN dim_match m ON fe.match_id = m.match_id
+            JOIN dim_match m ON (m.home_team_id = gtm.team_id
+                                 OR m.away_team_id = gtm.team_id)
             WHERE m.season = :season {comp_match_filter}
         ),
         matches_played AS (
             SELECT player_id, COUNT(DISTINCT match_id) AS matches
-            FROM gk_match_list
+            FROM team_matches
             GROUP BY player_id
         ),
+        -- Step 3: shots faced = on-target shots by the opponent
         shots_faced AS (
-            SELECT gml.player_id,
+            SELECT tm.player_id,
                    COUNT(fs.shot_id) AS shots_faced,
-                   SUM(CASE WHEN fs.result = 'Goal' THEN 1 ELSE 0 END) AS goals_allowed,
+                   SUM(CASE WHEN LOWER(fs.result) = 'goal' THEN 1 ELSE 0 END) AS goals_allowed,
                    ROUND(SUM(fs.xg)::numeric, 2) AS xg_conceded
-            FROM gk_match_list gml
-            JOIN gk_team_map gtm ON gtm.player_id = gml.player_id
-            JOIN fact_shots fs ON fs.match_id = gml.match_id
+            FROM team_matches tm
+            JOIN gk_team_map gtm ON gtm.player_id = tm.player_id
+            JOIN fact_shots fs ON fs.match_id = tm.match_id
                                AND fs.team_id != gtm.team_id
                                AND LOWER(fs.result) IN ('goal', 'saved', 'save', 'savedshot')
-            GROUP BY gml.player_id
+            GROUP BY tm.player_id
         ),
         clean_sheets AS (
-            SELECT gml.player_id, COUNT(*) AS clean_sheets
-            FROM gk_match_list gml
-            JOIN gk_team_map gtm ON gtm.player_id = gml.player_id
-            JOIN dim_match m ON m.match_id = gml.match_id
+            SELECT tm.player_id, COUNT(*) AS clean_sheets
+            FROM team_matches tm
+            JOIN gk_team_map gtm ON gtm.player_id = tm.player_id
+            JOIN dim_match m ON m.match_id = tm.match_id
             WHERE (m.home_team_id = gtm.team_id AND COALESCE(m.away_score, 1) = 0)
                OR (m.away_team_id = gtm.team_id AND COALESCE(m.home_score, 1) = 0)
-            GROUP BY gml.player_id
+            GROUP BY tm.player_id
         )
         SELECT gtm.goalkeeper,
                t.canonical_name AS team,
@@ -610,23 +710,28 @@ def get_player_discipline(
             WHERE 1=1 {season_filter} {shot_team_filter} {comp_filter}
             GROUP BY fs.player_id, fs.team_id, m.season
         ),
-        card_stats AS (
-            SELECT fe.player_id,
-                   m.season,
-                   SUM(CASE WHEN
-                            (fe.event_type ILIKE '%%yellow%%' AND fe.event_type NOT ILIKE '%%red%%')
-                            OR (LOWER(fe.event_type) = 'card' AND LOWER(fe.outcome) = 'yellow')
-                            THEN 1 ELSE 0 END) AS yellow_cards,
-                   SUM(CASE WHEN
-                            (fe.event_type ILIKE '%%red%%')
-                            OR (LOWER(fe.event_type) = 'card' AND LOWER(fe.outcome) IN ('red', 'yellowred'))
-                            THEN 1 ELSE 0 END) AS red_cards
+        -- A player can get at most 1 yellow + 1 red per match.
+        -- Collapse per (match, player) so multi-source data doesn't
+        -- inflate counts even when minute values differ across sources.
+        match_player_cards AS (
+            SELECT fe.match_id, fe.player_id, fe.team_id,
+                   MAX(CASE WHEN {_sql_is_yellow_card('fe')} THEN 1 ELSE 0 END) AS got_yellow,
+                   MAX(CASE WHEN {_sql_is_red_card('fe')} THEN 1 ELSE 0 END) AS got_red
             FROM fact_events fe
-            JOIN dim_match m ON fe.match_id = m.match_id
-            {comp_join}
             WHERE fe.event_type IS NOT NULL
-              {season_filter} {event_team_filter} {comp_filter}
-            GROUP BY fe.player_id, m.season
+            GROUP BY fe.match_id, fe.player_id, fe.team_id
+        ),
+        card_stats AS (
+            SELECT mpc.player_id,
+                   m.season,
+                   SUM(mpc.got_yellow) AS yellow_cards,
+                   SUM(mpc.got_red) AS red_cards
+            FROM match_player_cards mpc
+            JOIN dim_match m ON mpc.match_id = m.match_id
+            {comp_join}
+            WHERE 1=1
+              {season_filter} {event_team_filter.replace('fe.', 'mpc.')} {comp_filter}
+            GROUP BY mpc.player_id, m.season
         )
         SELECT p.canonical_name AS player,
                t.canonical_name AS team,
@@ -1026,35 +1131,43 @@ def get_referee_stats(
               {season_filter} {comp_filter}
               {team_match_filter}
         ),
+        -- Collapse possible multi-source duplicates per (match, player).
+        -- A second yellow is a yellow-card event plus a dismissal, not an
+        -- independent direct red card.
+        match_player_cards AS (
+            SELECT fe.match_id, fe.player_id, fe.team_id,
+                   MAX(CASE WHEN {_sql_is_yellow_card('fe')} THEN 1 ELSE 0 END) AS got_yellow,
+                   MAX(CASE WHEN {_sql_is_second_yellow_card('fe')} THEN 1 ELSE 0 END) AS got_second_yellow,
+                   MAX(CASE WHEN {_sql_is_direct_red_card('fe')} THEN 1 ELSE 0 END) AS got_red
+            FROM fact_events fe
+            WHERE fe.event_type IS NOT NULL
+            GROUP BY fe.match_id, fe.player_id, fe.team_id
+        ),
         ref_cards AS (
             SELECT rm.referee,
-                   SUM(CASE WHEN
-                       (fe.event_type ILIKE '%%yellow%%' AND fe.event_type NOT ILIKE '%%red%%')
-                       OR (LOWER(fe.event_type) = 'card' AND LOWER(fe.outcome) = 'yellow')
-                       THEN 1 ELSE 0 END) AS yellow_cards,
-                   SUM(CASE WHEN
-                       (fe.event_type ILIKE '%%red%%')
-                       OR (LOWER(fe.event_type) = 'card' AND LOWER(fe.outcome) IN ('red', 'yellowred'))
-                       THEN 1 ELSE 0 END) AS red_cards
+                   SUM(mpc.got_yellow + mpc.got_second_yellow) AS yellow_cards,
+                   SUM(mpc.got_red) AS red_cards,
+                   SUM(mpc.got_second_yellow) AS second_yellow_reds
             FROM ref_matches rm
-            JOIN fact_events fe ON fe.match_id = rm.match_id
-            WHERE fe.event_type IS NOT NULL
-              {card_team_filter}
+            JOIN match_player_cards mpc ON mpc.match_id = rm.match_id
+            WHERE 1=1
+              {card_team_filter.replace('fe.', 'mpc.')}
             GROUP BY rm.referee
         )
         SELECT rm.referee,
                COUNT(DISTINCT rm.match_id) AS matches_officiated,
-               COALESCE(rc.yellow_cards, 0) AS yellow_cards,
-               COALESCE(rc.red_cards, 0) AS red_cards,
-               COALESCE(rc.yellow_cards, 0) + COALESCE(rc.red_cards, 0) AS total_cards,
+               COALESCE(MAX(rc.yellow_cards), 0) AS yellow_cards,
+               COALESCE(MAX(rc.red_cards), 0) AS red_cards,
+               COALESCE(MAX(rc.second_yellow_reds), 0) AS second_yellow_reds,
+               COALESCE(MAX(rc.yellow_cards), 0) + COALESCE(MAX(rc.red_cards), 0) AS total_cards,
                ROUND(
-                   (COALESCE(rc.yellow_cards, 0) + COALESCE(rc.red_cards, 0))::numeric
+                   (COALESCE(MAX(rc.yellow_cards), 0) + COALESCE(MAX(rc.red_cards), 0))::numeric
                    / NULLIF(COUNT(DISTINCT rm.match_id), 0),
                    2
                ) AS cards_per_match
         FROM ref_matches rm
         LEFT JOIN ref_cards rc ON rc.referee = rm.referee
-        GROUP BY rm.referee, rc.yellow_cards, rc.red_cards
+        GROUP BY rm.referee
         ORDER BY matches_officiated DESC
     """
     try:
@@ -1067,18 +1180,22 @@ def get_manager_stats(
     season_label: str | None,
     competition: str | None = None,
     team: str | None = None,
+    min_matches: int = 3,
 ) -> pd.DataFrame:
     """Manager win/draw/loss record from dim_match text columns.
 
     When *team* is provided, only rows where the manager coached that
     specific team are included, so you see a per-team breakdown.
+
+    *min_matches* drops managers with too few games (interim / one-off
+    spells) so the points_pct ranking isn't dominated by 1-2 match samples.
     """
     eng = get_engine()
     with eng.connect() as conn:
         tid = _team_id(conn, team)
 
     comp_join, comp_filter = _comp_clause(competition)
-    params: dict = {}
+    params: dict = {"min_matches": int(min_matches)}
     season_filter = ""
     if season_label is not None:
         season_filter = "AND m.season = :season"
@@ -1100,7 +1217,8 @@ def get_manager_stats(
                    ht.canonical_name AS team,
                    m.home_score AS scored,
                    m.away_score AS conceded,
-                   m.match_id
+                   m.match_id,
+                   m.match_date
             FROM dim_match m
             {comp_join}
             LEFT JOIN dim_team ht ON m.home_team_id = ht.canonical_id
@@ -1115,7 +1233,8 @@ def get_manager_stats(
                    at.canonical_name AS team,
                    m.away_score AS scored,
                    m.home_score AS conceded,
-                   m.match_id
+                   m.match_id,
+                   m.match_date
             FROM dim_match m
             {comp_join}
             LEFT JOIN dim_team at ON m.away_team_id = at.canonical_id
@@ -1125,7 +1244,7 @@ def get_manager_stats(
               {away_team_filter}
         )
         SELECT manager,
-               MAX(team) AS team,
+               (ARRAY_AGG(team ORDER BY match_date DESC NULLS LAST))[1] AS team,
                COUNT(*) AS matches,
                SUM(CASE WHEN scored > conceded THEN 1 ELSE 0 END) AS wins,
                SUM(CASE WHEN scored = conceded THEN 1 ELSE 0 END) AS draws,
@@ -1143,7 +1262,7 @@ def get_manager_stats(
                ) AS points_pct
         FROM manager_matches
         GROUP BY manager
-        HAVING COUNT(*) >= 1
+        HAVING COUNT(*) >= :min_matches
         ORDER BY points_pct DESC, matches DESC
     """
     return query_df(sql, params)
@@ -1241,16 +1360,10 @@ def get_match_cards(match_id: int) -> pd.DataFrame:
     Mirrors the detection used in get_referee_stats; ``%%`` is required because
     query_df runs through psycopg2 where a literal percent must be escaped.
     """
-    sql = """
+    sql = f"""
         SELECT t.canonical_name AS team,
-               SUM(CASE WHEN
-                   (fe.event_type ILIKE '%%yellow%%' AND fe.event_type NOT ILIKE '%%red%%')
-                   OR (LOWER(fe.event_type) = 'card' AND LOWER(fe.outcome) = 'yellow')
-                   THEN 1 ELSE 0 END) AS yellow_cards,
-               SUM(CASE WHEN
-                   (fe.event_type ILIKE '%%red%%')
-                   OR (LOWER(fe.event_type) = 'card' AND LOWER(fe.outcome) IN ('red', 'yellowred'))
-                   THEN 1 ELSE 0 END) AS red_cards
+               SUM(CASE WHEN {_sql_is_yellow_card()} THEN 1 ELSE 0 END) AS yellow_cards,
+               SUM(CASE WHEN {_sql_is_red_card()} THEN 1 ELSE 0 END) AS red_cards
         FROM fact_events fe
         JOIN dim_team t ON t.canonical_id = fe.team_id
         WHERE fe.match_id = :mid AND fe.event_type IS NOT NULL
@@ -1318,27 +1431,54 @@ def get_player_cards_fouls(
         team_filter = "AND fe.team_id = :tid"
         params["tid"] = tid
     sql = f"""
+        WITH
+        -- Cards: at most 1 yellow + 1 red per (match, player)
+        match_player_cards AS (
+            SELECT fe.match_id, fe.player_id, fe.team_id,
+                   MAX(CASE WHEN {_sql_is_yellow_card('fe')} THEN 1 ELSE 0 END) AS got_yellow,
+                   MAX(CASE WHEN {_sql_is_red_card('fe')} THEN 1 ELSE 0 END) AS got_red
+            FROM fact_events fe
+            WHERE fe.event_type IS NOT NULL
+            GROUP BY fe.match_id, fe.player_id, fe.team_id
+        ),
+        card_totals AS (
+            SELECT mpc.player_id,
+                   SUM(mpc.got_yellow) AS yellow_cards,
+                   SUM(mpc.got_red) AS red_cards
+            FROM match_player_cards mpc
+            JOIN dim_match m ON m.match_id = mpc.match_id
+            {comp_join}
+            WHERE m.season = :season {comp_filter}
+              {team_filter.replace('fe.', 'mpc.')}
+            GROUP BY mpc.player_id
+        ),
+        -- Fouls + match count: minute-based dedup is fine for fouls
+        dedup_events AS (
+            SELECT DISTINCT ON (fe.match_id, fe.player_id, fe.minute,
+                                COALESCE(fe.event_type, ''))
+                   fe.match_id, fe.player_id, fe.team_id, fe.minute,
+                   fe.event_type
+            FROM fact_events fe
+            WHERE fe.event_type IS NOT NULL
+            ORDER BY fe.match_id, fe.player_id, fe.minute,
+                     COALESCE(fe.event_type, ''), fe.data_source
+        )
         SELECT p.canonical_name AS player,
                MAX(t.canonical_name) AS team,
-               COUNT(DISTINCT fe.match_id) AS matches,
-               SUM(CASE WHEN
-                   (fe.event_type ILIKE '%%yellow%%' AND fe.event_type NOT ILIKE '%%red%%')
-                   OR (LOWER(fe.event_type) = 'card' AND LOWER(fe.outcome) = 'yellow')
-                   THEN 1 ELSE 0 END) AS yellow_cards,
-               SUM(CASE WHEN
-                   (fe.event_type ILIKE '%%red%%')
-                   OR (LOWER(fe.event_type) = 'card' AND LOWER(fe.outcome) IN ('red', 'yellowred'))
-                   THEN 1 ELSE 0 END) AS red_cards,
-               SUM(CASE WHEN fe.event_type ILIKE '%%foul%%' THEN 1 ELSE 0 END) AS fouls
-        FROM fact_events fe
-        JOIN dim_match m ON m.match_id = fe.match_id
+               COUNT(DISTINCT de.match_id) AS matches,
+               COALESCE(MAX(ct.yellow_cards), 0) AS yellow_cards,
+               COALESCE(MAX(ct.red_cards), 0) AS red_cards,
+               SUM(CASE WHEN de.event_type ILIKE '%%foul%%' THEN 1 ELSE 0 END) AS fouls
+        FROM dedup_events de
+        JOIN dim_match m ON m.match_id = de.match_id
         {comp_join}
-        JOIN dim_player p ON p.canonical_id = fe.player_id
-        JOIN dim_team t ON t.canonical_id = fe.team_id
+        JOIN dim_player p ON p.canonical_id = de.player_id
+        JOIN dim_team t ON t.canonical_id = de.team_id
+        LEFT JOIN card_totals ct ON ct.player_id = de.player_id
         WHERE m.season = :season {comp_filter}
-          {team_filter}
+          {team_filter.replace('fe.', 'de.')}
         GROUP BY p.canonical_id, p.canonical_name
-        HAVING COUNT(DISTINCT fe.match_id) >= :minm
+        HAVING COUNT(DISTINCT de.match_id) >= :minm
     """
     df = query_df(sql, params)
     if df.empty:

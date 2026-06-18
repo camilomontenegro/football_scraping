@@ -109,10 +109,11 @@ def render() -> None:
         if _mc_season is None:
             st.info(t("select_season"))
         else:
-            df_ref = explore.get_referee_stats(_mc_season, _mc_comp)
+            df_ref = explore.get_referee_stats(_mc_season, _mc_comp, _mc_team)
             if df_ref.empty:
                 st.info(t("no_referee_data"))
             else:
+                _scope_suffix = f" ({_mc_team})" if _mc_team else ""
                 rm1, rm2, rm3, rm4 = st.columns(4)
                 rm1.metric(t("referees_section"), len(df_ref))
                 rm2.metric(t("matches"),
@@ -123,19 +124,26 @@ def render() -> None:
                            _fmt(df_ref["red_cards"].sum()))
 
                 display_ref = df_ref.rename(columns={
-                    "referee": "Referee",
-                    "matches_officiated": "Matches",
-                    "yellow_cards": "Yellows",
-                    "red_cards": "Reds",
-                    "total_cards": "Total Cards",
-                    "cards_per_match": "Cards/Match",
+                    "referee": t("col_referee"),
+                    "matches_officiated": t("matches"),
+                    "yellow_cards": t("col_yellows_scope").format(scope=_scope_suffix),
+                    "red_cards": t("col_reds_scope").format(scope=_scope_suffix),
+                    "second_yellow_reds": t("col_second_yellow_reds"),
+                    "total_cards": t("col_total_cards_scope").format(scope=_scope_suffix),
+                    "cards_per_match": t("cards_per_match_label"),
                 })
                 st.dataframe(display_ref, width="stretch")
 
-                # Top 10 referees by cards per match (min 5 matches)
-                strict_ref = df_ref[df_ref["matches_officiated"] >= 5].copy()
+                # Top referees by cards per match (min 5 matches, or 2 when scoped)
+                _min_matches = 2 if _mc_team else 5
+                strict_ref = df_ref[df_ref["matches_officiated"] >= _min_matches].copy()
                 if not strict_ref.empty:
-                    st.subheader(t("referees_section") + " — Cards/Match")
+                    _chart_title = (
+                        t("cards_match_vs_team").format(team=_mc_team)
+                        if _mc_team
+                        else t("cards_match_all")
+                    )
+                    st.subheader(f"{t('referees_section')} — {_chart_title}")
                     top_strict = strict_ref.sort_values(
                         "cards_per_match", ascending=False
                     ).head(15)
@@ -149,7 +157,7 @@ def render() -> None:
                         top_strict["cards_per_match"],
                         color="#e74c3c",
                     )
-                    ax_ref.set_xlabel("Cards per match", color="white")
+                    ax_ref.set_xlabel(t("cards_per_match_label"), color="white")
                     ax_ref.tick_params(colors="white")
                     for spine in ax_ref.spines.values():
                         spine.set_color("#444")
@@ -158,9 +166,11 @@ def render() -> None:
                     st.pyplot(fig_ref)
                     plt.close(fig_ref)
 
+                _scope_note = (
+                    t("ref_scope_team").format(team=_mc_team) if _mc_team else ""
+                )
                 st.caption(
-                    "Source: dim_referee + dim_match (referee_id FK) + fact_events (cards). "
-                    "Min. 5 matches for chart. Cards/Match = (yellows + reds) / matches."
+                    t("referee_caption").format(scope=_scope_note, min_m=_min_matches)
                 )
 
     # ── Managers ──────────────────────────────────────────────
@@ -168,14 +178,17 @@ def render() -> None:
         if _mc_season is None:
             st.info(t("select_season"))
         else:
-            df_mgr = explore.get_manager_stats(_mc_season, _mc_comp)
+            df_mgr = explore.get_manager_stats(_mc_season, _mc_comp, _mc_team)
             if df_mgr.empty:
                 st.info(t("no_manager_data"))
             else:
+                manager_matches = df_mgr["matches"].sum()
+                if _mc_team is None:
+                    manager_matches //= 2
                 mm1, mm2 = st.columns(2)
                 mm1.metric(t("managers_section"), len(df_mgr))
                 mm2.metric(t("matches"),
-                           _fmt(df_mgr["matches"].sum() // 2))
+                           _fmt(manager_matches))
 
                 display_mgr = df_mgr.rename(columns={
                     "manager": "Manager",
@@ -186,6 +199,42 @@ def render() -> None:
                     "avg_gf": "Avg GF", "points_pct": "Points %",
                 })
                 st.dataframe(display_mgr, width="stretch")
+
+                # W/D/L stacked bar per manager (top 15 by matches played).
+                # Colour by result: win = green, draw = grey, loss = red.
+                top_wdl = df_mgr.sort_values("matches", ascending=False).head(15)
+                if not top_wdl.empty:
+                    st.subheader("Record (W / D / L)")
+                    fig_wdl, ax_wdl = plt.subplots(
+                        figsize=(10, max(3, len(top_wdl) * 0.45))
+                    )
+                    fig_wdl.patch.set_facecolor("#0e1117")
+                    ax_wdl.set_facecolor("#0e1117")
+                    labels_wdl = [
+                        f"{r.manager} ({r.team})"
+                        for r in top_wdl.itertuples()
+                    ]
+                    wins = top_wdl["wins"].to_numpy()
+                    draws = top_wdl["draws"].to_numpy()
+                    losses = top_wdl["losses"].to_numpy()
+                    ax_wdl.barh(labels_wdl, wins, color="#2ecc71", label="W")
+                    ax_wdl.barh(labels_wdl, draws, left=wins,
+                                color="#95a5a6", label="D")
+                    ax_wdl.barh(labels_wdl, losses, left=wins + draws,
+                                color="#e74c3c", label="L")
+                    ax_wdl.set_xlabel(t("matches"), color="white")
+                    ax_wdl.tick_params(colors="white")
+                    for spine in ax_wdl.spines.values():
+                        spine.set_color("#444")
+                    ax_wdl.invert_yaxis()
+                    _leg = ax_wdl.legend(
+                        loc="lower right", facecolor="#0e1117", edgecolor="#444"
+                    )
+                    for _txt in _leg.get_texts():
+                        _txt.set_color("white")
+                    plt.tight_layout()
+                    st.pyplot(fig_wdl)
+                    plt.close(fig_wdl)
 
                 # Top 15 managers by points %
                 top_mgr = df_mgr.sort_values("points_pct", ascending=False).head(15)

@@ -270,6 +270,14 @@ def load_match_enrichment(csv_paths: list[Path]) -> int:
     with engine.begin() as conn:
         match_cache = _build_match_cache(conn)
         referee_cache = _build_referee_cache(conn)
+        team_cache = _build_team_cache(conn)  # ws_team_id -> canonical_id
+        # match_id -> home_team_id real de la fila, para orientar managers
+        home_team_by_match = {
+            r[0]: r[1] for r in conn.execute(text(
+                "SELECT match_id, home_team_id FROM dim_match "
+                "WHERE id_whoscored IS NOT NULL"
+            )).fetchall()
+        }
 
         for path in csv_paths:
             df = safe_read_csv(path)
@@ -282,13 +290,27 @@ def load_match_enrichment(csv_paths: list[Path]) -> int:
                 if not match_id:
                     continue
 
+                # Orientar managers a la fila: si el home real (WhoScored) no
+                # coincide con home_team_id de la fila, vienen invertidos.
+                mgr_h = row.get("manager_home")
+                mgr_a = row.get("manager_away")
+                try:
+                    home_ws = (int(row["home_team_ws_id"])
+                               if pd.notna(row.get("home_team_ws_id")) else None)
+                except (ValueError, TypeError):
+                    home_ws = None
+                home_canon = team_cache.get(home_ws) if home_ws else None
+                row_home = home_team_by_match.get(match_id)
+                if home_canon and row_home and home_canon != row_home:
+                    mgr_h, mgr_a = mgr_a, mgr_h  # fila invertida -> swap
+
                 updates = {}
                 if pd.notna(row.get("venue_name")) and row["venue_name"]:
                     updates["venue_name"] = str(row["venue_name"])
-                if pd.notna(row.get("manager_home")) and row["manager_home"]:
-                    updates["manager_home"] = str(row["manager_home"])
-                if pd.notna(row.get("manager_away")) and row["manager_away"]:
-                    updates["manager_away"] = str(row["manager_away"])
+                if pd.notna(mgr_h) and mgr_h:
+                    updates["manager_home"] = str(mgr_h)
+                if pd.notna(mgr_a) and mgr_a:
+                    updates["manager_away"] = str(mgr_a)
                 if pd.notna(row.get("ht_score")) and row["ht_score"]:
                     updates["ht_score"] = str(row["ht_score"]).strip()
                 if pd.notna(row.get("ft_score")) and row["ft_score"]:
