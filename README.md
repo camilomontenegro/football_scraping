@@ -1,5 +1,43 @@
 # Football Scraping Wizard
 
+## 🐳 Inicio rápido con Docker
+
+Requisitos: **Docker Desktop** instalado y corriendo.
+
+```powershell
+# 1. Clonar el repositorio
+git clone -b noelia/docker https://github.com/camilomontenegro/football_scraping.git
+cd football_scraping
+
+# 2. Configurar variables de entorno
+# Windows:
+copy .env.example .env
+notepad .env
+# Mac/Linux:
+# cp .env.example .env && nano .env
+# Rellena DB_PASSWORD con tu contraseña de PostgreSQL
+
+# 3. Restaurar la base de datos
+docker compose up db
+# Espera a ver: "database system is ready to accept connections"
+# Abre otra terminal:
+# Coloca el archivo .dump recibido dentro de db/migrations/ (puede estar en una subcarpeta)
+# Sustituye <nombre_del_dump> por la ruta relativa al archivo (ej: football_db_final.dump o subcarpeta/archivo.dump)
+docker cp "db/migrations/<nombre_del_dump>" football_postgres_db:/tmp/football_db_backup.dump
+docker exec football_postgres_db pg_restore -U postgres -d football_db --clean /tmp/football_db_backup.dump
+# Nota: es normal ver ~150 warnings "errors ignored on restore" la primera vez — no es un error
+# Espera 2-3 minutos tras el restore antes de continuar (postgres procesa índices en segundo plano)
+
+# 4. Levantar todo el proyecto
+docker compose up
+```
+
+Accede al dashboard en: **http://localhost:8501**
+
+> **Nota:** Las credenciales de Cloudinary solo son necesarias si se quieren volver a ejecutar los scrapers de fotos de jugadores.
+
+---
+
 Pipeline ETL de fútbol que combina varios scrapers (WhoScored, SofaScore, Understat, Transfermarkt, StatsBomb) en una única base de datos PostgreSQL, con un wizard interactivo y soporte multi‑competición (LaLiga, Bundesliga, Premier League, Champions, Mundial, etc.).
 
 ---
@@ -10,7 +48,7 @@ Asumiendo Windows + PowerShell, Python 3.12 y PostgreSQL ya instalado y arrancad
 
 ```powershell
 # 1) Posicionarse en la raíz del proyecto
-cd C:\Users\ivanm\Desktop\Dev\Mercanza\football_scraping_wizard
+cd football_scraping
 
 # 2) Crear y activar el entorno virtual
 python -m venv .venv

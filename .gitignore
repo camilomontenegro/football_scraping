@@ -14,14 +14,14 @@ data/*.db
 data/*.rar
 data/reference/
 
-# Bundles / CSVs de compañeros (viven en football_scraping_backup)
-db/migrations/photo_urls.csv
-
 # Dumps de base de datos (demasiado grandes para GitHub; guardar en local/Desktop)
+db/migrations/photo_urls.csv
 data/exports/*.dump
 exports/*.dump
 db/dump-*.sql
 db/*.dump
+*.dump
+db/migrations/football_db.dump/
 
 # Variables de entorno (contraseñas, credenciales DB)
 .env
@@ -41,3 +41,4 @@ __pycache__/
 
 # Jupyter
 .ipynb_checkpoints/
+notebooks/

@@ -1,0 +1,47 @@
+name: football_scraping
+
+services:
+  db:
+    image: postgres:17
+    container_name: football_postgres_db
+    restart: always
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - football_net
+
+  streamlit:
+    build: .
+    container_name: football_streamlit
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - "8501:8501"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+      - ./data/logs:/app/data/logs
+    networks:
+      - football_net
+
+volumes:
+  postgres_data:
+
+networks:
+  football_net:
+    driver: bridge
+    
