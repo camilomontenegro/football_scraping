@@ -178,14 +178,17 @@ def render() -> None:
         if _mc_season is None:
             st.info(t("select_season"))
         else:
-            df_mgr = explore.get_manager_stats(_mc_season, _mc_comp)
+            df_mgr = explore.get_manager_stats(_mc_season, _mc_comp, _mc_team)
             if df_mgr.empty:
                 st.info(t("no_manager_data"))
             else:
+                manager_matches = df_mgr["matches"].sum()
+                if _mc_team is None:
+                    manager_matches //= 2
                 mm1, mm2 = st.columns(2)
                 mm1.metric(t("managers_section"), len(df_mgr))
                 mm2.metric(t("matches"),
-                           _fmt(df_mgr["matches"].sum() // 2))
+                           _fmt(manager_matches))
 
                 display_mgr = df_mgr.rename(columns={
                     "manager": "Manager",
